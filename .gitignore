@@ -1,28 +1,25 @@
-# Dependencies
+# Dépendances
 node_modules/
 target/
 dist/
 
-# Tauri build files
-src-tauri/target/
-src-tauri/gen/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE files
-.vscode/
-.idea/
-
-# Database files (important!)
+# Base de données
 *.db
 *.db-shm
 *.db-wal
 
-# Environment files
-.env
-.env.local
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
 
 # Logs
 *.log
+.env
