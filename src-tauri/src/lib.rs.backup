@@ -1,0 +1,18 @@
+// src-tauri/src/lib.rs
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Forcer le chemin de la base de données vers Roaming (APPDATA)
+    let db_path = std::env::var("APPDATA")
+        .unwrap_or_else(|_| ".".to_string())
+        + "/com.user.gestion-commerciale/gestion-commerciale.db";
+    
+    let db_url = format!("sqlite:{}", db_path);
+    
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_sql::Builder::default()
+            .add_migrations(&db_url, &[])  // ← Changé: add_migrations (pluriel)
+            .build())
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
