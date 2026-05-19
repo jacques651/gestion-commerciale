@@ -1,27 +1,36 @@
+// src/components/ventes/ListeVentes.tsx
 import React, { useEffect, useState } from "react";
 import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   LoadingOverlay, Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
-  SimpleGrid, Select, TextInput
+  SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper, Alert,
+  Loader
 } from "@mantine/core";
 import {
   IconBuildingStore, IconTrash, IconSearch, IconRefresh,
-  IconInfoCircle, IconCalendar, IconCash, IconPlus, IconPrinter
-} from "@tabler/icons-react";
+  IconInfoCircle, IconCalendar, IconCash, IconPlus, IconPrinter, IconEye,
+  IconShoppingCart, IconTruck, IconReceipt, IconAlertCircle} from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import FormulaireVente from "./FormulaireVente";
 import ReçuVente from "./ReçuVente";
+import { notifications } from "@mantine/notifications";
 
 interface Vente {
+  nom_prenom: string;
+  contact: any;
+  Tel: any;
+  montant_total: number;
   idVente: number;
   code_vente: string;
-  idClient: number;
+  idClient: number | null;
   client_nom: string;
-  nom_prenom: string;
-  contact: string;
+  client_societe: string;
+  client_tel: string;
   date_vente: string;
-  montant_total: number;
+  montant_ht: number;
+  montant_ttc: number;
   type_vente: string;
+  statut: string;
 }
 
 const ListeVentes: React.FC = () => {
@@ -33,29 +42,79 @@ const ListeVentes: React.FC = () => {
   const [vueForm, setVueForm] = useState(false);
   const [showReçu, setShowReçu] = useState(false);
   const [selectedVente, setSelectedVente] = useState<Vente | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedVenteDetails, setSelectedVenteDetails] = useState<any>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [venteToDelete, setVenteToDelete] = useState<Vente | null>(null);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const itemsPerPage = 10;
 
   const chargerVentes = async () => {
     setLoading(true);
-    const db = await getDb();
-    const result = await db.select<Vente[]>(`
-      SELECT v.*, c.nom_complet as client_nom
-      FROM ventes v
-      LEFT JOIN clients c ON v.idClient = c.idClient
-      ORDER BY v.date_vente DESC
-    `);
-    setVentes(result || []);
-    setLoading(false);
+    try {
+      const db = await getDb();
+      const result = await db.select<Vente[]>(`
+        SELECT 
+          v.*,
+          cl.NomComplet as client_nom,
+          cl.Societe as client_societe,
+          cl.Tel as client_tel
+        FROM ventes v
+        LEFT JOIN clients cl ON v.idClient = cl.idClient
+        ORDER BY v.date_vente DESC
+      `);
+      setVentes(result || []);
+    } catch (error) {
+      console.error("Erreur chargement ventes:", error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors du chargement des ventes',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { chargerVentes(); }, []);
-
-  const supprimerVente = async (id: number) => {
-    if (!confirm("Supprimer cette vente ?")) return;
-    const db = await getDb();
-    await db.execute("DELETE FROM ventes WHERE idVente = ?", [id]);
+  useEffect(() => {
     chargerVentes();
+  }, []);
+
+  const supprimerVente = async () => {
+    if (!venteToDelete) return;
+    
+    try {
+      const db = await getDb();
+
+      const details = await db.select<any[]>(`
+        SELECT idProduit, quantite FROM vente_details WHERE idVente = ?
+      `, [venteToDelete.idVente]);
+
+      for (const detail of details) {
+        await db.execute(`
+          UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?
+        `, [detail.quantite, detail.idProduit]);
+      }
+
+      await db.execute("DELETE FROM vente_details WHERE idVente = ?", [venteToDelete.idVente]);
+      await db.execute("DELETE FROM ventes WHERE idVente = ?", [venteToDelete.idVente]);
+
+      notifications.show({
+        title: 'Succès',
+        message: `Vente ${venteToDelete.code_vente} supprimée avec succès`,
+        color: 'green',
+      });
+      setDeleteModalOpen(false);
+      setVenteToDelete(null);
+      chargerVentes();
+    } catch (error) {
+      console.error("Erreur suppression:", error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors de la suppression',
+        color: 'red',
+      });
+    }
   };
 
   const handlePrintReçu = (vente: Vente) => {
@@ -63,86 +122,460 @@ const ListeVentes: React.FC = () => {
     setShowReçu(true);
   };
 
-  const ventesFiltrees = ventes.filter(v =>
-    v.code_vente.toLowerCase().includes(recherche.toLowerCase()) ||
-    (v.client_nom && v.client_nom.toLowerCase().includes(recherche.toLowerCase())) ||
-    v.nom_prenom.toLowerCase().includes(recherche.toLowerCase())
-  );
+  const handleViewDetails = async (vente: Vente) => {
+    try {
+      const db = await getDb();
+      const details = await db.select<any[]>(`
+        SELECT 
+          vd.*,
+          p.designation as produit_nom,
+          p.code_produit,
+          p.categorie
+        FROM vente_details vd
+        LEFT JOIN products p ON vd.idProduit = p.idProduit
+        WHERE vd.idVente = ?
+      `, [vente.idVente]);
+
+      setSelectedVenteDetails({
+        ...vente,
+        details
+      });
+      setDetailsModalOpen(true);
+    } catch (error) {
+      console.error("Erreur chargement détails:", error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors du chargement des détails',
+        color: 'red',
+      });
+    }
+  };
+
+  const ventesFiltrees = ventes.filter(v => {
+    const matchRecherche =
+      v.code_vente?.toLowerCase().includes(recherche.toLowerCase()) ||
+      (v.client_nom && v.client_nom.toLowerCase().includes(recherche.toLowerCase())) ||
+      (v.client_societe && v.client_societe.toLowerCase().includes(recherche.toLowerCase()));
+
+    const matchType = typeFiltre ? v.type_vente === typeFiltre : true;
+
+    return matchRecherche && matchType;
+  });
 
   const totalPages = Math.ceil(ventesFiltrees.length / itemsPerPage);
   const paginatedData = ventesFiltrees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const totalMontant = ventesFiltrees.reduce((sum, v) => sum + v.montant_total, 0);
+  const totalMontant = ventesFiltrees.reduce((sum, v) => sum + (v.montant_ttc || 0), 0);
+  const ventesAujourdhui = ventes.filter(v => new Date(v.date_vente).toDateString() === new Date().toDateString()).length;
 
-  if (vueForm) return <FormulaireVente onSuccess={() => { setVueForm(false); chargerVentes(); }} onCancel={() => setVueForm(false)} />;
-  if (showReçu && selectedVente) return <ReçuVente vente={selectedVente} onClose={() => setShowReçu(false)} />;
-  if (loading) return <Card withBorder radius="md" p="lg"><LoadingOverlay visible={true} /><Text>Chargement...</Text></Card>;
+  const formatMontant = (value: any): string => {
+    if (value === undefined || value === null) return '0';
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return '0';
+    return num.toLocaleString();
+  };
+
+  if (vueForm) {
+    return <FormulaireVente
+      onSuccess={() => {
+        setVueForm(false);
+        chargerVentes();
+      }}
+      onCancel={() => setVueForm(false)}
+    />;
+  }
+
+  if (showReçu && selectedVente) {
+    return <ReçuVente
+      vente={{
+        idVente: selectedVente.idVente,
+        nom_prenom: selectedVente.nom_prenom || selectedVente.client_nom || 'Client',
+        contact: selectedVente.contact || selectedVente.Tel || '',
+        date_vente: selectedVente.date_vente,
+        montant_total: selectedVente.montant_ttc || selectedVente.montant_total || 0
+      }}
+      onClose={() => setShowReçu(false)}
+    />;
+  }
+
+  if (loading) {
+    return (
+      <Card withBorder radius="md" p="lg" ta="center">
+        <LoadingOverlay visible={true} />
+        <Loader size="xl" />
+        <Text mt="md">Chargement des ventes...</Text>
+      </Card>
+    );
+  }
 
   return (
     <Box p="md">
       <Stack gap="lg">
-        <Card withBorder radius="md" p="lg" bg="#1b365d">
-          <Group justify="space-between">
-            <Stack gap={4}><Group gap="xs"><IconBuildingStore size={24} color="white" /><Title order={2} c="white">Ventes au détail</Title></Group><Text size="sm" c="gray.3">Gestion des ventes directes</Text></Stack>
-            <Group gap="md"><Button variant="light" color="white" leftSection={<IconInfoCircle size={18} />} onClick={() => setInfoModalOpen(true)}>Instructions</Button><ThemeIcon size={48} radius="md" color="white" variant="light"><IconBuildingStore size={28} /></ThemeIcon></Group>
-          </Group>
-        </Card>
-
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-          <Card withBorder radius="md" p="md"><Group justify="space-between" mb="xs"><Text size="xs" c="dimmed">Total ventes</Text><ThemeIcon size={30} color="blue" variant="light"><IconBuildingStore size={18} /></ThemeIcon></Group><Text fw={700} size="xl" c="blue">{ventes.length}</Text></Card>
-          <Card withBorder radius="md" p="md" bg="green.0"><Group justify="space-between" mb="xs"><Text size="xs" c="dimmed">Chiffre d'affaires</Text><ThemeIcon size={30} color="green" variant="light"><IconCash size={18} /></ThemeIcon></Group><Text fw={700} size="xl" c="green">{totalMontant.toLocaleString()} FCFA</Text></Card>
-          <Card withBorder radius="md" p="md" bg="orange.0"><Group justify="space-between" mb="xs"><Text size="xs" c="dimmed">Ventes du jour</Text><ThemeIcon size={30} color="orange" variant="light"><IconCalendar size={18} /></ThemeIcon></Group><Text fw={700} size="xl" c="orange">{ventes.filter(v => new Date(v.date_vente).toDateString() === new Date().toDateString()).length}</Text></Card>
-        </SimpleGrid>
-
-        <Card withBorder radius="md" p="md">
-          <Group justify="space-between">
+        {/* EN-TÊTE ATTRACTIF */}
+        <Paper
+          p="xl"
+          radius="lg"
+          style={{
+            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          <Flex justify="space-between" align="center" wrap="wrap">
+            <Stack gap={4}>
+              <Group gap="md">
+                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                  <IconShoppingCart size={30} />
+                </ThemeIcon>
+                <div>
+                  <Title order={1} c="white" style={{ fontSize: '2rem' }}>Ventes au détail</Title>
+                  <Text c="gray.3" size="sm">Gérez et suivez toutes vos ventes directes</Text>
+                </div>
+              </Group>
+            </Stack>
             <Group>
-              <TextInput placeholder="Rechercher client..." leftSection={<IconSearch size={16} />} value={recherche} onChange={(e) => { setRecherche(e.target.value); setCurrentPage(1); }} size="sm" style={{ width: 250 }} />
-              <Select placeholder="Type" data={[{ value: "", label: "Tous" }, { value: "COMPTOIR", label: "Comptoir" }, { value: "REVENDEUR", label: "Revendeur" }]} value={typeFiltre} onChange={setTypeFiltre} size="sm" style={{ width: 130 }} clearable />
+              <Button
+                variant="light"
+                color="white"
+                leftSection={<IconInfoCircle size={18} />}
+                onClick={() => setInfoModalOpen(true)}
+              >
+                Instructions
+              </Button>
+            </Group>
+          </Flex>
+
+          {/* Cartes statistiques */}
+          <SimpleGrid cols={4} spacing="md" mt="xl">
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="white" variant="light" size="lg">
+                  <IconShoppingCart size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Total ventes</Text>
+                  <Text c="white" fw={700} size="xl">{ventes.length}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="blue" variant="light" size="lg">
+                  <IconCash size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Chiffre d'affaires</Text>
+                  <Text c="white" fw={700} size="xl">{formatMontant(totalMontant)} F</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="green" variant="light" size="lg">
+                  <IconTruck size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Ventes comptoir</Text>
+                  <Text c="white" fw={700} size="xl">{ventes.filter(v => v.type_vente === 'COMPTOIR').length}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="orange" variant="light" size="lg">
+                  <IconCalendar size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Ventes du jour</Text>
+                  <Text c="white" fw={700} size="xl">{ventesAujourdhui}</Text>
+                </div>
+              </Group>
+            </Card>
+          </SimpleGrid>
+        </Paper>
+
+        {/* Barre d'outils */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Flex justify="space-between" align="flex-end" wrap="wrap" gap="md">
+            <Group grow>
+              <TextInput
+                placeholder="Rechercher par code, client..."
+                leftSection={<IconSearch size={16} />}
+                value={recherche}
+                onChange={(e) => { setRecherche(e.target.value); setCurrentPage(1); }}
+                size="md"
+                style={{ width: 300 }}
+              />
+              <Select
+                placeholder="Type de vente"
+                data={[
+                  { value: "", label: "Tous les types" },
+                  { value: "COMPTOIR", label: "Comptoir" },
+                  { value: "LIVRAISON", label: "Livraison" }
+                ]}
+                value={typeFiltre}
+                onChange={setTypeFiltre}
+                size="md"
+                style={{ width: 180 }}
+                clearable
+              />
             </Group>
             <Group>
-              <Tooltip label="Actualiser"><ActionIcon variant="light" onClick={() => chargerVentes()} size="lg"><IconRefresh size={18} /></ActionIcon></Tooltip>
-              <Button leftSection={<IconPlus size={16} />} onClick={() => setVueForm(true)} variant="gradient" gradient={{ from: "blue", to: "cyan" }}>Nouvelle vente</Button>
+              <Tooltip label="Actualiser">
+                <ActionIcon variant="light" onClick={() => chargerVentes()} size="lg" color="adminBlue">
+                  <IconRefresh size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={() => setVueForm(true)}
+                variant="gradient"
+                gradient={{ from: "blue", to: "cyan" }}
+                size="md"
+              >
+                Nouvelle vente
+              </Button>
             </Group>
-          </Group>
+          </Flex>
         </Card>
 
-        <Card withBorder radius="md" p={0} style={{ overflow: "hidden" }}>
-          <div style={{ overflowX: "auto" }}>
-            <Table striped highlightOnHover>
-              <Table.Thead style={{ backgroundColor: "#1b365d" }}>
-                <Table.Tr>
-                  <Table.Th style={{ color: "white" }}>N°</Table.Th>
-                  <Table.Th style={{ color: "white" }}>Client</Table.Th>
-                  <Table.Th style={{ color: "white" }}>Contact</Table.Th>
-                  <Table.Th style={{ color: "white" }}>Date</Table.Th>
-                  <Table.Th style={{ color: "white", textAlign: "right" }}>Montant</Table.Th>
-                  <Table.Th style={{ color: "white", textAlign: "center" }}>Actions</Table.Th>
+        {/* Tableau des ventes */}
+        <Card withBorder radius="lg" shadow="sm" p={0}>
+          <Paper bg="gray.0" p="md" style={{ borderBottom: '1px solid #e5e7eb' }}>
+            <Flex justify="space-between" align="center">
+              <Group>
+                <IconReceipt size={20} color="#1b365d" />
+                <Title order={3} size="h4">Liste des ventes</Title>
+                <Badge size="lg" variant="light" color="blue">{ventesFiltrees.length} ventes</Badge>
+              </Group>
+            </Flex>
+          </Paper>
+
+          <Box style={{ overflowX: "auto" }}>
+            <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
+              <Table.Thead>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',}}>
+                  <Table.Th w={60}>N°</Table.Th>
+                  <Table.Th>Code</Table.Th>
+                  <Table.Th>Client</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Date</Table.Th>
+                  <Table.Th ta="right">Montant</Table.Th>
+                  <Table.Th ta="center" w={160}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {paginatedData.map((v, idx) => (
                   <Table.Tr key={v.idVente}>
-                    <Table.Td>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
-                    <Table.Td fw={500}>{v.client_nom || v.nom_prenom}</Table.Td>
-                    <Table.Td>{v.contact || "-"}</Table.Td>
-                    <Table.Td><Group gap={4}><IconCalendar size={12} /><Text size="sm">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</Text></Group></Table.Td>
-                    <Table.Td ta="right" fw={600}>{v.montant_total.toLocaleString()} FCFA</Table.Td>
+                    <Table.Td fw={500}>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
                     <Table.Td>
+                      <Text fw={600} size="sm">{v.code_vente}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="sm">
+                        <Avatar size="sm" radius="xl" color="blue">
+                          {(v.client_nom || v.client_societe || 'C').charAt(0).toUpperCase()}
+                        </Avatar>
+                        <Text fw={500} size="sm">{v.client_nom || v.client_societe || 'Client inconnu'}</Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge 
+                        size="sm" 
+                        color={v.type_vente === 'COMPTOIR' ? 'blue' : 'orange'}
+                        variant="light"
+                        leftSection={v.type_vente === 'COMPTOIR' ? <IconBuildingStore size={12} /> : <IconTruck size={12} />}
+                      >
+                        {v.type_vente === 'COMPTOIR' ? 'Comptoir' : 'Livraison'}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4}>
+                        <IconCalendar size={12} color="#1b365d" />
+                        <Text size="sm">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td ta="right">
+                      <Text fw={700} c="adminBlue" size="sm">{formatMontant(v.montant_ttc)} FCFA</Text>
+                    </Table.Td>
+                    <Table.Td ta="center">
                       <Group gap={6} justify="center">
-                        <Tooltip label="Imprimer reçu"><ActionIcon size="sm" color="teal" onClick={() => handlePrintReçu(v)}><IconPrinter size={16} /></ActionIcon></Tooltip>
-                        <Tooltip label="Supprimer"><ActionIcon size="sm" color="red" onClick={() => supprimerVente(v.idVente)}><IconTrash size={16} /></ActionIcon></Tooltip>
+                        <Tooltip label="Voir détails">
+                          <ActionIcon size="md" color="adminBlue" variant="light" onClick={() => handleViewDetails(v)}>
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Imprimer reçu">
+                          <ActionIcon size="md" color="teal" variant="light" onClick={() => handlePrintReçu(v)}>
+                            <IconPrinter size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Supprimer">
+                          <ActionIcon size="md" color="red" variant="light" onClick={() => {
+                            setVenteToDelete(v);
+                            setDeleteModalOpen(true);
+                          }}>
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
             </Table>
-          </div>
-          {totalPages > 1 && <Group justify="center" p="md"><Pagination value={currentPage} onChange={setCurrentPage} total={totalPages} color="blue" size="sm" /></Group>}
+          </Box>
+
+          {ventesFiltrees.length === 0 && (
+            <Flex justify="center" align="center" direction="column" py={60}>
+              <IconShoppingCart size={60} color="#ccc" />
+              <Text ta="center" c="dimmed" mt="md">Aucune vente trouvée</Text>
+              <Button mt="md" variant="light" onClick={() => setVueForm(true)} leftSection={<IconPlus size={16} />}>
+                Nouvelle vente
+              </Button>
+            </Flex>
+          )}
+
+          {totalPages > 1 && (
+            <Group justify="center" p="md">
+              <Pagination
+                value={currentPage}
+                onChange={setCurrentPage}
+                total={totalPages}
+                size="md"
+              />
+            </Group>
+          )}
         </Card>
 
-        <Modal opened={infoModalOpen} onClose={() => setInfoModalOpen(false)} title="📋 Instructions" size="md" centered styles={{ header: { backgroundColor: "#1b365d", padding: "16px 20px" }, title: { color: "white", fontWeight: 600 }, body: { padding: "20px" } }}>
-          <Stack gap="md"><Text size="sm">1. Enregistrez les ventes au comptoir</Text><Text size="sm">2. Imprimez le reçu pour le client</Text><Text size="sm">3. Le stock est mis à jour automatiquement</Text><Divider /><Text size="xs" c="dimmed" ta="center">Version 1.0.0</Text></Stack>
+        {/* Modal des détails */}
+        <Modal
+          opened={detailsModalOpen}
+          onClose={() => {
+            setDetailsModalOpen(false);
+            setSelectedVenteDetails(null);
+          }}
+          title={`Détails de la vente ${selectedVenteDetails?.code_vente || ''}`}
+          size="lg"
+          padding="md"
+          centered
+          styles={{
+            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            title: { color: 'white', fontWeight: 600 },
+            body: { padding: '20px' }
+          }}
+        >
+          {selectedVenteDetails && (
+            <Stack gap="md">
+              <Card withBorder p="sm" bg="gray.0" radius="md">
+                <SimpleGrid cols={2} spacing="md">
+                  <div>
+                    <Text size="xs" c="dimmed">Client</Text>
+                    <Text fw={500}>{selectedVenteDetails.client_nom || selectedVenteDetails.client_societe || 'Client inconnu'}</Text>
+                    <Text size="xs" c="dimmed" mt="xs">Contact</Text>
+                    <Text>{selectedVenteDetails.client_tel || '-'}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Date</Text>
+                    <Text>{new Date(selectedVenteDetails.date_vente).toLocaleDateString('fr-FR')}</Text>
+                    <Text size="xs" c="dimmed" mt="xs">Type</Text>
+                    <Badge color={selectedVenteDetails.type_vente === 'COMPTOIR' ? 'blue' : 'orange'} variant="light">
+                      {selectedVenteDetails.type_vente === 'COMPTOIR' ? 'Comptoir' : 'Livraison'}
+                    </Badge>
+                  </div>
+                </SimpleGrid>
+              </Card>
+
+              <Divider label="Produits vendus" labelPosition="center" />
+
+              {selectedVenteDetails.details && selectedVenteDetails.details.length > 0 ? (
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Code</Table.Th>
+                      <Table.Th>Désignation</Table.Th>
+                      <Table.Th>Qté</Table.Th>
+                      <Table.Th>Prix unit.</Table.Th>
+                      <Table.Th>Total</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {selectedVenteDetails.details.map((detail: any, idx: number) => (
+                      <Table.Tr key={idx}>
+                        <Table.Td>
+                          <Text size="xs">{detail.code_produit || '-'}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>{detail.produit_nom || detail.designation || '-'}</Text>
+                        </Table.Td>
+                        <Table.Td>{detail.quantite}</Table.Td>
+                        <Table.Td>{formatMontant(detail.prix_unitaire_ht)} F</Table.Td>
+                        <Table.Td fw={600}>{formatMontant(detail.quantite * detail.prix_unitaire_ht)} F</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              ) : (
+                <Text ta="center" c="dimmed" py="md">Aucun détail</Text>
+              )}
+
+              <Divider />
+              <Group justify="flex-end">
+                <Text fw={800} size="lg" c="adminBlue">
+                  Total: {formatMontant(selectedVenteDetails.montant_ttc)} FCFA
+                </Text>
+              </Group>
+            </Stack>
+          )}
+        </Modal>
+
+        {/* Modal confirmation suppression */}
+        <Modal
+          opened={deleteModalOpen}
+          onClose={() => setDeleteModalOpen(false)}
+          title="Supprimer la vente"
+          centered
+        >
+          <Stack>
+            <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
+              Êtes-vous sûr de vouloir supprimer cette vente ?
+              <Text size="sm" mt="md" c="red">
+                Action irréversible !<br />
+                - La vente sera supprimée<br />
+                - Les stocks seront restaurés
+              </Text>
+            </Alert>
+            <Group justify="flex-end" mt="md">
+              <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>
+                Annuler
+              </Button>
+              <Button color="red" onClick={supprimerVente}>
+                Supprimer
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        {/* Modal Instructions */}
+        <Modal
+          opened={infoModalOpen}
+          onClose={() => setInfoModalOpen(false)}
+          title="📋 Instructions"
+          size="md"
+          centered
+          styles={{
+            header: { backgroundColor: "#1b365d", padding: "16px 20px", borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            title: { color: "white", fontWeight: 600 },
+            body: { padding: "20px" }
+          }}
+        >
+          <Stack gap="md">
+            <Text size="sm">1. Enregistrez les ventes au comptoir</Text>
+            <Text size="sm">2. Imprimez le reçu pour le client</Text>
+            <Text size="sm">3. Le stock est mis à jour automatiquement</Text>
+            <Text size="sm">4. Consultez les détails avec l'icône 👁️</Text>
+            <Divider />
+            <Text size="xs" c="dimmed" ta="center">Version 1.0.0 - Gestion Commerciale Pro</Text>
+          </Stack>
         </Modal>
       </Stack>
     </Box>

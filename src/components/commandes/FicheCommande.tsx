@@ -37,6 +37,7 @@ interface CommandeDetail {
   code_facture: string;
   date_facture: string;
   total_paye: number;
+  client_societe: string | null;
 }
 
 interface FicheCommandeProps {
@@ -54,7 +55,12 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
     const result = await db.select<CommandeDetail[]>(`
       SELECT 
         c.*, 
-        cl.nom_complet as client_nom,
+        CASE 
+          WHEN cl.NomComplet IS NOT NULL AND cl.NomComplet != '' THEN cl.NomComplet
+          WHEN cl.Societe IS NOT NULL AND cl.Societe != '' THEN cl.Societe
+          ELSE 'Client sans nom'
+        END as client_nom,
+        cl.Societe as client_societe,
         COALESCE(SUM(p.montant), 0) as total_paye
       FROM commandes c
       JOIN clients cl ON c.idClient = cl.idClient
@@ -109,6 +115,14 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
     return type === 'SIMPLE' ? '📦 Simple' : '🔄 Revendeur';
   };
 
+  const getClientDisplayName = () => {
+    if (!commande) return '';
+    if (commande.client_nom && commande.client_nom !== 'Client sans nom') {
+      return commande.client_nom;
+    }
+    return commande.client_societe || 'Client sans nom';
+  };
+
   if (loading) {
     return (
       <Card withBorder radius="md" p="lg" pos="relative">
@@ -156,7 +170,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
               <IconUser size={16} />
               <Text fw={600}>Client</Text>
             </Group>
-            <Text size="lg" fw={500}>{commande.client_nom}</Text>
+            <Text size="lg" fw={500}>{getClientDisplayName()}</Text>
           </Card>
 
           <Card withBorder radius="md" p="md">

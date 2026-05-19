@@ -1,360 +1,642 @@
 // src/components/commandes/FormulaireCommande.tsx
 import React, { useState, useEffect } from 'react';
-import {
-  Stack,
-  Card,
-  Title,
-  Text,
-  Group,
-  Button,
-  Select,
-  TextInput,
-  NumberInput,
-  Table,
-  Badge,
-  LoadingOverlay,
-  Box,
-  Divider,
-  Alert,
-  ScrollArea,
-  ActionIcon,
+import { 
+  Modal, TextInput, Select, Button, Group, Stack, 
+  NumberInput, Table, ActionIcon, Text, Card, 
+  Divider, LoadingOverlay, Grid, Badge,
+  Tooltip, Pagination, ScrollArea, ThemeIcon, Paper, Center
 } from '@mantine/core';
-import {
-  IconArrowLeft,
-  IconDeviceFloppy,
-  IconUser,
-  IconPhone,
-  IconBuildingStore,
-  IconPackage,
-  IconTrash,
-  IconSearch,
-  IconRefresh,
-} from '@tabler/icons-react';
-import { getDb } from '../../database/db';
+import { notifications } from '@mantine/notifications';
+import { 
+  IconTrash, IconPlus, IconSearch, 
+  IconRefresh, IconUserPlus, IconShoppingBag, IconPhone, IconUser,
+  IconPackage, IconBuildingStore, IconShoppingCart, IconCheck, IconTruck} from '@tabler/icons-react';
+import { useClients } from '../../hooks/useClients';
+import { useProducts } from '../../hooks/useProducts';
+import { useCommandes } from '../../hooks/useCommandes';
+import { FormulaireClient } from '../clients/FormulaireClient';
+import { generateCommandeCode } from '../../utils/codeGenerator';
 
-interface Client {
-  idClient: number;
-  nom_complet: string;
-  telephone: string;
-  type_client: string;
+interface FormulaireCommandeProps {
+  opened: boolean;
+  onClose: () => void;
 }
 
-interface Produit {
+interface CartItem {
   idProduit: number;
   designation: string;
-  unite_base: string;
-  prix_vente_detail: number;
-  qte_stock: number;
-  categorie: string;
-}
-
-interface PanierItem {
-  idProduit: number;
-  designation: string;
-  quantite: number;
-  prix_unitaire: number;
+  code_produit: string;
+  categorie?: string;
+  unite_mesure?: string;
+  quantite_stock: number;
+  prix_vente: number;
+  prix_achat_base?: number;
+  quantite_commande: number;
   total: number;
 }
 
-interface FormulaireCommandeProps {
-  onSuccess: () => void;
-  onCancel: () => void;
-}
+export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, onClose }) => {
+  const { clients, loading: clientsLoading, refresh: refreshClients } = useClients();
+  const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
+  const { createCommande, loading } = useCommandes();
+  
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedClientDetails, setSelectedClientDetails] = useState<any>(null);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [clientModalOpened, setClientModalOpened] = useState(false);
+  const [codeCommande, setCodeCommande] = useState('');
+  const [typeCommande, setTypeCommande] = useState<string>('STANDARD');
+  
+  const itemsPerPage = 5;
 
-const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ onSuccess, onCancel }) => {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [produits, setProduits] = useState<Produit[]>([]);
-  const [produitsFiltres, setProduitsFiltres] = useState<Produit[]>([]);
-  const [panier, setPanier] = useState<PanierItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [recherche, setRecherche] = useState('');
-  const [filtreCategorie, setFiltreCategorie] = useState<string | null>(null);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [typeCommande, setTypeCommande] = useState<string>('SIMPLE');
-  const [dateCommande, setDateCommande] = useState(new Date().toISOString().split('T')[0]);
-
-  // Charger les clients
+  // Générer le code commande
   useEffect(() => {
-    const loadClients = async () => {
-      const db = await getDb();
-      const result = await db.select<Client[]>(`
-        SELECT idClient, nom_complet, telephone, type_client
-        FROM clients WHERE est_supprime = 0 ORDER BY nom_complet
-      `);
-      setClients(result);
-      setLoading(false);
+    const generateCode = async () => {
+      if (opened) {
+        try {
+          const code = await generateCommandeCode();
+          setCodeCommande(code);
+        } catch (error) {
+          console.error("Erreur génération code:", error);
+          setCodeCommande(`CMD-${Date.now()}`);
+        }
+      }
     };
-    loadClients();
-  }, []);
+    generateCode();
+  }, [opened]);
 
-  // Charger les produits
   useEffect(() => {
-    const loadProduits = async () => {
-      const db = await getDb();
-      const result = await db.select<Produit[]>(`
-        SELECT idProduit, designation, unite_base, prix_vente_detail, qte_stock, categorie
-        FROM products WHERE est_supprime = 0 AND qte_stock > 0
-        ORDER BY designation
-      `);
-      setProduits(result);
-      setProduitsFiltres(result);
-      const uniqueCategories = [...new Set(result.map(p => p.categorie).filter(Boolean))];
-      setCategories(uniqueCategories);
-    };
-    loadProduits();
-  }, []);
+    if (selectedClientId && clients.length > 0) {
+      const client = clients.find(c => c.idClient.toString() === selectedClientId);
+      setSelectedClientDetails(client);
+    } else {
+      setSelectedClientDetails(null);
+    }
+  }, [selectedClientId, clients]);
 
-  // Filtrer les produits
   useEffect(() => {
-    let filtered = [...produits];
-    if (recherche) {
-      filtered = filtered.filter(p => p.designation.toLowerCase().includes(recherche.toLowerCase()));
+    if (!opened) {
+      setCart([]);
+      setSelectedClientId(null);
+      setSelectedClientDetails(null);
+      setSearchTerm('');
+      setSelectedCategory(null);
+      setCurrentPage(1);
+      setCodeCommande('');
+      setTypeCommande('STANDARD');
     }
-    if (filtreCategorie) {
-      filtered = filtered.filter(p => p.categorie === filtreCategorie);
-    }
-    setProduitsFiltres(filtered);
-  }, [recherche, filtreCategorie, produits]);
+  }, [opened]);
 
-  const handleClientChange = (value: string | null) => {
-    if (!value) {
-      setSelectedClient(null);
-      return;
-    }
-    const client = clients.find(c => c.idClient.toString() === value);
-    setSelectedClient(client || null);
-    // Si le client est revendeur, forcer le type de commande
-    if (client?.type_client === 'REVENDEUR') {
-      setTypeCommande('REVENDEUR');
-    }
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory ? product.categorie === selectedCategory : true;
+    return matchesSearch && matchesCategory;
+  });
+
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const paginatedProducts = filteredProducts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const categories = [...new Set(products.map(p => p.categorie).filter(Boolean))];
+
+  const formatPrice = (value: number | undefined | null): string => {
+    if (value === undefined || value === null) return '0';
+    return value.toLocaleString();
   };
 
-  const ajouterAuPanier = (produit: Produit, quantite: number) => {
-    if (quantite <= 0) return;
-    if (quantite > produit.qte_stock) {
-      setError(`Stock insuffisant. Maximum: ${produit.qte_stock}`);
+  const addToCart = (product: any) => {
+    const existingItem = cart.find(item => item.idProduit === product.idProduit);
+    const qte = 1;
+    const stock = product.qte_stock || 0;
+    const prix = product.prix_vente_detail || 0;
+    
+    if (prix <= 0) {
+      notifications.show({
+        title: 'Erreur',
+        message: `Le prix du produit "${product.designation}" n'est pas défini`,
+        color: 'red',
+      });
       return;
     }
-
-    const existingIndex = panier.findIndex(p => p.idProduit === produit.idProduit);
     
-    if (existingIndex >= 0) {
-      const newQuantite = panier[existingIndex].quantite + quantite;
-      if (newQuantite > produit.qte_stock) {
-        setError(`Quantité totale (${newQuantite}) dépasse le stock (${produit.qte_stock})`);
+    if (existingItem) {
+      const newQuantite = existingItem.quantite_commande + qte;
+      if (newQuantite > stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock disponible: ${stock}`,
+          color: 'red',
+        });
         return;
       }
-      const updated = [...panier];
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        quantite: newQuantite,
-        total: newQuantite * produit.prix_vente_detail,
-      };
-      setPanier(updated);
+      setCart(cart.map(item =>
+        item.idProduit === product.idProduit
+          ? { 
+              ...item, 
+              quantite_commande: newQuantite, 
+              total: newQuantite * item.prix_vente 
+            }
+          : item
+      ));
     } else {
-      setPanier([...panier, {
-        idProduit: produit.idProduit,
-        designation: produit.designation,
-        quantite: quantite,
-        prix_unitaire: produit.prix_vente_detail,
-        total: quantite * produit.prix_vente_detail,
-      }]);
-    }
-    setError('');
-  };
-
-  const retirerDuPanier = (index: number) => {
-    const updated = [...panier];
-    updated.splice(index, 1);
-    setPanier(updated);
-  };
-
-  const totalHT = panier.reduce((sum, item) => sum + item.total, 0);
-  const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
-
-  const handleSubmit = async () => {
-    if (!selectedClient) {
-      setError('Veuillez sélectionner un client');
-      return;
-    }
-    if (panier.length === 0) {
-      setError('Veuillez ajouter des produits à la commande');
-      return;
-    }
-
-    setSaving(true);
-    setError('');
-
-    try {
-      const db = await getDb();
-      const codeCommande = `CMD-${Date.now()}`;
-
-      // Insérer la commande
-      await db.execute(`
-        INSERT INTO commandes (code_commande, idClient, type_commande, date_commande, montant_ht, montant_ttc, statut)
-        VALUES (?, ?, ?, ?, ?, ?, 'CONFIRMEE')
-      `, [codeCommande, selectedClient.idClient, typeCommande, dateCommande, totalHT, totalHT]);
-
-      const commandeResult = await db.select<{ idCommande: number }[]>(
-        "SELECT idCommande FROM commandes WHERE code_commande = ?",
-        [codeCommande]
-      );
-      const idCommande = commandeResult[0]?.idCommande;
-
-      // Insérer les détails et mettre à jour le stock
-      for (const item of panier) {
-        await db.execute(`
-          INSERT INTO commande_details (idCommande, idProduit, qte_commande, prix_unitaire_vente)
-          VALUES (?, ?, ?, ?)
-        `, [idCommande, item.idProduit, item.quantite, item.prix_unitaire]);
-
-        // Mettre à jour le stock
-        await db.execute(`
-          UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-        `, [item.quantite, item.idProduit]);
+      if (qte > stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock disponible: ${stock}`,
+          color: 'red',
+        });
+        return;
       }
-
-      setSaving(false);
-      onSuccess();
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Erreur lors de l\'enregistrement');
-      setSaving(false);
+      setCart([
+        ...cart,
+        {
+          idProduit: product.idProduit,
+          designation: product.designation || 'Sans nom',
+          code_produit: product.code_produit || '-',
+          categorie: product.categorie,
+          unite_mesure: product.unite_base || 'pièce',
+          quantite_stock: stock,
+          prix_vente: prix,
+          prix_achat_base: product.prix_achat_base || 0,
+          quantite_commande: qte,
+          total: qte * prix,
+        }
+      ]);
     }
   };
 
-  if (loading) return <Card withBorder radius="md" p="lg"><LoadingOverlay visible={true} /><Text>Chargement...</Text></Card>;
+  const updateQuantity = (index: number, newQuantite: number) => {
+    const item = cart[index];
+    if (newQuantite > item.quantite_stock) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Stock disponible: ${item.quantite_stock}`,
+        color: 'red',
+      });
+      return;
+    }
+    const newCart = [...cart];
+    newCart[index].quantite_commande = newQuantite;
+    newCart[index].total = newQuantite * item.prix_vente;
+    setCart(newCart);
+  };
+
+  const removeFromCart = (index: number) => {
+    setCart(cart.filter((_, i) => i !== index));
+  };
+
+  const totalArticles = cart.length;
+  const totalPieces = cart.reduce((sum, item) => sum + item.quantite_commande, 0);
+  const montantTotal = cart.reduce((sum, item) => sum + item.total, 0);
+
+
+const handleSubmit = async () => {
+  if (!selectedClientId) {
+    notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
+    return;
+  }
+  
+  if (cart.length === 0) {
+    notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
+    return;
+  }
+  
+  setSubmitting(true);
+  
+  try {
+    const montantHT = montantTotal / 1.18;
+    const montantTVA = montantTotal - montantHT;
+    
+    const commande = {
+      code_commande: codeCommande,
+      idClient: parseInt(selectedClientId),
+      type_commande: typeCommande,
+      montant_ht: montantHT,
+      montant_tva: montantTVA,
+      montant_ttc: montantTotal,
+      montant_remise: 0,
+      montant_net: montantTotal,
+      statut: 'CONFIRMEE',
+      source: 'DIRECT'
+    };
+    
+    const details = cart.map(item => ({
+      idProduit: item.idProduit,
+      qte_commande: item.quantite_commande,
+      prix_unitaire_vente: item.prix_vente,
+      remise: 0,
+      idConditionnement: null
+    }));
+    
+    // Utiliser la méthode du hook (elle gère sa propre transaction)
+    await createCommande(commande, details);
+    
+    notifications.show({
+      title: 'Succès',
+      message: `Commande ${codeCommande} créée avec succès`,
+      color: 'green',
+    });
+    
+    onClose();
+    
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Erreur lors de la création de la commande';
+    console.error('Erreur création commande:', errorMessage);
+    notifications.show({
+      title: 'Erreur',
+      message: errorMessage,
+      color: 'red',
+    });
+  } finally {
+    setSubmitting(false);
+  }
+};
+  
+  const clientData = clients.map(c => ({ 
+    value: c.idClient.toString(), 
+    label: c.NomComplet || c.Societe || 'Client sans nom'
+  }));
 
   return (
-    <Box p="md">
-      <Stack gap="lg">
-        {/* HEADER */}
-        <Card withBorder radius="md" p="lg" bg="#1b365d">
-          <Group justify="space-between">
-            <Group gap="xs"><IconPackage size={24} color="white" /><Title order={2} c="white">Nouvelle commande</Title></Group>
-            <Button variant="light" color="white" leftSection={<IconArrowLeft size={16} />} onClick={onCancel}>Retour</Button>
+    <>
+      <Modal
+        opened={opened}
+        onClose={onClose}
+        size="70%"
+        padding="xl"
+        radius="lg"
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 700, fontSize: '1.5rem' },
+          body: { padding: 0 }
+        }}
+        title={
+          <Group gap="md">
+            <ThemeIcon size="lg" radius="md" color="white" variant="light">
+              <IconShoppingCart size={24} />
+            </ThemeIcon>
+            <div>
+              <Text size="lg" fw={700} c="white">Nouvelle Commande</Text>
+              <Text size="xs" opacity={0.7} c="white">Créez une nouvelle commande client</Text>
+            </div>
           </Group>
-        </Card>
-
-        {/* CLIENT */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Informations client</Title>
-          <Divider mb="md" />
-          <Select
-            label="Client"
-            placeholder="Sélectionner un client"
-            data={clients.map(c => ({ value: c.idClient.toString(), label: c.nom_complet }))}
-            onChange={handleClientChange}
-            leftSection={<IconUser size={16} />}
-            required
-            searchable
-          />
-          {selectedClient && (
-            <Group mt="md">
-              <Group gap="xs"><IconPhone size={14} /><Text size="sm">{selectedClient.telephone || 'Pas de téléphone'}</Text></Group>
-              <Group gap="xs"><IconBuildingStore size={14} /><Text size="sm" tt="capitalize">{selectedClient.type_client}</Text></Group>
-            </Group>
-          )}
-          <Select
-            label="Type de commande"
-            data={[
-              { value: 'SIMPLE', label: 'Simple' },
-              { value: 'REVENDEUR', label: 'Revendeur' },
-            ]}
-            value={typeCommande}
-            onChange={(val) => setTypeCommande(val || 'SIMPLE')}
-            mt="md"
-            disabled={selectedClient?.type_client === 'REVENDEUR'}
-          />
-        </Card>
-
-        {/* PRODUITS DISPONIBLES */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Produits disponibles</Title>
-          <Divider mb="md" />
-          <Group mb="md">
-            <TextInput
-              placeholder="Rechercher un produit..."
-              leftSection={<IconSearch size={16} />}
-              value={recherche}
-              onChange={(e) => setRecherche(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <Select
-              placeholder="Catégorie"
-              data={[{ value: '', label: 'Toutes' }, ...categories.map(c => ({ value: c, label: c }))]}
-              value={filtreCategorie}
-              onChange={setFiltreCategorie}
-              clearable
-              style={{ width: 150 }}
-            />
-            <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={() => { setRecherche(''); setFiltreCategorie(null); }}>Actualiser</Button>
-          </Group>
-          <ScrollArea h={300}>
-            <Table striped highlightOnHover>
-              <Table.Thead><Table.Tr><Table.Th>Désignation</Table.Th><Table.Th>Stock</Table.Th><Table.Th>Prix</Table.Th><Table.Th>Qté</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
-              <Table.Tbody>
-                {produitsFiltres.map((p) => (
-                  <Table.Tr key={p.idProduit}>
-                    <Table.Td fw={500}>{p.designation}</Table.Td>
-                    <Table.Td><Badge color={p.qte_stock <= 5 ? 'orange' : 'green'} variant="light">{p.qte_stock}</Badge></Table.Td>
-                    <Table.Td>{p.prix_vente_detail.toLocaleString()} FCFA</Table.Td>
-                    <Table.Td style={{ width: 100 }}>
-                      <NumberInput size="xs" min={0} max={p.qte_stock} value={quantiteInput[p.idProduit] || 0} onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) })} />
-                    </Table.Td>
-                    <Table.Td><Button size="xs" variant="light" onClick={() => { ajouterAuPanier(p, quantiteInput[p.idProduit] || 0); setQuantiteInput({ ...quantiteInput, [p.idProduit]: 0 }); }}>Ajouter</Button></Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
-          {produitsFiltres.length === 0 && <Text ta="center" c="dimmed" py={40}>Aucun produit trouvé</Text>}
-        </Card>
-
-        {/* PANIER */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Panier</Title>
-          <Divider mb="md" />
-          {panier.length === 0 ? (
-            <Text ta="center" c="dimmed" py={40}>Aucun produit sélectionné</Text>
-          ) : (
-            <>
-              <Table striped highlightOnHover>
-                <Table.Thead><Table.Tr><Table.Th>Produit</Table.Th><Table.Th>Qté</Table.Th><Table.Th>Prix unitaire</Table.Th><Table.Th>Total</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
-                <Table.Tbody>
-                  {panier.map((item, idx) => (
-                    <Table.Tr key={idx}>
-                      <Table.Td fw={500}>{item.designation}</Table.Td>
-                      <Table.Td>{item.quantite}</Table.Td>
-                      <Table.Td>{item.prix_unitaire.toLocaleString()} FCFA</Table.Td>
-                      <Table.Td fw={600}>{item.total.toLocaleString()} FCFA</Table.Td>
-                      <Table.Td><ActionIcon color="red" onClick={() => retirerDuPanier(idx)}><IconTrash size={16} /></ActionIcon></Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-              <Divider my="md" />
-              <Group justify="flex-end">
-                <Text fw={700} size="lg">Total : {totalHT.toLocaleString()} FCFA</Text>
+        }
+      >
+        <ScrollArea h="calc(100vh - 180px)" type="auto" p="lg">
+          <Stack gap="xl">
+            {/* Partie Client */}
+            <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#f8f9fa' }}>
+              <Group gap="xs" mb="md">
+                <ThemeIcon color="blue" variant="light" radius="md">
+                  <IconUser size={18} />
+                </ThemeIcon>
+                <Text fw={600} size="md">Informations client</Text>
               </Group>
-            </>
-          )}
-          <Divider my="md" />
-          <Group justify="space-between">
-            <TextInput label="Date de commande" type="date" value={dateCommande} onChange={(e) => setDateCommande(e.target.value)} style={{ width: 200 }} />
-            <Group>
-              <Button variant="light" color="red" onClick={onCancel}>Annuler</Button>
-              <Button onClick={handleSubmit} loading={saving} leftSection={<IconDeviceFloppy size={16} />} variant="gradient" gradient={{ from: 'blue', to: 'cyan' }}>Enregistrer la commande</Button>
+              
+              <Grid>
+                <Grid.Col span={8}>
+                  <Select
+                    label="Sélectionnez le client"
+                    placeholder="Rechercher un client..."
+                    data={clientData}
+                    value={selectedClientId}
+                    onChange={setSelectedClientId}
+                    searchable
+                    required
+                    size="md"
+                    leftSection={<IconUser size={16} />}
+                  />
+                </Grid.Col>
+                <Grid.Col span={4}>
+                  <Button 
+                    leftSection={<IconUserPlus size={16} />}
+                    onClick={() => setClientModalOpened(true)}
+                    fullWidth
+                    mt="auto"
+                    size="md"
+                    variant="light"
+                    color="blue"
+                    style={{ marginTop: 28 }}
+                  >
+                    Nouveau client
+                  </Button>
+                </Grid.Col>
+              </Grid>
+
+              {selectedClientDetails && (
+                <Paper p="sm" withBorder radius="md" mt="sm" style={{ backgroundColor: 'white' }}>
+                  <Group grow>
+                    <Group gap="xs">
+                      <IconPhone size={14} color="#1b365d" />
+                      <Text size="sm">{selectedClientDetails.Tel || 'Tél non renseigné'}</Text>
+                    </Group>
+                    <Group gap="xs">
+                      <IconBuildingStore size={14} color="#1b365d" />
+                      <Text size="sm">{selectedClientDetails.TypeClient === 'revendeur' ? 'Revendeur' : 'Client'}</Text>
+                    </Group>
+                  </Group>
+                </Paper>
+              )}
+            </Card>
+
+            {/* Type de commande */}
+            <Card withBorder radius="lg" shadow="sm" p="lg">
+              <Group gap="xs" mb="md">
+                <ThemeIcon color="green" variant="light" radius="md">
+                  <IconPackage size={18} />
+                </ThemeIcon>
+                <Text fw={600} size="md">Type de commande</Text>
+              </Group>
+              
+              <Grid>
+                <Grid.Col span={6}>
+                  <Paper
+                    p="md"
+                    withBorder
+                    radius="md"
+                    style={{
+                      cursor: 'pointer',
+                      backgroundColor: typeCommande === 'STANDARD' ? '#eef3f9' : 'white',
+                      borderColor: typeCommande === 'STANDARD' ? '#1b365d' : '#e5e7eb'
+                    }}
+                    onClick={() => setTypeCommande('STANDARD')}
+                  >
+                    <Group>
+                      <ThemeIcon color="blue" variant={typeCommande === 'STANDARD' ? 'filled' : 'light'} radius="xl">
+                        <IconShoppingBag size={18} />
+                      </ThemeIcon>
+                      <div style={{ flex: 1 }}>
+                        <Text fw={600} size="sm">Commande Standard</Text>
+                        <Text size="xs" c="dimmed">Vente au détail - Prix normal</Text>
+                      </div>
+                      {typeCommande === 'STANDARD' && <IconCheck size={18} color="#1b365d" />}
+                    </Group>
+                  </Paper>
+                </Grid.Col>
+                <Grid.Col span={6}>
+                  <Paper
+                    p="md"
+                    withBorder
+                    radius="md"
+                    style={{
+                      cursor: 'pointer',
+                      backgroundColor: typeCommande === 'REVENDEUR' ? '#e8f5e9' : 'white',
+                      borderColor: typeCommande === 'REVENDEUR' ? '#2e7d32' : '#e5e7eb'
+                    }}
+                    onClick={() => setTypeCommande('REVENDEUR')}
+                  >
+                    <Group>
+                      <ThemeIcon color="green" variant={typeCommande === 'REVENDEUR' ? 'filled' : 'light'} radius="xl">
+                        <IconTruck size={18} />
+                      </ThemeIcon>
+                      <div style={{ flex: 1 }}>
+                        <Text fw={600} size="sm">Commande Revendeur</Text>
+                        <Text size="xs" c="dimmed">Approvisionnement stock revendeur</Text>
+                      </div>
+                      {typeCommande === 'REVENDEUR' && <IconCheck size={18} color="#2e7d32" />}
+                    </Group>
+                  </Paper>
+                </Grid.Col>
+              </Grid>
+
+              <Divider my="md" />
+              
+              <TextInput
+                label="Code commande"
+                value={codeCommande}
+                readOnly
+                disabled
+                size="md"
+                leftSection={<IconPackage size={16} />}
+              />
+            </Card>
+
+            {/* Liste des produits */}
+            <Card withBorder radius="lg" shadow="sm" p="lg">
+              <Group gap="xs" mb="md" justify="space-between">
+                <Group>
+                  <ThemeIcon color="grape" variant="light" radius="md">
+                    <IconSearch size={18} />
+                  </ThemeIcon>
+                  <Text fw={600} size="md">Catalogue produits</Text>
+                </Group>
+                <Badge color="blue" variant="light" size="lg">{products.length} produits disponibles</Badge>
+              </Group>
+              
+              <Grid>
+                <Grid.Col span={8}>
+                  <TextInput
+                    placeholder="Rechercher un produit..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    leftSection={<IconSearch size={16} />}
+                    size="md"
+                  />
+                </Grid.Col>
+                <Grid.Col span={3}>
+                  <Select
+                    placeholder="Catégorie"
+                    data={categories.map(c => ({ value: c, label: c }))}
+                    value={selectedCategory}
+                    onChange={setSelectedCategory}
+                    clearable
+                    size="md"
+                  />
+                </Grid.Col>
+                <Grid.Col span={1}>
+                  <Tooltip label="Actualiser">
+                    <ActionIcon onClick={refreshProducts} size="md" variant="outline" h={38}>
+                      <IconRefresh size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Grid.Col>
+              </Grid>
+
+              <ScrollArea h={280}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr style={{ backgroundColor: '#eef3f9' }}>
+                      <Table.Th>Produit</Table.Th>
+                      <Table.Th ta="right">Prix vente</Table.Th>
+                      <Table.Th ta="right">Prix achat</Table.Th>
+                      <Table.Th ta="center">Stock</Table.Th>
+                      <Table.Th ta="center" w={100}>Action</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {paginatedProducts.map((product) => (
+                      <Table.Tr key={product.idProduit}>
+                        <Table.Td>
+                          <Text fw={500} size="sm">{product.designation}</Text>
+                          <Text size="xs" c="dimmed">{product.code_produit}</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text fw={600} c="blue">{formatPrice(product.prix_vente_detail)} F</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="sm" c="dimmed">{formatPrice(product.prix_achat_base)} F</Text>
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Badge 
+                            color={(product.qte_stock || 0) < 10 ? 'red' : 'green'} 
+                            variant="light" 
+                            size="sm"
+                          >
+                            {product.qte_stock || 0} unités
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Button
+                            size="xs"
+                            leftSection={<IconPlus size={14} />}
+                            onClick={() => addToCart(product)}
+                            disabled={(product.qte_stock || 0) === 0}
+                            variant="light"
+                            color="blue"
+                          >
+                            Ajouter
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+
+              {filteredProducts.length === 0 && (
+                <Center py="xl">
+                  <Stack align="center">
+                    <IconSearch size={40} color="#ccc" />
+                    <Text c="dimmed">Aucun produit trouvé</Text>
+                  </Stack>
+                </Center>
+              )}
+
+              {totalPages > 1 && (
+                <Group justify="center" mt="md">
+                  <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="sm" />
+                </Group>
+              )}
+            </Card>
+
+            {/* Panier */}
+            {cart.length > 0 && (
+              <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
+                <Group gap="xs" mb="md">
+                  <ThemeIcon color="orange" variant="light" radius="md">
+                    <IconShoppingCart size={18} />
+                  </ThemeIcon>
+                  <Text fw={600} size="md">Panier ({totalArticles} articles)</Text>
+                </Group>
+                
+                <ScrollArea h={200}>
+                  <Table striped highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Produit</Table.Th>
+                        <Table.Th ta="center" w={100}>Qté</Table.Th>
+                        <Table.Th ta="right" w={120}>Total</Table.Th>
+                        <Table.Th ta="center" w={50}></Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {cart.map((item, index) => (
+                        <Table.Tr key={index}>
+                          <Table.Td>
+                            <Text size="sm" fw={500}>{item.designation}</Text>
+                            <Text size="xs" c="dimmed">{item.code_produit}</Text>
+                          </Table.Td>
+                          <Table.Td ta="center">
+                            <NumberInput
+                              value={item.quantite_commande}
+                              onChange={(val) => updateQuantity(index, Number(val) || 1)}
+                              min={1}
+                              max={item.quantite_stock}
+                              size="xs"
+                              w={80}
+                            />
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            <Text fw={600} c="blue">{formatPrice(item.total)} F</Text>
+                          </Table.Td>
+                          <Table.Td ta="center">
+                            <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+
+                <Divider my="md" />
+
+                <Grid>
+                  <Grid.Col span={4}>
+                    <Card withBorder p="sm" bg="gray.0">
+                      <Text size="xs" c="dimmed">Articles</Text>
+                      <Text size="xl" fw={700}>{totalArticles}</Text>
+                    </Card>
+                  </Grid.Col>
+                  <Grid.Col span={4}>
+                    <Card withBorder p="sm" bg="gray.0">
+                      <Text size="xs" c="dimmed">Pièces</Text>
+                      <Text size="xl" fw={700}>{totalPieces}</Text>
+                    </Card>
+                  </Grid.Col>
+                  <Grid.Col span={4}>
+                    <Card withBorder p="sm" style={{ backgroundColor: '#eef3f9' }}>
+                      <Text size="xs" c="dimmed">Total TTC</Text>
+                      <Text size="xl" fw={700} c="adminBlue">{formatPrice(montantTotal)} F</Text>
+                    </Card>
+                  </Grid.Col>
+                </Grid>
+              </Card>
+            )}
+
+            {/* Boutons d'action */}
+            <Group justify="flex-end" mt="md" pb="md">
+              <Button 
+                variant="outline" 
+                onClick={onClose} 
+                size="md"
+                leftSection={<IconTrash size={16} />}
+              >
+                Annuler
+              </Button>
+              <Button 
+                onClick={handleSubmit} 
+                loading={submitting || loading}
+                disabled={cart.length === 0 || !selectedClientId}
+                size="md"
+                color="green"
+                leftSection={<IconShoppingBag size={16} />}
+              >
+                Enregistrer la commande
+              </Button>
             </Group>
-          </Group>
-          {error && <Alert color="red" mt="md">{error}</Alert>}
-        </Card>
-      </Stack>
-    </Box>
+          </Stack>
+        </ScrollArea>
+        
+        <LoadingOverlay visible={clientsLoading || productsLoading} />
+      </Modal>
+
+      <FormulaireClient
+        opened={clientModalOpened}
+        onClose={() => {
+          setClientModalOpened(false);
+          refreshClients();
+        }}
+      />
+    </>
   );
 };
 

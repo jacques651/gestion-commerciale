@@ -1,406 +1,361 @@
 // src/components/clients/ListeClients.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  Stack,
-  Card,
-  Title,
-  Text,
-  Group,
-  Button,
-  TextInput,
-  Table,
-  Badge,
-  ActionIcon,
-  LoadingOverlay,
-  Box,
-  Pagination,
-  Tooltip,
-  Modal,
-  Divider,
-  ThemeIcon,
-  SimpleGrid,
-  Select,
-} from '@mantine/core';
+  Table, TextInput, Button, Group, Badge, ActionIcon,
+  Stack, Title, Card, Text, Tooltip, Pagination, Paper,
+  Flex, ThemeIcon, Avatar, SimpleGrid, Loader, Modal, Alert} from '@mantine/core';
 import {
-  IconUsers,
-  IconPlus,
-  IconEdit,
-  IconTrash,
-  IconSearch,
-  IconRefresh,
-  IconInfoCircle,
-  IconUser,
-  IconPhone,
-  IconMapPin,
-  IconBuildingStore,
+  IconSearch, IconPlus, IconEdit, IconTrash, IconPhone,
+  IconUsers, IconBuildingStore, IconUserCheck,
+  IconUserPlus, IconMapPin, IconX, IconAlertCircle
 } from '@tabler/icons-react';
-import { getDb } from '../../database/db';
-import FormulaireClient from './FormulaireClient';
+import { useClients } from '../../hooks/useClients';
+import { FormulaireClient } from './FormulaireClient';
+import { Client } from '../../database/repositories/clientRepository';
+import { notifications } from '@mantine/notifications';
 
-interface Client {
-  idClient: number;
-  code_client: string;
-  nom_complet: string;
-  societe: string;
-  type_client: string;
-  adresse: string;
-  ville: string;
-  telephone: string;
-  email: string;
-  est_actif: number;
-}
-
-const ListeClients: React.FC = () => {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [recherche, setRecherche] = useState('');
-  const [typeFiltre, setTypeFiltre] = useState<string | null>(null);
+export const ListeClients: React.FC = () => {
+  const { clients, loading, deleteClient, searchClients, refresh } = useClients();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [modalOpened, setModalOpened] = useState(false);
+  const [deleteModalOpened, setDeleteModalOpened] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [vueForm, setVueForm] = useState(false);
-  const [clientEdition, setClientEdition] = useState<Client | null>(null);
-  const [infoModalOpen, setInfoModalOpen] = useState(false);
   const itemsPerPage = 10;
 
-  const chargerClients = async () => {
-    setLoading(true);
-    const db = await getDb();
-    const result = await db.select<Client[]>(`
-      SELECT * FROM clients WHERE est_supprime = 0 ORDER BY nom_complet
-    `);
-    setClients(result || []);
-    setLoading(false);
+  const handleSearch = () => {
+    searchClients(searchTerm);
   };
 
-  useEffect(() => {
-    chargerClients();
-  }, []);
-
-  const supprimerClient = async (id: number) => {
-    if (!confirm('Supprimer ce client ?')) return;
-    const db = await getDb();
-    await db.execute("UPDATE clients SET est_supprime = 1 WHERE idClient = ?", [id]);
-    chargerClients();
+  const handleDeleteClick = (client: Client) => {
+    setSelectedClient(client);
+    setDeleteModalOpened(true);
   };
 
-  const handleReset = () => {
-    setRecherche('');
-    setTypeFiltre(null);
-    chargerClients();
-    setCurrentPage(1);
+  const confirmDelete = async () => {
+    if (selectedClient) {
+      const nom = selectedClient.NomComplet || selectedClient.Societe || 'Client';
+      await deleteClient(selectedClient.idClient);
+      notifications.show({
+        title: 'Succès',
+        message: `Client "${nom}" supprimé avec succès`,
+        color: 'green',
+      });
+      setDeleteModalOpened(false);
+      setSelectedClient(null);
+    }
   };
 
-  const typesClients = [
-    { value: 'PARTICULIER', label: '👤 Particulier' },
-    { value: 'REVENDEUR', label: '🔄 Revendeur' },
-    { value: 'ENTREPRISE', label: '🏢 Entreprise' },
-  ];
+  const handleEdit = (client: Client) => {
+    setEditingClient(client);
+    setModalOpened(true);
+  };
 
-  const clientsFiltres = clients.filter(c => {
-    const matchRecherche = c.nom_complet.toLowerCase().includes(recherche.toLowerCase()) ||
-                          c.code_client.toLowerCase().includes(recherche.toLowerCase()) ||
-                          (c.telephone && c.telephone.includes(recherche));
-    const matchType = !typeFiltre || c.type_client === typeFiltre;
-    return matchRecherche && matchType;
-  });
+  const handleCloseModal = () => {
+    setModalOpened(false);
+    setEditingClient(null);
+    refresh();
+  };
 
-  const totalPages = Math.ceil(clientsFiltres.length / itemsPerPage);
-  const paginatedData = clientsFiltres.slice(
+  const getTypeBadge = (type: string) => {
+    const colors: Record<string, string> = {
+      client: 'blue',
+      revendeur: 'green',
+    };
+    const labels: Record<string, string> = {
+      client: 'Client',
+      revendeur: 'Revendeur',
+    };
+    const icons: Record<string, React.ReactNode> = {
+      client: <IconUserCheck size={12} />,
+      revendeur: <IconBuildingStore size={12} />,
+    };
+    return (
+      <Badge
+        color={colors[type] || 'gray'}
+        variant="light"
+        size="md"
+        leftSection={icons[type]}
+      >
+        {labels[type] || type}
+      </Badge>
+    );
+  };
+
+  const getNomAffichage = (client: Client) => {
+    if (client.NomComplet) return client.NomComplet;
+    if (client.Societe) return client.Societe;
+    return 'Client sans nom';
+  };
+
+  // Statistiques
+  const stats = {
+    total: clients.length,
+    revendeurs: clients.filter(c => c.TypeClient === 'revendeur').length,
+    clients: clients.filter(c => c.TypeClient === 'client').length,
+    avecTel: clients.filter(c => c.Tel).length
+  };
+
+  // Pagination
+  const totalPages = Math.ceil(clients.length / itemsPerPage);
+  const paginatedClients = clients.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  const getTypeBadge = (type: string) => {
-    switch (type) {
-      case 'PARTICULIER':
-        return { label: 'Particulier', color: 'blue', icon: <IconUser size={12} /> };
-      case 'REVENDEUR':
-        return { label: 'Revendeur', color: 'orange', icon: <IconBuildingStore size={12} /> };
-      case 'ENTREPRISE':
-        return { label: 'Entreprise', color: 'green', icon: <IconBuildingStore size={12} /> };
-      default:
-        return { label: type, color: 'gray', icon: <IconUser size={12} /> };
-    }
-  };
-
-  if (vueForm) {
+  if (loading && clients.length === 0) {
     return (
-      <FormulaireClient
-        client={clientEdition || undefined}
-        onSuccess={() => {
-          setVueForm(false);
-          setClientEdition(null);
-          chargerClients();
-        }}
-        onCancel={() => {
-          setVueForm(false);
-          setClientEdition(null);
-        }}
-      />
-    );
-  }
-
-  if (loading) {
-    return (
-      <Card withBorder radius="md" p="lg" pos="relative">
-        <LoadingOverlay visible={true} />
-        <Text>Chargement des clients...</Text>
+      <Card withBorder p="xl" ta="center">
+        <Loader size="xl" />
+        <Text mt="md">Chargement des clients...</Text>
       </Card>
     );
   }
 
   return (
-    <Box p="md">
-      <Stack gap="lg">
-        {/* HEADER */}
-        <Card withBorder radius="md" p="lg" bg="#1b365d">
-          <Group justify="space-between">
+    <>
+      <Stack gap="lg" p="md">
+        {/* EN-TÊTE ATTRACTIF */}
+        <Paper
+          p="xl"
+          radius="lg"
+          style={{
+            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
-              <Group gap="xs">
-                <IconUsers size={24} color="white" />
-                <Title order={2} c="white">Clients</Title>
+              <Group gap="md">
+                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                  <IconUsers size={30} />
+                </ThemeIcon>
+                <div>
+                  <Title order={1} c="white" style={{ fontSize: '2rem' }}>Clients</Title>
+                  <Text c="gray.3" size="sm">Gérez votre portefeuille clients</Text>
+                </div>
               </Group>
-              <Text size="sm" c="gray.3">
-                Gestion de la clientèle
-              </Text>
             </Stack>
-            <Group gap="md">
+            <Group>
               <Button
+                size="md"
                 variant="light"
                 color="white"
-                leftSection={<IconInfoCircle size={18} />}
-                onClick={() => setInfoModalOpen(true)}
-              >
-                Instructions
-              </Button>
-              <ThemeIcon size={48} radius="md" color="white" variant="light">
-                <IconUsers size={28} />
-              </ThemeIcon>
-            </Group>
-          </Group>
-        </Card>
-
-        {/* STATS KPI */}
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-          <Card withBorder radius="md" p="md">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Total clients
-              </Text>
-              <ThemeIcon size={30} radius="md" color="blue" variant="light">
-                <IconUsers size={18} />
-              </ThemeIcon>
-            </Group>
-            <Text fw={700} size="xl" c="blue">
-              {clients.length}
-            </Text>
-          </Card>
-
-          <Card withBorder radius="md" p="md" bg="orange.0">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Revendeurs
-              </Text>
-              <ThemeIcon size={30} radius="md" color="orange" variant="light">
-                <IconBuildingStore size={18} />
-              </ThemeIcon>
-            </Group>
-            <Text fw={700} size="xl" c="orange">
-              {clients.filter(c => c.type_client === 'REVENDEUR').length}
-            </Text>
-          </Card>
-
-          <Card withBorder radius="md" p="md" bg="green.0">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Entreprises
-              </Text>
-              <ThemeIcon size={30} radius="md" color="green" variant="light">
-                <IconBuildingStore size={18} />
-              </ThemeIcon>
-            </Group>
-            <Text fw={700} size="xl" c="green">
-              {clients.filter(c => c.type_client === 'ENTREPRISE').length}
-            </Text>
-          </Card>
-        </SimpleGrid>
-
-        {/* BARRE D'OUTILS */}
-        <Card withBorder radius="md" p="md">
-          <Group justify="space-between" wrap="wrap" gap="sm">
-            <Group>
-              <TextInput
-                placeholder="Rechercher par nom, code ou téléphone..."
-                leftSection={<IconSearch size={16} />}
-                value={recherche}
-                onChange={(e) => {
-                  setRecherche(e.target.value);
-                  setCurrentPage(1);
-                }}
-                size="sm"
-                style={{ width: 300 }}
-              />
-              <Select
-                placeholder="Filtrer par type"
-                data={[{ value: '', label: 'Tous' }, ...typesClients]}
-                value={typeFiltre}
-                onChange={setTypeFiltre}
-                size="sm"
-                style={{ width: 150 }}
-                clearable
-              />
-            </Group>
-            <Group>
-              <Tooltip label="Actualiser">
-                <ActionIcon variant="light" onClick={handleReset} size="lg">
-                  <IconRefresh size={18} />
-                </ActionIcon>
-              </Tooltip>
-              <Button
-                leftSection={<IconPlus size={16} />}
-                onClick={() => {
-                  setClientEdition(null);
-                  setVueForm(true);
-                }}
-                variant="gradient"
-                gradient={{ from: 'blue', to: 'cyan' }}
+                leftSection={<IconUserPlus size={18} />}
+                onClick={() => setModalOpened(true)}
               >
                 Nouveau client
               </Button>
             </Group>
+          </Flex>
+
+          {/* Cartes statistiques */}
+          <SimpleGrid cols={4} spacing="md" mt="xl">
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="white" variant="light" size="lg">
+                  <IconUsers size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Total clients</Text>
+                  <Text c="white" fw={700} size="xl">{stats.total}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="blue" variant="light" size="lg">
+                  <IconUserCheck size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Clients standards</Text>
+                  <Text c="white" fw={700} size="xl">{stats.clients}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="green" variant="light" size="lg">
+                  <IconBuildingStore size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Revendeurs</Text>
+                  <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="yellow" variant="light" size="lg">
+                  <IconPhone size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Contacts enregistrés</Text>
+                  <Text c="white" fw={700} size="xl">{stats.avecTel}</Text>
+                </div>
+              </Group>
+            </Card>
+          </SimpleGrid>
+        </Paper>
+
+        {/* SECTION RECHERCHE */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Group justify="space-between" mb="md">
+            <Group>
+              <IconSearch size={20} color="#1b365d" />
+              <Title order={3} size="h4">Rechercher</Title>
+            </Group>
+            {searchTerm && (
+              <Button variant="light" color="gray" onClick={() => {
+                setSearchTerm('');
+                refresh();
+              }} size="xs" leftSection={<IconX size={14} />}>
+                Réinitialiser
+              </Button>
+            )}
+          </Group>
+
+          <Group grow>
+            <TextInput
+              placeholder="Rechercher par nom, société, téléphone, email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              leftSection={<IconSearch size={16} />}
+              size="md"
+            />
+            <Button
+              onClick={handleSearch}
+              size="md"
+              variant="filled"
+              color="adminBlue"
+              leftSection={<IconSearch size={16} />}
+            >
+              Rechercher
+            </Button>
           </Group>
         </Card>
 
-        {/* TABLEAU DES CLIENTS */}
-        <Card withBorder radius="md" p={0} style={{ overflow: 'hidden' }}>
-          <Table striped highlightOnHover>
-            <Table.Thead style={{ backgroundColor: '#1b365d' }}>
-              <Table.Tr>
-                <Table.Th style={{ color: 'white' }}>Code</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Nom complet</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Téléphone</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Type</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Ville</Table.Th>
-                <Table.Th style={{ color: 'white', textAlign: 'center' }}>Actions</Table.Th>
+        {/* TABLEAU PRINCIPAL - VERSION COMPACTE */}
+        <Card withBorder radius="md" shadow="sm" p={0}>
+          <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Client</Table.Th>
+                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px', width: 100 }}>Type</Table.Th>
+                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Contact</Table.Th>
+                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Ville</Table.Th>
+                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px', width: 80, textAlign: 'center' }}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {paginatedData.map((c) => {
-                const typeBadge = getTypeBadge(c.type_client);
-                return (
-                  <Table.Tr key={c.idClient}>
-                    <Table.Td>
-                      <Badge color="gray" variant="light" size="sm">
-                        {c.code_client}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td fw={500}>{c.nom_complet}</Table.Td>
-                    <Table.Td>
-                      {c.telephone ? (
-                        <Group gap={4}>
-                          <IconPhone size={12} />
-                          <Text size="sm">{c.telephone}</Text>
-                        </Group>
-                      ) : (
-                        <Text size="sm" c="dimmed">—</Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={typeBadge.color} variant="light" size="sm" leftSection={typeBadge.icon}>
-                        {typeBadge.label}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {c.ville ? (
-                        <Group gap={4}>
-                          <IconMapPin size={12} />
-                          <Text size="sm">{c.ville}</Text>
-                        </Group>
-                      ) : (
-                        <Text size="sm" c="dimmed">—</Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={6} justify="center">
-                        <Tooltip label="Modifier">
-                          <ActionIcon
-                            size="sm"
-                            variant="subtle"
-                            color="orange"
-                            onClick={() => {
-                              setClientEdition(c);
-                              setVueForm(true);
-                            }}
-                          >
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Supprimer">
-                          <ActionIcon
-                            size="sm"
-                            variant="subtle"
-                            color="red"
-                            onClick={() => supprimerClient(c.idClient)}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
+              {paginatedClients.map((client) => (
+                <Table.Tr key={client.idClient} style={{ fontSize: '13px' }}>
+                  <Table.Td style={{ padding: '8px 12px' }}>
+                    <Group gap="xs" wrap="nowrap">
+                      <Avatar size="sm" radius="xl" color="blue">
+                        {getNomAffichage(client).charAt(0).toUpperCase()}
+                      </Avatar>
+                      <div>
+                        <Text fw={600} size="sm">{getNomAffichage(client)}</Text>
+                        {client.Societe && client.Societe !== client.NomComplet && (
+                          <Text size="xs" c="dimmed">{client.Societe}</Text>
+                        )}
+                      </div>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '8px 12px' }}>{getTypeBadge(client.TypeClient)}</Table.Td>
+                  <Table.Td style={{ padding: '8px 12px' }}>
+                    {client.Tel ? (
+                      <Group gap="4" wrap="nowrap">
+                        <IconPhone size={12} color="#1b365d" />
+                        <Text size="sm">{client.Tel}</Text>
                       </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                );
-              })}
+                    ) : (
+                      <Text size="xs" c="dimmed">-</Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td style={{ padding: '8px 12px' }}>
+                    {client.Ville ? (
+                      <Group gap="4" wrap="nowrap">
+                        <IconMapPin size={12} color="#1b365d" />
+                        <Text size="sm">{client.Ville}</Text>
+                      </Group>
+                    ) : (
+                      <Text size="xs" c="dimmed">-</Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                    <Group gap={4} justify="center" wrap="nowrap">
+                      <Tooltip label="Modifier">
+                        <ActionIcon variant="subtle" color="adminBlue" size="sm" onClick={() => handleEdit(client)}>
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Supprimer">
+                        <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteClick(client)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
             </Table.Tbody>
           </Table>
 
-          {/* PAGINATION */}
+          {clients.length === 0 && (
+            <Flex justify="center" align="center" direction="column" py={40}>
+              <IconUsers size={40} color="#ccc" />
+              <Text ta="center" c="dimmed" mt="sm" size="sm">Aucun client trouvé</Text>
+              <Button mt="md" variant="light" size="sm" onClick={() => setModalOpened(true)} leftSection={<IconPlus size={14} />}>
+                Ajouter un client
+              </Button>
+            </Flex>
+          )}
+
           {totalPages > 1 && (
-            <Group justify="center" p="md">
-              <Pagination
-                value={currentPage}
-                onChange={setCurrentPage}
-                total={totalPages}
-                color="blue"
-                size="sm"
-              />
+            <Group justify="center" p="sm">
+              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="sm" />
             </Group>
           )}
         </Card>
-
-        {/* MODAL INSTRUCTIONS */}
-        <Modal
-          opened={infoModalOpen}
-          onClose={() => setInfoModalOpen(false)}
-          title="📋 Instructions"
-          size="md"
-          centered
-          styles={{
-            header: {
-              backgroundColor: '#1b365d',
-              padding: '16px 20px',
-            },
-            title: {
-              color: 'white',
-              fontWeight: 600,
-            },
-            body: {
-              padding: '20px',
-            },
-          }}
-        >
-          <Stack gap="md">
-            <Text size="sm">1. Utilisez le bouton "Nouveau client" pour ajouter un client</Text>
-            <Text size="sm">2. La recherche filtre par nom, code ou téléphone</Text>
-            <Text size="sm">3. Le filtre par type permet de voir les particuliers, revendeurs ou entreprises</Text>
-            <Text size="sm">4. Cliquez sur ✏️ pour modifier un client</Text>
-            <Text size="sm">5. Cliquez sur 🗑️ pour supprimer un client</Text>
-            <Divider />
-            <Text size="xs" c="dimmed" ta="center">
-              Version 1.0.0 - Gestion Commerciale
-            </Text>
-          </Stack>
-        </Modal>
       </Stack>
-    </Box>
+
+      {/* MODAL CONFIRMATION SUPPRESSION */}
+      <Modal
+        opened={deleteModalOpened}
+        onClose={() => setDeleteModalOpened(false)}
+        title="Supprimer le client"
+        centered
+      >
+        <Stack>
+          <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
+            Êtes-vous sûr de vouloir supprimer ce client ?
+            <Text size="sm" mt="md" c="red">
+              Cette action est irréversible !
+            </Text>
+          </Alert>
+          <Group justify="flex-end" mt="md">
+            <Button variant="outline" onClick={() => setDeleteModalOpened(false)}>
+              Annuler
+            </Button>
+            <Button color="red" onClick={confirmDelete}>
+              Supprimer
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* FORMULAIRE CLIENT */}
+      <FormulaireClient
+        opened={modalOpened}
+        onClose={handleCloseModal}
+        editClient={editingClient}
+      />
+    </>
   );
 };
 

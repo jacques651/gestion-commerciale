@@ -1,304 +1,161 @@
 // src/components/clients/FormulaireClient.tsx
 import React, { useState, useEffect } from 'react';
-import {
-  Stack,
-  Card,
-  Title,
-  Text,
-  Group,
-  Button,
-  TextInput,
-  Select,
-  Divider,
-  Alert,
-  Box,
-  Modal,
-} from '@mantine/core';
-import {
-  IconDeviceFloppy,
-  IconArrowLeft,
-  IconUser,
-  IconInfoCircle,
-  IconCheck,
-  IconAlertCircle,
-  IconPhone,
-  IconMail,
-  IconMapPin,
-  IconBuildingStore,
-} from '@tabler/icons-react';
-import { getDb } from '../../database/db';
-
-interface Client {
-  idClient?: number;
-  code_client: string;
-  nom_complet: string;
-  societe: string;
-  type_client: string;
-  adresse: string;
-  ville: string;
-  telephone: string;
-  email: string;
-}
+import { Modal, TextInput, Select, Button, Group, Stack } from '@mantine/core';
+import { useClients } from '../../hooks/useClients';
+import { Client } from '../../database/repositories/clientRepository';
 
 interface FormulaireClientProps {
-  client?: Client;
-  onSuccess: () => void;
-  onCancel: () => void;
+  opened: boolean;
+  onClose: () => void;
+  editClient?: Client | null;
 }
 
-const FormulaireClient: React.FC<FormulaireClientProps> = ({ client, onSuccess, onCancel }) => {
-  const [codeClient, setCodeClient] = useState('');
-  const [nomComplet, setNomComplet] = useState('');
-  const [societe, setSociete] = useState('');
-  const [typeClient, setTypeClient] = useState<string | null>('PARTICULIER');
-  const [adresse, setAdresse] = useState('');
-  const [ville, setVille] = useState('');
-  const [telephone, setTelephone] = useState('');
-  const [email, setEmail] = useState('');
+export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onClose, editClient }) => {
+  const { createClient, updateClient } = useClients();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-  const [infoModalOpen, setInfoModalOpen] = useState(false);
 
-  const typesOptions = [
-    { value: 'PARTICULIER', label: '👤 Particulier' },
-    { value: 'REVENDEUR', label: '🔄 Revendeur' },
-    { value: 'ENTREPRISE', label: '🏢 Entreprise' },
-  ];
+  // Ces champs correspondent EXACTEMENT à la nouvelle table
+  const [formData, setFormData] = useState({
+    NomComplet: '',
+    Societe: '',
+    Adresse: '',
+    Tel: '',
+    Email: '',
+    Ville: '',
+    TypeClient: 'client' as 'client' | 'revendeur',
+  });
 
+  // Remplir le formulaire si édition
   useEffect(() => {
-    if (client) {
-      setCodeClient(client.code_client);
-      setNomComplet(client.nom_complet);
-      setSociete(client.societe || '');
-      setTypeClient(client.type_client);
-      setAdresse(client.adresse || '');
-      setVille(client.ville || '');
-      setTelephone(client.telephone || '');
-      setEmail(client.email || '');
-    } else {
-      const code = `CLT-${Date.now()}`;
-      setCodeClient(code);
+    if (editClient) {
+      setFormData({
+        NomComplet: editClient.NomComplet || '',
+        Societe: editClient.Societe || '',
+        Adresse: editClient.Adresse || '',
+        Tel: editClient.Tel || '',
+        Email: editClient.Email || '',
+        Ville: editClient.Ville || '',
+        TypeClient: editClient.TypeClient || 'client',
+      });
+    } else if (opened) {
+      // Réinitialiser pour un nouveau client
+      setFormData({
+        NomComplet: '',
+        Societe: '',
+        Adresse: '',
+        Tel: '',
+        Email: '',
+        Ville: '',
+        TypeClient: 'client',
+      });
     }
-  }, [client]);
+  }, [editClient, opened]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setSuccess(false);
-
-    if (!nomComplet.trim()) {
-      setError('Le nom complet est obligatoire');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      const db = await getDb();
+      const clientData = {
+        NomComplet: formData.NomComplet,
+        Societe: formData.Societe || null,
+        Adresse: formData.Adresse || null,
+        Tel: formData.Tel || null,
+        Email: formData.Email || null,
+        Ville: formData.Ville || null,
+        TypeClient: formData.TypeClient,
+      };
 
-      if (client?.idClient) {
-        await db.execute(`
-          UPDATE clients 
-          SET code_client=?, nom_complet=?, societe=?, type_client=?, 
-              adresse=?, ville=?, telephone=?, email=?
-          WHERE idClient=?
-        `, [codeClient, nomComplet, societe || null, typeClient, adresse || null, ville || null, telephone || null, email || null, client.idClient]);
-        setSuccess(true);
+      if (editClient) {
+        await updateClient(editClient.idClient, clientData);
       } else {
-        await db.execute(`
-          INSERT INTO clients (code_client, nom_complet, societe, type_client, adresse, ville, telephone, email, est_actif, est_supprime)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-        `, [codeClient, nomComplet, societe || null, typeClient, adresse || null, ville || null, telephone || null, email || null]);
-        setSuccess(true);
+        await createClient(clientData);
       }
-
-      setTimeout(() => {
-        onSuccess();
-      }, 1500);
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Erreur lors de l\'enregistrement');
+      onClose();
+    } catch (error) {
+      console.error('Erreur:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const typeOptions = [
+    { value: 'client', label: 'Client' },
+    { value: 'revendeur', label: 'Revendeur' },
+  ];
+
   return (
-    <Box style={{ maxWidth: 800, margin: '0 auto' }} p="sm">
-      <Stack gap="md">
-        <Card withBorder radius="md" p="sm" bg="#1b365d">
-          <Group justify="space-between">
-            <Group gap="xs">
-              <IconUser size={18} color="white" />
-              <Title order={4} size="h5" c="white">
-                {client ? 'Modifier le client' : 'Nouveau client'}
-              </Title>
-            </Group>
-            <Group gap="xs">
-              <Button
-                variant="subtle"
-                color="white"
-                size="compact-sm"
-                leftSection={<IconInfoCircle size={14} />}
-                onClick={() => setInfoModalOpen(true)}
-              >
-                Aide
-              </Button>
-              <Button
-                variant="subtle"
-                color="white"
-                size="compact-sm"
-                leftSection={<IconArrowLeft size={14} />}
-                onClick={onCancel}
-              >
-                Retour
-              </Button>
-            </Group>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={editClient ? 'Modifier le client' : 'Nouveau client'}
+      size="md"
+    >
+      <form onSubmit={handleSubmit}>
+        <Stack gap="md">
+          <TextInput
+            label="Nom complet"
+            placeholder="Nom complet du client"
+            value={formData.NomComplet}
+            onChange={(e) => setFormData({ ...formData, NomComplet: e.target.value })}
+            required
+          />
+
+          <TextInput
+            label="Société"
+            placeholder="Nom de la société (optionnel)"
+            value={formData.Societe}
+            onChange={(e) => setFormData({ ...formData, Societe: e.target.value })}
+          />
+
+          <TextInput
+            label="Adresse"
+            placeholder="Adresse complète"
+            value={formData.Adresse}
+            onChange={(e) => setFormData({ ...formData, Adresse: e.target.value })}
+          />
+
+          <TextInput
+            label="Téléphone"
+            placeholder="Numéro de téléphone"
+            value={formData.Tel}
+            onChange={(e) => setFormData({ ...formData, Tel: e.target.value })}
+          />
+
+          <TextInput
+            label="Email"
+            placeholder="adresse@email.com"
+            value={formData.Email}
+            onChange={(e) => setFormData({ ...formData, Email: e.target.value })}
+            type="email"
+          />
+
+          <TextInput
+            label="Ville"
+            placeholder="Ville"
+            value={formData.Ville}
+            onChange={(e) => setFormData({ ...formData, Ville: e.target.value })}
+          />
+
+          <Select
+            label="Type de client"
+            placeholder="Sélectionner le type"
+            data={typeOptions}
+            value={formData.TypeClient}
+            onChange={(value) => setFormData({ ...formData, TypeClient: value as 'client' | 'revendeur' })}
+            required
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="outline" onClick={onClose}>
+              Annuler
+            </Button>
+            <Button type="submit" loading={loading}>
+              {editClient ? 'Modifier' : 'Créer'}
+            </Button>
           </Group>
-        </Card>
-
-        <Card withBorder radius="md" p="sm">
-          <form onSubmit={handleSubmit}>
-            <Stack gap="sm">
-              {success && (
-                <Alert icon={<IconCheck size={14} />} color="green" variant="light" p="xs">
-                  <Text size="xs">Client {client ? 'modifié' : 'ajouté'} avec succès !</Text>
-                </Alert>
-              )}
-
-              {error && (
-                <Alert icon={<IconAlertCircle size={14} />} color="red" variant="light" p="xs">
-                  <Text size="xs">{error}</Text>
-                </Alert>
-              )}
-
-              <TextInput
-                label="Code client"
-                value={codeClient}
-                disabled
-                size="sm"
-              />
-
-              <TextInput
-                label="Nom complet"
-                placeholder="Nom et prénom"
-                value={nomComplet}
-                onChange={(e) => setNomComplet(e.target.value)}
-                leftSection={<IconUser size={14} />}
-                size="sm"
-                required
-              />
-
-              <TextInput
-                label="Société"
-                placeholder="Nom de l'entreprise (optionnel)"
-                value={societe}
-                onChange={(e) => setSociete(e.target.value)}
-                leftSection={<IconBuildingStore size={14} />}
-                size="sm"
-              />
-
-              <Select
-                label="Type de client"
-                data={typesOptions}
-                value={typeClient}
-                onChange={setTypeClient}
-                size="sm"
-              />
-
-              <TextInput
-                label="Téléphone"
-                placeholder="Numéro de téléphone"
-                value={telephone}
-                onChange={(e) => setTelephone(e.target.value)}
-                leftSection={<IconPhone size={14} />}
-                size="sm"
-              />
-
-              <TextInput
-                label="Email"
-                placeholder="adresse@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                leftSection={<IconMail size={14} />}
-                size="sm"
-                type="email"
-              />
-
-              <TextInput
-                label="Adresse"
-                placeholder="Adresse complète"
-                value={adresse}
-                onChange={(e) => setAdresse(e.target.value)}
-                leftSection={<IconMapPin size={14} />}
-                size="sm"
-              />
-
-              <TextInput
-                label="Ville"
-                placeholder="Ville"
-                value={ville}
-                onChange={(e) => setVille(e.target.value)}
-                leftSection={<IconMapPin size={14} />}
-                size="sm"
-              />
-
-              <Divider />
-
-              <Group justify="space-between">
-                <Button size="sm" variant="light" color="red" onClick={onCancel}>
-                  Annuler
-                </Button>
-                <Button
-                  size="sm"
-                  type="submit"
-                  loading={loading}
-                  leftSection={<IconDeviceFloppy size={14} />}
-                  variant="gradient"
-                  gradient={{ from: 'blue', to: 'cyan' }}
-                >
-                  {client ? 'Mettre à jour' : 'Enregistrer'}
-                </Button>
-              </Group>
-            </Stack>
-          </form>
-        </Card>
-
-        <Modal
-          opened={infoModalOpen}
-          onClose={() => setInfoModalOpen(false)}
-          title="📋 Instructions"
-          size="sm"
-          centered
-          styles={{
-            header: {
-              backgroundColor: '#1b365d',
-              padding: '10px 12px',
-            },
-            title: {
-              color: 'white',
-              fontWeight: 600,
-              fontSize: 13,
-            },
-            body: {
-              padding: '12px',
-            },
-          }}
-        >
-          <Stack gap="xs">
-            <Text size="xs">1. Le code client est généré automatiquement</Text>
-            <Text size="xs">2. Le nom complet est obligatoire</Text>
-            <Text size="xs">3. Sélectionnez le type de client (Particulier, Revendeur, Entreprise)</Text>
-            <Text size="xs">4. Les coordonnées sont optionnelles mais recommandées</Text>
-            <Divider />
-            <Text size="xs" c="dimmed" ta="center">Version 1.0.0</Text>
-          </Stack>
-        </Modal>
-      </Stack>
-    </Box>
+        </Stack>
+      </form>
+    </Modal>
   );
 };
-
-export default FormulaireClient;

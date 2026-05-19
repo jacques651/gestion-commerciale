@@ -1,78 +1,235 @@
-import React, { useState, useEffect } from "react";
-import { Stack, Card, Title, Text, Group, Button, TextInput, NumberInput, Select, Divider, Alert, Box, Modal } from "@mantine/core";
-import { IconDeviceFloppy, IconArrowLeft, IconPackage, IconInfoCircle, IconCheck, IconAlertCircle, IconCategory } from "@tabler/icons-react";
-import { getDb } from "../../database/db";
+// src/components/products/FormulaireProduit.tsx
+import React, { useState, useEffect } from 'react';
+import { Modal, TextInput, NumberInput, Select, Button, Group, Stack, LoadingOverlay, Card, SimpleGrid } from '@mantine/core';
+import { useProducts } from '../../hooks/useProducts';
+import { CreateProductInput } from '../../database/repositories/productRepository';
+import { getNextProductCode } from '../../services/codeGeneratorService';
 
-interface Produit { idProduit?: number; code_produit: string; categorie: string; designation: string; unite_base: string; prix_achat_base: number; prix_vente_detail: number; prix_vente_gros: number; seuil_alerte: number; }
-interface FormulaireProduitProps { produit?: Produit; onSuccess: () => void; onCancel: () => void; }
+interface FormulaireProduitProps {
+  opened: boolean;
+  onClose: () => void;
+  editProduct?: any;
+}
 
-const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ produit, onSuccess, onCancel }) => {
-  const [codeProduit, setCodeProduit] = useState("");
-  const [categorie, setCategorie] = useState("");
-  const [designation, setDesignation] = useState("");
-  const [uniteBase, setUniteBase] = useState("pièce");
-  const [prixAchat, setPrixAchat] = useState<number | undefined>(0);
-  const [prixDetail, setPrixDetail] = useState<number | undefined>(0);
-  const [prixGros, setPrixGros] = useState<number | undefined>(0);
-  const [seuilAlerte, setSeuilAlerte] = useState<number | undefined>(0);
+export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, onClose, editProduct }) => {
+  const { createProduct, updateProduct } = useProducts();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
-  const [infoModalOpen, setInfoModalOpen] = useState(false);
-
-  const unitesOptions = [{ value: "pièce", label: "Pièce" }, { value: "m", label: "Mètre" }, { value: "kg", label: "Kilogramme" }];
+  const [generatingCode, setGeneratingCode] = useState(false);
+  
+  const [formData, setFormData] = useState<CreateProductInput>({
+    code_produit: '',
+    categorie: '',
+    designation: '',
+    unite_base: 'pièce',
+    prix_achat_base: 0,
+    prix_vente_detail: 0,
+    prix_vente_gros: 0,
+    seuil_alerte: 0,
+    commission_pourcentage: 0,
+    qte_stock: 0,
+  });
 
   useEffect(() => {
-    if (produit) {
-      setCodeProduit(produit.code_produit); setCategorie(produit.categorie); setDesignation(produit.designation); setUniteBase(produit.unite_base);
-      setPrixAchat(produit.prix_achat_base); setPrixDetail(produit.prix_vente_detail); setPrixGros(produit.prix_vente_gros); setSeuilAlerte(produit.seuil_alerte);
-    } else { setCodeProduit(`PRD-${Date.now()}`); }
-  }, [produit]);
+    const generateCode = async () => {
+      if (!editProduct && !formData.code_produit && opened) {
+        setGeneratingCode(true);
+        try {
+          const code = await getNextProductCode();
+          setFormData(prev => ({ ...prev, code_produit: code }));
+        } catch (error) {
+          console.error('Erreur génération code:', error);
+        } finally {
+          setGeneratingCode(false);
+        }
+      }
+    };
+    generateCode();
+  }, [editProduct, opened, formData.code_produit]);
+
+  useEffect(() => {
+    if (editProduct) {
+      setFormData({
+        code_produit: editProduct.code_produit || '',
+        categorie: editProduct.categorie || '',
+        designation: editProduct.designation || '',
+        unite_base: editProduct.unite_base || 'pièce',
+        prix_achat_base: editProduct.prix_achat_base || 0,
+        prix_vente_detail: editProduct.prix_vente_detail || 0,
+        prix_vente_gros: editProduct.prix_vente_gros || 0,
+        seuil_alerte: editProduct.seuil_alerte || 0,
+        commission_pourcentage: editProduct.commission_pourcentage || 0,
+        qte_stock: editProduct.qte_stock || 0,
+      });
+    } else if (opened) {
+      setFormData({
+        code_produit: '',
+        categorie: '',
+        designation: '',
+        unite_base: 'pièce',
+        prix_achat_base: 0,
+        prix_vente_detail: 0,
+        prix_vente_gros: 0,
+        seuil_alerte: 0,
+        commission_pourcentage: 0,
+        qte_stock: 0,
+      });
+    }
+  }, [editProduct, opened]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(""); setSuccess(false);
-    if (!designation.trim()) { setError("La désignation est obligatoire"); return; }
-    if (!prixDetail || prixDetail <= 0) { setError("Le prix de détail est obligatoire"); return; }
+    e.preventDefault();
     setLoading(true);
+    
     try {
-      const db = await getDb();
-      if (produit?.idProduit) {
-        await db.execute("UPDATE products SET code_produit=?, categorie=?, designation=?, unite_base=?, prix_achat_base=?, prix_vente_detail=?, prix_vente_gros=?, seuil_alerte=? WHERE idProduit=?", [codeProduit, categorie || null, designation, uniteBase, prixAchat || 0, prixDetail, prixGros || 0, seuilAlerte || 0, produit.idProduit]);
+      if (editProduct) {
+        await updateProduct(editProduct.idProduit, formData);
       } else {
-        await db.execute("INSERT INTO products (code_produit, categorie, designation, unite_base, prix_achat_base, prix_vente_detail, prix_vente_gros, seuil_alerte, qte_stock, est_supprime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)", [codeProduit, categorie || null, designation, uniteBase, prixAchat || 0, prixDetail, prixGros || 0, seuilAlerte || 0]);
+        await createProduct(formData);
       }
-      setSuccess(true);
-      setTimeout(() => onSuccess(), 1500);
-    } catch (err: any) { setError(err.message || "Erreur"); }
-    finally { setLoading(false); }
+      onClose();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const categories = [
+    'Téléphone Simple', 'Smartphone', 'Accessoire', 'Informatique',
+    'Électronique', 'Bureau', 'Quincaillerie', 'Outillage',
+    'Consommable', 'Textile', 'Alimentaire', 'Autre'
+  ];
+
+  const unites = ['pièce', 'kg', 'litre', 'mètre', 'boîte', 'carton', 'lot', 'paire'];
+
   return (
-    <Box style={{ maxWidth: 600, margin: "0 auto" }} p="sm">
-      <Stack gap="md">
-        <Card withBorder radius="md" p="sm" bg="#1b365d"><Group justify="space-between"><Group gap="xs"><IconPackage size={18} color="white" /><Title order={4} size="h5" c="white">{produit ? "Modifier" : "Nouveau produit"}</Title></Group><Group gap="xs"><Button variant="subtle" color="white" size="compact-sm" leftSection={<IconInfoCircle size={14} />} onClick={() => setInfoModalOpen(true)}>Aide</Button><Button variant="subtle" color="white" size="compact-sm" leftSection={<IconArrowLeft size={14} />} onClick={onCancel}>Retour</Button></Group></Group></Card>
-        <Card withBorder radius="md" p="sm">
-          <form onSubmit={handleSubmit}>
-            <Stack gap="sm">
-              {success && <Alert icon={<IconCheck size={14} />} color="green" variant="light" p="xs"><Text size="xs">Produit enregistré !</Text></Alert>}
-              {error && <Alert icon={<IconAlertCircle size={14} />} color="red" variant="light" p="xs"><Text size="xs">{error}</Text></Alert>}
-              <TextInput label="Code produit" value={codeProduit} disabled size="sm" />
-              <TextInput label="Désignation" placeholder="Nom du produit" value={designation} onChange={(e) => setDesignation(e.target.value)} leftSection={<IconPackage size={14} />} size="sm" required />
-              <TextInput label="Catégorie" placeholder="Ex: Téléphone" value={categorie} onChange={(e) => setCategorie(e.target.value)} leftSection={<IconCategory size={14} />} size="sm" />
-              <Select label="Unité de base" data={unitesOptions} value={uniteBase} onChange={(val) => setUniteBase(val || "pièce")} size="sm" />
-              <NumberInput label="Prix d'achat (FCFA)" value={prixAchat} onChange={(val) => setPrixAchat(Number(val))} min={0} step={100} size="sm" />
-              <NumberInput label="Prix de vente détail (FCFA)" value={prixDetail} onChange={(val) => setPrixDetail(Number(val))} min={0} step={100} size="sm" required />
-              <NumberInput label="Prix de vente gros (FCFA)" value={prixGros} onChange={(val) => setPrixGros(Number(val))} min={0} step={100} size="sm" />
-              <NumberInput label="Seuil d'alerte" value={seuilAlerte} onChange={(val) => setSeuilAlerte(Number(val))} min={0} step={1} size="sm" />
-              <Divider />
-              <Group justify="space-between"><Button size="sm" variant="light" color="red" onClick={onCancel}>Annuler</Button><Button size="sm" type="submit" loading={loading} leftSection={<IconDeviceFloppy size={14} />} variant="gradient" gradient={{ from: "blue", to: "cyan" }}>{produit ? "Mettre à jour" : "Enregistrer"}</Button></Group>
-            </Stack>
-          </form>
-        </Card>
-        <Modal opened={infoModalOpen} onClose={() => setInfoModalOpen(false)} title="📋 Instructions" size="sm" centered styles={{ header: { backgroundColor: "#1b365d", padding: "10px 12px" }, title: { color: "white", fontWeight: 600, fontSize: 13 }, body: { padding: "12px" } }}><Stack gap="xs"><Text size="xs">1. Saisissez les informations du produit</Text><Divider /><Text size="xs" c="dimmed" ta="center">Version 1.0.0</Text></Stack></Modal>
-      </Stack>
-    </Box>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={editProduct ? 'Modifier le produit' : 'Nouveau produit'}
+      size="md"
+      padding="md"
+    >
+      <LoadingOverlay visible={generatingCode} />
+      <form onSubmit={handleSubmit}>
+        <Stack gap="sm">
+          <Card withBorder p="sm" radius="md">
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+              <TextInput
+                label="Code produit"
+                placeholder="Généré automatiquement"
+                value={formData.code_produit}
+                readOnly
+                disabled
+                size="sm"
+                styles={{ input: { backgroundColor: '#f5f5f5', cursor: 'not-allowed' } }}
+                required
+              />
+              <Select
+                label="Catégorie"
+                placeholder="Sélectionnez"
+                data={categories}
+                value={formData.categorie}
+                onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
+                required
+                size="sm"
+                searchable
+              />
+            </SimpleGrid>
+
+            <TextInput
+              label="Désignation"
+              placeholder="Nom du produit"
+              value={formData.designation}
+              onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
+              required
+              size="sm"
+              mt="sm"
+            />
+
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mt="xs">
+              <Select
+                label="Unité"
+                data={unites}
+                value={formData.unite_base}
+                onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
+                size="sm"
+              />
+              <NumberInput
+                label="Stock initial"
+                placeholder="0"
+                value={formData.qte_stock}
+                onChange={(value) => setFormData({ ...formData, qte_stock: Number(value) || 0 })}
+                min={0}
+                size="sm"
+              />
+            </SimpleGrid>
+          </Card>
+
+          <Card withBorder p="sm" radius="md">
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+              <NumberInput
+                label="Prix d'achat"
+                placeholder="0"
+                value={formData.prix_achat_base}
+                onChange={(value) => setFormData({ ...formData, prix_achat_base: Number(value) || 0 })}
+                min={0}
+                step={100}
+                size="sm"
+              />
+              <NumberInput
+                label="Prix vente détail"
+                placeholder="0"
+                value={formData.prix_vente_detail}
+                onChange={(value) => setFormData({ ...formData, prix_vente_detail: Number(value) || 0 })}
+                min={0}
+                step={100}
+                size="sm"
+                required
+              />
+              <NumberInput
+                label="Prix vente gros"
+                placeholder="0"
+                value={formData.prix_vente_gros}
+                onChange={(value) => setFormData({ ...formData, prix_vente_gros: Number(value) || 0 })}
+                min={0}
+                step={100}
+                size="sm"
+              />
+            </SimpleGrid>
+
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mt="xs">
+              <NumberInput
+                label="Seuil d'alerte"
+                placeholder="0"
+                value={formData.seuil_alerte}
+                onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
+                min={0}
+                size="sm"
+              />
+              <NumberInput
+                label="Commission (%)"
+                placeholder="0"
+                value={formData.commission_pourcentage}
+                onChange={(value) => setFormData({ ...formData, commission_pourcentage: Number(value) || 0 })}
+                min={0}
+                max={100}
+                step={1}
+                size="sm"
+              />
+            </SimpleGrid>
+          </Card>
+          
+          <Group justify="flex-end" mt="sm">
+            <Button variant="outline" onClick={onClose} size="sm">
+              Annuler
+            </Button>
+            <Button type="submit" loading={loading} size="sm">
+              {editProduct ? 'Modifier' : 'Créer'}
+            </Button>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
   );
 };
-
-export default FormulaireProduit;

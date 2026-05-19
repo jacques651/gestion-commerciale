@@ -1,147 +1,489 @@
-import React, { useState, useEffect } from "react";
+// src/components/ventes/FormulaireVente.tsx
+import React, { useState, useEffect } from 'react';
 import {
-  Stack, Card, Title, Text, Group, Button, Select, NumberInput,
-  Divider, Alert, Box, Modal, Table, ActionIcon, TextInput,
-  ScrollArea, SimpleGrid,
-  Badge,
-  LoadingOverlay
-} from "@mantine/core";
-import {
-  IconDeviceFloppy, IconArrowLeft, IconBuildingStore, IconUser,
-  IconTrash,
-  IconSearch} from "@tabler/icons-react";
-import { getDb } from "../../database/db";
+  Modal, TextInput, Select, Button, Group, Stack,
+  NumberInput, Table, ActionIcon, Text, Card,
+  Divider, Title, LoadingOverlay, ScrollArea, Badge, Tooltip,
+  Checkbox
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { IconTrash, IconPlus, IconShoppingCart, IconSearch, IconRefresh, IconUserPlus } from '@tabler/icons-react';
+import { useClients } from '../../hooks/useClients';
+import { useProducts } from '../../hooks/useProducts';
+import { useSales } from '../../hooks/useSales';
+import { getNextVenteCode } from '../../services/codeGeneratorService';
+import { getDb } from '../../database/db';
+import { FormulaireClient } from '../clients/FormulaireClient';
 
-interface Client { idClient: number; nom_complet: string; }
-interface Produit { idProduit: number; designation: string; unite_base: string; prix_vente_detail: number; qte_stock: number; categorie: string; }
-interface PanierItem { idProduit: number; designation: string; quantite: number; prix_unitaire: number; total: number; }
+interface FormulaireVenteProps {
+  onSuccess: () => void;
+  onCancel: () => void;
+}
 
-const FormulaireVente: React.FC<{ onSuccess: () => void; onCancel: () => void }> = ({ onSuccess, onCancel }) => {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [produits, setProduits] = useState<Produit[]>([]);
-  const [produitsFiltres, setProduitsFiltres] = useState<Produit[]>([]);
-  const [panier, setPanier] = useState<PanierItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [, setSuccess] = useState(false);
-  const [infoModalOpen, setInfoModalOpen] = useState(false);
-  const [recherche, setRecherche] = useState("");
-  const [categorieFiltre, setCategorieFiltre] = useState<string | null>(null);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
-  const [formData, setFormData] = useState({ idClient: "", nomClient: "", contact: "", dateVente: new Date().toISOString().split("T")[0] });
+interface CartItem {
+  idProduit: number;
+  designation: string;
+  code_produit: string;
+  quantite_stock: number;
+  prix_vente: number;
+  quantite: number;
+  total: number;
+}
+
+export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onCancel }) => {
+  const { clients, loading: clientsLoading, refresh: refreshClients } = useClients();
+  const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
+  const { createSale, loading } = useSales();
+
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [, setSelectedClientDetails] = useState<any>(null);
+  const [clientNom, setClientNom] = useState<string>('');
+  const [clientContact, setClientContact] = useState<string>('');
+  const [ajouterClient, setAjouterClient] = useState<boolean>(false);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [codeVente, setCodeVente] = useState<string>('');
+  const [clientModalOpened, setClientModalOpened] = useState(false);
+
+  const itemsPerPage = 5;
 
   useEffect(() => {
-    const loadData = async () => {
-      const db = await getDb();
-      const clientsData = await db.select<Client[]>("SELECT idClient, nom_complet FROM clients WHERE est_actif=1 AND est_supprime=0 ORDER BY nom_complet");
-      const produitsData = await db.select<Produit[]>("SELECT idProduit, designation, unite_base, prix_vente_detail, qte_stock, categorie FROM products WHERE est_supprime=0 AND qte_stock > 0 ORDER BY designation");
-      setClients(clientsData);
-      setProduits(produitsData);
-      setProduitsFiltres(produitsData);
-      const uniqueCategories = [...new Set(produitsData.map(p => p.categorie).filter(Boolean))];
-      setCategories(uniqueCategories);
-      setLoading(false);
+    const generateCode = async () => {
+      const code = await getNextVenteCode();
+      setCodeVente(code);
     };
-    loadData();
+    generateCode();
   }, []);
 
   useEffect(() => {
-    let filtered = [...produits];
-    if (recherche) filtered = filtered.filter(p => p.designation.toLowerCase().includes(recherche.toLowerCase()));
-    if (categorieFiltre) filtered = filtered.filter(p => p.categorie === categorieFiltre);
-    setProduitsFiltres(filtered);
-  }, [recherche, categorieFiltre, produits]);
-
-  const ajouterAuPanier = (produit: Produit, quantite: number) => {
-    if (quantite <= 0) return;
-    if (quantite > produit.qte_stock) { setError(`Stock insuffisant. Maximum: ${produit.qte_stock}`); return; }
-
-    const existingIndex = panier.findIndex(p => p.idProduit === produit.idProduit);
-    if (existingIndex >= 0) {
-      const newQuantite = panier[existingIndex].quantite + quantite;
-      if (newQuantite > produit.qte_stock) { setError(`Quantité totale dépasse le stock`); return; }
-      const updated = [...panier];
-      updated[existingIndex] = { ...updated[existingIndex], quantite: newQuantite, total: newQuantite * produit.prix_vente_detail };
-      setPanier(updated);
-    } else {
-      setPanier([...panier, { idProduit: produit.idProduit, designation: produit.designation, quantite: quantite, prix_unitaire: produit.prix_vente_detail, total: quantite * produit.prix_vente_detail }]);
+    if (selectedClientId && clients.length > 0) {
+      const client = clients.find(c => c.idClient.toString() === selectedClientId);
+      setSelectedClientDetails(client);
+      if (client) {
+        setClientNom((client as any).NomComplet || (client as any).Societe || '');
+        setClientContact((client as any).Tel || '');
+        setAjouterClient(true);
+      }
+    } else if (!selectedClientId) {
+      setSelectedClientDetails(null);
+      if (!ajouterClient) {
+        setClientNom('');
+        setClientContact('');
+      }
     }
-    setError("");
-    setQuantiteInput({ ...quantiteInput, [produit.idProduit]: 0 });
+  }, [selectedClientId, clients, ajouterClient]);
+
+  // Filtrer les produits
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  });
+
+  const paginatedProducts = filteredProducts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // Calcul des totaux
+  const totalHT = cart.reduce((sum, item) => sum + item.total, 0);
+  const tva = totalHT * 0.18;
+  const totalTTC = totalHT + tva;
+
+  // Ajouter un produit au panier
+  const addToCart = (product: any) => {
+    const existingItem = cart.find(item => item.idProduit === product.idProduit);
+    const qte = 1;
+    const stock = product.qte_stock || 0;
+    const prix = product.prix_vente_detail || 0;
+
+    if (prix <= 0) {
+      notifications.show({
+        title: 'Erreur',
+        message: `Le prix du produit "${product.designation}" n'est pas défini`,
+        color: 'red',
+      });
+      return;
+    }
+
+    if (existingItem) {
+      const newQuantite = existingItem.quantite + qte;
+      if (newQuantite > stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock disponible: ${stock}`,
+          color: 'red',
+        });
+        return;
+      }
+      setCart(cart.map(item =>
+        item.idProduit === product.idProduit
+          ? {
+            ...item,
+            quantite: newQuantite,
+            total: newQuantite * item.prix_vente
+          }
+          : item
+      ));
+    } else {
+      if (qte > stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock disponible: ${stock}`,
+          color: 'red',
+        });
+        return;
+      }
+      setCart([
+        ...cart,
+        {
+          idProduit: product.idProduit,
+          designation: product.designation,
+          code_produit: product.code_produit,
+          quantite_stock: stock,
+          prix_vente: prix,
+          quantite: qte,
+          total: qte * prix,
+        }
+      ]);
+    }
   };
 
-  const retirerDuPanier = (index: number) => { const updated = [...panier]; updated.splice(index, 1); setPanier(updated); };
-  const totalHT = panier.reduce((sum, item) => sum + item.total, 0);
+  const updateQuantity = (index: number, newQuantite: number) => {
+    const item = cart[index];
+    if (newQuantite > item.quantite_stock) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Stock disponible: ${item.quantite_stock}`,
+        color: 'red',
+      });
+      return;
+    }
+    const newCart = [...cart];
+    newCart[index].quantite = newQuantite;
+    newCart[index].total = newQuantite * item.prix_vente;
+    setCart(newCart);
+  };
+
+  const removeFromCart = (index: number) => {
+    setCart(cart.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = async () => {
-    if (panier.length === 0) { setError("Veuillez ajouter des produits"); return; }
-    setSaving(true); setError("");
+    // Les infos client sont optionnelles - on vérifie seulement le panier
+    if (cart.length === 0) {
+      notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
+      return;
+    }
+
+    setSubmitting(true);
+
     try {
+      const sale = {
+        code_vente: codeVente,
+        idClient: selectedClientId ? parseInt(selectedClientId) : null,
+        nom_prenom: ajouterClient ? clientNom : 'Client anonyme',
+        contact: ajouterClient ? (clientContact || null) : null,
+        montant_ht: totalHT,
+        montant_tva: tva,
+        montant_ttc: totalTTC,
+        type_vente: 'COMPTOIR',
+        statut: 'COMPLETEE',
+        observation: null,
+        date_vente: new Date().toISOString()
+      };
+
+      const details = cart.map(item => ({
+        idProduit: item.idProduit,
+        quantite: item.quantite,
+        prix_unitaire_ht: item.prix_vente,
+        prix_unitaire_ttc: item.prix_vente * 1.18,
+        tva_taux: 18,
+        remise_percent: 0
+      }));
+
+      await createSale(sale, details);
+
+      // Mettre à jour le stock
       const db = await getDb();
-      const codeVente = `VNT-${Date.now()}`;
-      await db.execute(`INSERT INTO ventes (code_vente, idClient, nom_prenom, contact, date_vente, montant_total, type_vente) VALUES (?, ?, ?, ?, ?, ?, 'COMPTOIR')`,
-        [codeVente, formData.idClient || null, formData.nomClient, formData.contact || null, formData.dateVente, totalHT]);
-
-      const venteResult = await db.select<{ idVente: number }[]>("SELECT idVente FROM ventes WHERE code_vente = ?", [codeVente]);
-      const idVente = venteResult[0]?.idVente;
-
-      for (const item of panier) {
-        await db.execute("INSERT INTO vente_details (idVente, idProduit, quantite, prix_unitaire) VALUES (?, ?, ?, ?)", [idVente, item.idProduit, item.quantite, item.prix_unitaire]);
-        await db.execute("UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?", [item.quantite, item.idProduit]);
+      for (const item of cart) {
+        await db.execute(`
+          UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
+        `, [item.quantite, item.idProduit]);
       }
-      setSuccess(true);
-      setTimeout(() => onSuccess(), 1500);
-    } catch (err: any) { setError(err.message || "Erreur"); }
-    finally { setSaving(false); }
+
+      notifications.show({
+        title: 'Succès',
+        message: `Vente ${codeVente} enregistrée`,
+        color: 'green',
+      });
+
+      onSuccess();
+
+    } catch (error) {
+      console.error(error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors de l\'enregistrement',
+        color: 'red',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  if (loading) return <Card withBorder radius="md" p="lg"><LoadingOverlay visible={true} /><Text>Chargement...</Text></Card>;
+  const formatMontant = (value: any): string => {
+    if (value === undefined || value === null) return '0';
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return '0';
+    return num.toLocaleString();
+  };
+
+  const clientData = clients.map(c => ({
+    value: c.idClient.toString(),
+    label: (c as any).NomComplet || (c as any).Societe || 'Client sans nom'
+  }));
 
   return (
-    <Box p="md">
-      <Stack gap="lg">
-        <Card withBorder radius="md" p="lg" bg="#1b365d"><Group justify="space-between"><Group gap="xs"><IconBuildingStore size={24} color="white" /><Title order={2} c="white">Nouvelle vente</Title></Group><Button variant="light" color="white" leftSection={<IconArrowLeft size={16} />} onClick={onCancel}>Retour</Button></Group></Card>
+    <>
+      <Modal
+        opened={true}
+        onClose={onCancel}
+        title="Nouvelle vente au comptoir"
+        size="900px"
+        padding="md"
+      >
+        <ScrollArea h="calc(100vh - 200px)" type="auto">
+          <Stack gap="md" pr="sm">
+            {/* Code vente */}
+            <Card withBorder p="sm" radius="md">
+              <Group grow>
+                <TextInput
+                  label="Code vente"
+                  value={codeVente}
+                  readOnly
+                  disabled
+                  size="sm"
+                  styles={{ input: { backgroundColor: '#f5f5f5', cursor: 'not-allowed' } }}
+                />
+              </Group>
+            </Card>
 
-        {/* Infos client */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Informations client</Title>
-          <Divider mb="md" />
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <Select label="Client (optionnel)" placeholder="Sélectionner" data={clients.map(c => ({ value: c.idClient.toString(), label: c.nom_complet }))} value={formData.idClient} onChange={(val) => setFormData({ ...formData, idClient: val || "" })} leftSection={<IconUser size={14} />} clearable searchable />
-            <TextInput label="Nom complet" placeholder="Nom du client" value={formData.nomClient} onChange={(e) => setFormData({ ...formData, nomClient: e.target.value })} leftSection={<IconUser size={14} />} required />
-            <TextInput label="Contact" placeholder="Téléphone" value={formData.contact} onChange={(e) => setFormData({ ...formData, contact: e.target.value })} leftSection={<IconUser size={14} />} />
-            <TextInput label="Date" type="date" value={formData.dateVente} onChange={(e) => setFormData({ ...formData, dateVente: e.target.value })} />
-          </SimpleGrid>
-        </Card>
+            {/* Client - Optionnel */}
+            <Card withBorder p="sm" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Title order={5}>Informations client (optionnel)</Title>
+                <Checkbox
+                  label="Ajouter les infos client"
+                  checked={ajouterClient}
+                  onChange={(e) => {
+                    setAjouterClient(e.currentTarget.checked);
+                    if (!e.currentTarget.checked) {
+                      setSelectedClientId(null);
+                      setClientNom('');
+                      setClientContact('');
+                    }
+                  }}
+                />
+              </Group>
 
-        {/* Produits */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Produits</Title>
-          <Divider mb="md" />
-          <Group mb="md"><TextInput placeholder="Rechercher..." leftSection={<IconSearch size={16} />} value={recherche} onChange={(e) => setRecherche(e.target.value)} style={{ flex: 1 }} /><Select placeholder="Catégorie" data={[{ value: "", label: "Toutes" }, ...categories.map(c => ({ value: c, label: c }))]} value={categorieFiltre} onChange={setCategorieFiltre} style={{ width: 150 }} clearable /></Group>
-          <ScrollArea h={250}>
-            <Table striped highlightOnHover>
-              <Table.Thead><Table.Tr><Table.Th>Produit</Table.Th><Table.Th>Stock</Table.Th><Table.Th>Prix</Table.Th><Table.Th>Qté</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead>
-              <Table.Tbody>{produitsFiltres.map((p) => (<Table.Tr key={p.idProduit}><Table.Td fw={500}>{p.designation}</Table.Td><Table.Td><Badge color={p.qte_stock <= 5 ? "orange" : "green"} variant="light">{p.qte_stock}</Badge></Table.Td><Table.Td>{p.prix_vente_detail.toLocaleString()} FCFA</Table.Td><Table.Td><NumberInput size="xs" min={0} max={p.qte_stock} value={quantiteInput[p.idProduit] || 0} onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) })} style={{ width: 80 }} /></Table.Td><Table.Td><Button size="xs" variant="light" onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)}>Ajouter</Button></Table.Td></Table.Tr>))}</Table.Tbody>
-            </Table>
-          </ScrollArea>
-        </Card>
+              {ajouterClient && (
+                <>
+                  <Group grow>
+                    <Select
+                      label="Client existant"
+                      placeholder="Choisir un client"
+                      data={clientData}
+                      value={selectedClientId}
+                      onChange={setSelectedClientId}
+                      searchable
+                      clearable
+                      size="sm"
+                    />
+                    <Button
+                      leftSection={<IconUserPlus size={14} />}
+                      onClick={() => setClientModalOpened(true)}
+                      size="sm"
+                      variant="light"
+                      mt="auto"
+                    >
+                      Nouveau client
+                    </Button>
+                  </Group>
 
-        {/* Panier */}
-        <Card withBorder radius="md" p="lg">
-          <Title order={4} mb="md">Panier</Title>
-          <Divider mb="md" />
-          {panier.length === 0 ? <Text ta="center" c="dimmed" py={40}>Aucun produit</Text> : (<><Table striped highlightOnHover><Table.Thead><Table.Tr><Table.Th>Produit</Table.Th><Table.Th>Qté</Table.Th><Table.Th>Prix</Table.Th><Table.Th>Total</Table.Th><Table.Th></Table.Th></Table.Tr></Table.Thead><Table.Tbody>{panier.map((item, idx) => (<Table.Tr key={idx}><Table.Td fw={500}>{item.designation}</Table.Td><Table.Td>{item.quantite}</Table.Td><Table.Td>{item.prix_unitaire.toLocaleString()} FCFA</Table.Td><Table.Td fw={600}>{item.total.toLocaleString()} FCFA</Table.Td><Table.Td><ActionIcon color="red" onClick={() => retirerDuPanier(idx)}><IconTrash size={16} /></ActionIcon></Table.Td></Table.Tr>))}</Table.Tbody></Table><Divider my="md" /><Group justify="flex-end"><Text fw={700} size="lg">Total : {totalHT.toLocaleString()} FCFA</Text></Group></>)}
-          <Divider my="md" />
-          {error && <Alert color="red" mb="md">{error}</Alert>}
-          <Group justify="flex-end"><Button variant="light" color="red" onClick={onCancel}>Annuler</Button><Button onClick={handleSubmit} loading={saving} leftSection={<IconDeviceFloppy size={16} />} variant="gradient" gradient={{ from: "blue", to: "cyan" }}>Enregistrer</Button></Group>
-        </Card>
+                  <Group grow mt="sm">
+                    <TextInput
+                      label="Nom complet"
+                      placeholder="Nom du client"
+                      value={clientNom}
+                      onChange={(e) => setClientNom(e.target.value)}
+                      size="sm"
+                    />
+                    <TextInput
+                      label="Contact"
+                      placeholder="Téléphone"
+                      value={clientContact}
+                      onChange={(e) => setClientContact(e.target.value)}
+                      size="sm"
+                    />
+                  </Group>
+                </>
+              )}
 
-        <Modal opened={infoModalOpen} onClose={() => setInfoModalOpen(false)} title="📋 Instructions" size="md" centered styles={{ header: { backgroundColor: "#1b365d", padding: "16px 20px" }, title: { color: "white", fontWeight: 600 }, body: { padding: "20px" } }}><Stack gap="md"><Text size="sm">1. Saisissez les informations du client</Text><Text size="sm">2. Ajoutez les produits au panier</Text><Text size="sm">3. Validez la vente</Text><Divider /><Text size="xs" c="dimmed" ta="center">Version 1.0.0</Text></Stack></Modal>
-      </Stack>
-    </Box>
+              {!ajouterClient && (
+                <Text size="xs" c="dimmed" ta="center" mt="sm">
+                  La vente sera enregistrée comme "Client anonyme"
+                </Text>
+              )}
+            </Card>
+
+            {/* Produits */}
+            <Card withBorder p="sm" radius="md">
+              <Title order={5} mb="sm">Produits</Title>
+
+              <Group mb="sm" gap="xs">
+                <TextInput
+                  placeholder="Rechercher un produit"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ flex: 1 }}
+                  leftSection={<IconSearch size={14} />}
+                  size="sm"
+                />
+                <Tooltip label="Actualiser">
+                  <ActionIcon onClick={refreshProducts} size="sm" variant="outline">
+                    <IconRefresh size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+
+              <ScrollArea h={250}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Désignation</Table.Th>
+                      <Table.Th>Prix</Table.Th>
+                      <Table.Th>Stock</Table.Th>
+                      <Table.Th></Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {paginatedProducts.map((product) => (
+                      <Table.Tr key={product.idProduit}>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>{product.designation}</Text>
+                          <Text size="xs" c="dimmed">{product.code_produit}</Text>
+                        </Table.Td>
+                        <Table.Td>{formatMontant(product.prix_vente_detail)} F</Table.Td>
+                        <Table.Td>
+                          <Badge color={(product.qte_stock || 0) < 10 ? 'red' : 'green'} variant="light" size="sm">
+                            {product.qte_stock || 0}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Button
+                            size="xs"
+                            leftSection={<IconPlus size={12} />}
+                            onClick={() => addToCart(product)}
+                            disabled={(product.qte_stock || 0) === 0}
+                            variant="light"
+                          >
+                            Ajouter
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Card>
+
+            {/* Panier */}
+            {cart.length > 0 && (
+              <Card withBorder p="sm" radius="md">
+                <Title order={5} mb="sm">Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
+
+                <ScrollArea h={200}>
+                  <Table striped highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Produit</Table.Th>
+                        <Table.Th>Qté</Table.Th>
+                        <Table.Th>Prix unit.</Table.Th>
+                        <Table.Th>Total</Table.Th>
+                        <Table.Th></Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {cart.map((item, index) => (
+                        <Table.Tr key={index}>
+                          <Table.Td>
+                            <Text size="sm">{item.designation}</Text>
+                          </Table.Td>
+                          <Table.Td style={{ width: 100 }}>
+                            <NumberInput
+                              value={item.quantite}
+                              onChange={(val) => updateQuantity(index, Number(val) || 1)}
+                              min={1}
+                              max={item.quantite_stock}
+                              size="xs"
+                            />
+                          </Table.Td>
+                          <Table.Td>{formatMontant(item.prix_vente)} F</Table.Td>
+                          <Table.Td>{formatMontant(item.total)} F</Table.Td>
+                          <Table.Td>
+                            <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
+                              <IconTrash size={14} />
+                            </ActionIcon>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+
+                <Divider my="sm" />
+                <Group justify="flex-end">
+                  <div>
+                    <Text size="sm">Total HT: <strong>{formatMontant(totalHT)} F</strong></Text>
+                    <Text size="xs" c="dimmed">TVA (18%): {formatMontant(tva)} F</Text>
+                    <Text size="lg" fw={700} c="blue">Total TTC: {formatMontant(totalTTC)} F</Text>
+                  </div>
+                </Group>
+              </Card>
+            )}
+
+            <Group justify="flex-end">
+              <Button variant="outline" onClick={onCancel} size="sm">
+                Annuler
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                loading={submitting || loading}
+                disabled={cart.length === 0}
+                leftSection={<IconShoppingCart size={14} />}
+                size="sm"
+                color="green"
+              >
+                Enregistrer la vente
+              </Button>
+            </Group>
+          </Stack>
+        </ScrollArea>
+
+        <LoadingOverlay visible={clientsLoading || productsLoading} />
+      </Modal>
+
+      <FormulaireClient
+        opened={clientModalOpened}
+        onClose={() => {
+          setClientModalOpened(false);
+          refreshClients();
+        }}
+      />
+    </>
   );
 };
 

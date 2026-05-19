@@ -14,6 +14,8 @@ import {
   TextInput,
   Divider,
   Tooltip,
+  Card,
+  ScrollArea
 } from '@mantine/core';
 import {
   IconPlus,
@@ -25,6 +27,7 @@ import { getDb } from '../../database/db';
 
 interface Conditionnement {
   idConditionnement: number;
+  idProduit: number;
   code_conditionnement: string;
   libelle: string;
   quantite_unites: number;
@@ -49,134 +52,181 @@ const GestionConditionnements: React.FC<GestionConditionnementsProps> = ({ idPro
 
   const loadConditionnements = async () => {
     setLoading(true);
-    const db = await getDb();
-    const result = await db.select<Conditionnement[]>(`
-      SELECT * FROM conditionnements WHERE idProduit = ? ORDER BY quantite_unites ASC
-    `, [idProduit]);
-    setConditionnements(result);
-    setLoading(false);
+    try {
+      const db = await getDb();
+      const result = await db.select<Conditionnement[]>(`
+        SELECT * FROM conditionnements WHERE idProduit = ? AND est_actif = 1 ORDER BY quantite_unites ASC
+      `, [idProduit]);
+      setConditionnements(result);
+    } catch (error) {
+      console.error('Erreur chargement conditionnements:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    loadConditionnements();
+    if (idProduit) {
+      loadConditionnements();
+    }
   }, [idProduit]);
 
   const handleSave = async () => {
-    const db = await getDb();
-    
-    if (editing) {
-      await db.execute(`
-        UPDATE conditionnements 
-        SET libelle=?, quantite_unites=?, prix_vente=?
-        WHERE idConditionnement=?
-      `, [formData.libelle, formData.quantite_unites, formData.prix_vente, editing.idConditionnement]);
-    } else {
-      const code = `COND-${Date.now()}`;
-      await db.execute(`
-        INSERT INTO conditionnements (idProduit, code_conditionnement, libelle, quantite_unites, prix_vente, est_actif)
-        VALUES (?, ?, ?, ?, ?, 1)
-      `, [idProduit, code, formData.libelle, formData.quantite_unites, formData.prix_vente]);
+    if (!formData.libelle.trim()) {
+      alert('Veuillez saisir un libellé');
+      return;
     }
-    
-    setModalOpen(false);
-    setEditing(null);
-    setFormData({ libelle: '', quantite_unites: 1, prix_vente: 0 });
-    loadConditionnements();
+    if (formData.quantite_unites < 1) {
+      alert('La quantité doit être au moins 1');
+      return;
+    }
+    if (formData.prix_vente < 0) {
+      alert('Le prix doit être positif');
+      return;
+    }
+
+    try {
+      const db = await getDb();
+      
+      if (editing) {
+        await db.execute(`
+          UPDATE conditionnements 
+          SET libelle = ?, quantite_unites = ?, prix_vente = ?
+          WHERE idConditionnement = ?
+        `, [formData.libelle, formData.quantite_unites, formData.prix_vente, editing.idConditionnement]);
+      } else {
+        const code = `COND-${Date.now()}`;
+        await db.execute(`
+          INSERT INTO conditionnements (idProduit, code_conditionnement, libelle, quantite_unites, prix_vente, est_actif)
+          VALUES (?, ?, ?, ?, ?, 1)
+        `, [idProduit, code, formData.libelle, formData.quantite_unites, formData.prix_vente]);
+      }
+      
+      setModalOpen(false);
+      setEditing(null);
+      setFormData({ libelle: '', quantite_unites: 1, prix_vente: 0 });
+      loadConditionnements();
+    } catch (error) {
+      console.error('Erreur sauvegarde:', error);
+      alert('Erreur lors de la sauvegarde');
+    }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Supprimer ce conditionnement ?')) return;
-    const db = await getDb();
-    await db.execute("DELETE FROM conditionnements WHERE idConditionnement = ?", [id]);
-    loadConditionnements();
+  const handleDelete = async (id: number, libelle: string) => {
+    if (!confirm(`Supprimer le conditionnement "${libelle}" ?`)) return;
+    try {
+      const db = await getDb();
+      await db.execute("DELETE FROM conditionnements WHERE idConditionnement = ?", [id]);
+      loadConditionnements();
+    } catch (error) {
+      console.error('Erreur suppression:', error);
+      alert('Erreur lors de la suppression');
+    }
   };
 
   const getPricePerUnit = (prixVente: number, quantite: number) => {
+    if (quantite === 0) return 0;
     return (prixVente / quantite).toFixed(0);
   };
 
   if (loading) {
-    return <Text>Chargement...</Text>;
+    return (
+      <Card withBorder p="sm">
+        <Text size="sm" ta="center">Chargement...</Text>
+      </Card>
+    );
   }
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
+    <Card withBorder p="sm" radius="md">
+      <Group justify="space-between" mb="sm">
         <Group gap="xs">
-          <IconBoxMultiple size={20} />
-          <Title order={4}>Conditionnements</Title>
+          <IconBoxMultiple size={18} />
+          <Title order={6}>Conditionnements</Title>
+          <Badge size="xs" variant="light" color="blue">
+            {conditionnements.length}
+          </Badge>
         </Group>
-        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={() => setModalOpen(true)}>
-          Nouveau
+        <Button 
+          size="xs" 
+          leftSection={<IconPlus size={12} />} 
+          onClick={() => setModalOpen(true)}
+          variant="light"
+        >
+          Ajouter
         </Button>
       </Group>
 
-      <Divider />
+      <Divider mb="sm" />
 
       {conditionnements.length === 0 ? (
-        <Text ta="center" c="dimmed" py={40}>
-          Aucun conditionnement. Cliquez sur "Nouveau" pour ajouter un paquet, carton, etc.
+        <Text ta="center" c="dimmed" py="md" size="sm">
+          Aucun conditionnement
         </Text>
       ) : (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Libellé</Table.Th>
-              <Table.Th>Contenu</Table.Th>
-              <Table.Th>Prix de vente</Table.Th>
-              <Table.Th>Prix unitaire</Table.Th>
-              <Table.Th style={{ textAlign: 'center' }}>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {conditionnements.map((c) => (
-              <Table.Tr key={c.idConditionnement}>
-                <Table.Td>
-                  <Badge color="blue" variant="light" size="lg">
-                    {c.libelle}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>{c.quantite_unites} unité(s)</Table.Td>
-                <Table.Td fw={600}>{c.prix_vente.toLocaleString()} FCFA</Table.Td>
-                <Table.Td>
-                  <Badge color="green" variant="light">
-                    {getPricePerUnit(c.prix_vente, c.quantite_unites)} FCFA/un
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Group gap="xs" justify="center">
-                    <Tooltip label="Modifier">
-                      <ActionIcon
-                        size="sm"
-                        color="orange"
-                        onClick={() => {
-                          setEditing(c);
-                          setFormData({
-                            libelle: c.libelle,
-                            quantite_unites: c.quantite_unites,
-                            prix_vente: c.prix_vente,
-                          });
-                          setModalOpen(true);
-                        }}
-                      >
-                        <IconEdit size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="Supprimer">
-                      <ActionIcon
-                        size="sm"
-                        color="red"
-                        onClick={() => handleDelete(c.idConditionnement)}
-                      >
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Group>
-                </Table.Td>
+        <ScrollArea h={200}>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Libellé</Table.Th>
+                <Table.Th>Contenu</Table.Th>
+                <Table.Th>Prix</Table.Th>
+                <Table.Th>Prix/un</Table.Th>
+                <Table.Th style={{ textAlign: 'center', width: 60 }}></Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {conditionnements.map((c) => (
+                <Table.Tr key={c.idConditionnement}>
+                  <Table.Td>
+                    <Badge color="blue" variant="light" size="sm">
+                      {c.libelle}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>{c.quantite_unites} un.</Table.Td>
+                  <Table.Td style={{ fontWeight: 600 }}>{c.prix_vente.toLocaleString()} F</Table.Td>
+                  <Table.Td>
+                    <Badge color="green" variant="light" size="xs">
+                      {getPricePerUnit(c.prix_vente, c.quantite_unites)} F
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap={4} justify="center">
+                      <Tooltip label="Modifier">
+                        <ActionIcon
+                          size="sm"
+                          color="orange"
+                          variant="subtle"
+                          onClick={() => {
+                            setEditing(c);
+                            setFormData({
+                              libelle: c.libelle,
+                              quantite_unites: c.quantite_unites,
+                              prix_vente: c.prix_vente,
+                            });
+                            setModalOpen(true);
+                          }}
+                        >
+                          <IconEdit size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Supprimer">
+                        <ActionIcon
+                          size="sm"
+                          color="red"
+                          variant="subtle"
+                          onClick={() => handleDelete(c.idConditionnement, c.libelle)}
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
       )}
 
       <Modal
@@ -186,56 +236,51 @@ const GestionConditionnements: React.FC<GestionConditionnementsProps> = ({ idPro
           setEditing(null);
           setFormData({ libelle: '', quantite_unites: 1, prix_vente: 0 });
         }}
-        title={editing ? "Modifier le conditionnement" : "Nouveau conditionnement"}
-        size="md"
+        title={editing ? "Modifier" : "Nouveau conditionnement"}
+        size="sm"
         centered
-        styles={{
-          header: {
-            backgroundColor: '#1b365d',
-            padding: '16px 20px',
-          },
-          title: {
-            color: 'white',
-            fontWeight: 600,
-          },
-          body: {
-            padding: '20px',
-          },
-        }}
+        padding="md"
       >
-        <Stack>
+        <Stack gap="sm">
           <TextInput
             label="Libellé"
-            placeholder="Ex: Paquet de 12, Carton de 48..."
+            placeholder="Ex: Paquet, Carton, Lot..."
             value={formData.libelle}
             onChange={(e) => setFormData({ ...formData, libelle: e.target.value })}
+            size="sm"
             required
           />
           <NumberInput
-            label="Nombre d'unités"
-            placeholder="Quantité dans ce conditionnement"
+            label="Nb d'unités"
+            description="Quantité dans ce conditionnement"
+            placeholder="Ex: 12"
             value={formData.quantite_unites}
-            onChange={(val) => setFormData({ ...formData, quantite_unites: Number(val) })}
+            onChange={(val) => setFormData({ ...formData, quantite_unites: Number(val) || 1 })}
             min={1}
+            size="sm"
             required
           />
           <NumberInput
             label="Prix de vente (FCFA)"
             placeholder="Prix pour ce conditionnement"
             value={formData.prix_vente}
-            onChange={(val) => setFormData({ ...formData, prix_vente: Number(val) })}
+            onChange={(val) => setFormData({ ...formData, prix_vente: Number(val) || 0 })}
             min={0}
             step={500}
+            size="sm"
             required
           />
-          <Divider />
-          <Group justify="flex-end">
-            <Button variant="light" onClick={() => setModalOpen(false)}>Annuler</Button>
-            <Button onClick={handleSave}>Enregistrer</Button>
+          <Group justify="flex-end" mt="sm">
+            <Button variant="outline" onClick={() => setModalOpen(false)} size="sm">
+              Annuler
+            </Button>
+            <Button onClick={handleSave} size="sm">
+              {editing ? 'Modifier' : 'Ajouter'}
+            </Button>
           </Group>
         </Stack>
       </Modal>
-    </Stack>
+    </Card>
   );
 };
 

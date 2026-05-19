@@ -1,5 +1,5 @@
 // src/types/auth.ts
-export type Role = 'admin' | 'gestionnaire' | 'caissier' | 'commercial';
+export type Role = 'admin' | 'gestionnaire' | 'commercial' | 'stockiste' | 'comptable';
 
 export interface Utilisateur {
   id: number;
@@ -7,6 +7,7 @@ export interface Utilisateur {
   login: string;
   role: Role;
   est_actif: number;
+  created_at?: string;
 }
 
 export interface AuthContextType {
