@@ -77,6 +77,43 @@ export const ListeFacturesRevendeur: React.FC = () => {
     f.code_facture?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     f.client_nom?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+const reinitialiserFactures = async () => {
+  try {
+    const db = await getDb();
+
+    // Factures revendeurs
+    await db.execute(`
+      DELETE FROM factures_revendeur
+    `);
+
+    // Décomptes
+    await db.execute(`
+      DELETE FROM decompte_details
+    `);
+
+    await db.execute(`
+      DELETE FROM decomptes
+    `);
+
+    await chargerFactures();
+   
+
+    notifications.show({
+      title: 'Succès',
+      message: 'Factures et décomptes réinitialisés',
+      color: 'green'
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    notifications.show({
+      title: 'Erreur',
+      message: 'Impossible de réinitialiser les données',
+      color: 'red'
+    });
+  }
+};
 
   const totalPages = Math.ceil(facturesFiltrees.length / itemsPerPage);
   const paginatedFactures = facturesFiltrees.slice(
@@ -184,8 +221,32 @@ export const ListeFacturesRevendeur: React.FC = () => {
             size="md"
             style={{ width: 350 }}
           />
-          <Button variant="subtle" onClick={() => { setSearchTerm(''); setCurrentPage(1); }} leftSection={<IconRefresh size={16} />}>
+          <Button
+            variant="filled"
+            color="orange"
+            leftSection={<IconRefresh size={16} />}
+            onClick={async () => {
+              setSearchTerm('');
+              setCurrentPage(1);
+
+              await chargerFactures();
+
+              notifications.show({
+                title: 'Réinitialisation',
+                message: 'Liste des factures rechargée',
+                color: 'green'
+              });
+            }}
+          >
             Réinitialiser
+          </Button>
+
+          <Button
+            color="red"
+            leftSection={<IconRefresh size={16} />}
+            onClick={reinitialiserFactures}
+          >
+            Vider les factures
           </Button>
         </Group>
       </Card>
@@ -195,7 +256,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
         <Box style={{ overflowX: 'auto' }}>
           <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',}}>
+              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)', }}>
                 <Table.Th>Code facture</Table.Th>
                 <Table.Th>Revendeur</Table.Th>
                 <Table.Th>Date</Table.Th>

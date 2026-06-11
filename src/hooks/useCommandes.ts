@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { commandeRepository, Commande, CreateCommandeInput, CreateCommandeDetailInput } from '../database/repositories/commandeRepository';
 import { notifications } from '@mantine/notifications';
 
-
 export const useCommandes = () => {
   const [commandes, setCommandes] = useState<Commande[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,39 +94,26 @@ const cancelCommande = useCallback(async (id: number) => {
   }
 }, [loadCommandes]);
 
-const deleteCommande = useCallback(async (id: number) => {
-  try {
-    setLoading(true);
-    await commandeRepository.delete(id);
-    notifications.show({
-      title: 'Succès',
-      message: 'Commande supprimée définitivement avec succès',
-      color: 'green',
-    });
-    await loadCommandes();
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Erreur lors de la suppression';
-    console.error(errorMsg);
-    notifications.show({
-      title: 'Erreur',
-      message: errorMsg,
-      color: 'red',
-    });
-    throw err;
-  } finally {
-    setLoading(false);
-  }
-}, [loadCommandes]);
 
-const getCommandeById = useCallback(async (id: number) => {
-  try {
-    return await commandeRepository.getById(id);
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Erreur récupération commande';
-    console.error(errorMsg);
-    return null;
-  }
-}, []);
+// Dans src/hooks/useCommandes.ts
+const getCommandeById = useCallback(
+  async (id: number) => {
+    try {
+
+      return await commandeRepository.getById(id);
+
+    } catch (error) {
+
+      console.error(
+        "Erreur getCommandeById:",
+        error
+      );
+
+      return null;
+    }
+  },
+  []
+);
 
   useEffect(() => {
     loadCommandes();
@@ -140,7 +126,6 @@ const getCommandeById = useCallback(async (id: number) => {
     createCommande,
     updateStatus,
     cancelCommande,
-    deleteCommande,  // Nouvelle méthode
     getCommandeById,
     refresh: loadCommandes,
   };

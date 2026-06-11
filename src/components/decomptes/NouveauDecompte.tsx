@@ -8,10 +8,14 @@ import {
 import {
   IconArrowLeft, IconDeviceFloppy, IconTrash, IconUser, IconPhone,
   IconBuildingStore, IconPackage, IconSearch, IconRefresh,
-  IconCash, IconCalendar, IconFileText
+  IconCash, IconFileText
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { notifications } from "@mantine/notifications";
+import { stockRevendeurRepository } from "../../database/repositories/stockRevendeurRepository";
+import {
+  decompteRepository
+} from "../../database/repositories/decompteRepository";
 
 interface Client {
   idClient: number;
@@ -21,13 +25,18 @@ interface Client {
   TypeClient: string;
 }
 
-interface Produit {
+interface ProduitRevendeur {
   idProduit: number;
+
   designation: string;
-  prix_vente_detail: number;
-  prix_achat_base: number;
-  commission_pourcentage: number;
+
   qte_stock: number;
+
+  prix_achat_base: number;
+
+  prix_vente_gros: number;
+
+  commission_pourcentage: number;
 }
 
 interface PanierItem {
@@ -48,48 +57,16 @@ interface NouveauDecompteProps {
 const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }) => {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [produits, setProduits] = useState<Produit[]>([]);
+  const [produits, setProduits] = useState<ProduitRevendeur[]>([]);
   const [panier, setPanier] = useState<PanierItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [recherche, setRecherche] = useState("");
   const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
-  const [dateDecompte, setDateDecompte] = useState<Date | null>(new Date());
-  const [codeDecompte, setCodeDecompte] = useState<string>("");
+
   const [objet, setObjet] = useState("");
-  const [modePaiement, setModePaiement] = useState<string>("especes");
 
-  // Générer le code décompte
-  useEffect(() => {
-    const generateCode = async () => {
-      try {
-        const db = await getDb();
-        const result = await db.select<any[]>(`
-          SELECT code_recu FROM decomptes 
-          ORDER BY idDecompte DESC LIMIT 1
-        `);
-
-        if (result.length === 0) {
-          setCodeDecompte('DCP-0001');
-        } else {
-          const lastCode = result[0].code_recu;
-          const match = lastCode?.match(/DCP-(\d+)/);
-          if (match) {
-            const lastNumber = parseInt(match[1]);
-            const nextNumber = lastNumber + 1;
-            setCodeDecompte(`DCP-${nextNumber.toString().padStart(4, '0')}`);
-          } else {
-            setCodeDecompte(`DCP-${Date.now()}`);
-          }
-        }
-      } catch (error) {
-        console.error('Erreur génération code:', error);
-        setCodeDecompte(`DCP-${Date.now()}`);
-      }
-    };
-    generateCode();
-  }, []);
 
   // Charger les clients revendeurs
   useEffect(() => {
@@ -118,33 +95,35 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   }, []);
 
   // Charger les produits disponibles
-  const loadProduits = async () => {
-    try {
-      const db = await getDb();
-      const result = await db.select<Produit[]>(`
-        SELECT 
-          idProduit, 
-          designation, 
-          prix_vente_detail, 
-          prix_achat_base,
-          commission_pourcentage,
-          qte_stock
-        FROM products
-        WHERE qte_stock > 0
-        ORDER BY designation
-      `);
-      setProduits(result);
-      setQuantiteInput({});
-    } catch (error) {
-      console.error('Erreur chargement produits:', error);
-    }
-  };
+  const loadStockRevendeur =
+    async (
+      idRevendeur: number
+    ) => {
 
-  useEffect(() => {
-    loadProduits();
-  }, []);
+      try {
 
-  const ajouterAuPanier = (produit: Produit, quantite: number) => {
+        const result =
+          await stockRevendeurRepository
+            .getByRevendeur(
+              idRevendeur
+            );
+
+        setProduits(result);
+
+        setPanier([]);
+
+        setQuantiteInput({});
+
+      } catch (error) {
+
+        console.error(error);
+
+      }
+
+    };
+
+
+  const ajouterAuPanier = (produit: ProduitRevendeur, quantite: number) => {
     if (quantite <= 0) {
       setError("Veuillez saisir une quantité valide");
       return;
@@ -155,8 +134,25 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     }
 
     const existingIndex = panier.findIndex(p => p.idProduit === produit.idProduit);
-    const total = quantite * produit.prix_vente_detail;
-    const commission = total * (produit.commission_pourcentage / 100);
+    const total =
+      quantite *
+      produit.prix_vente_gros;
+
+    const benefice =
+      (
+        produit.prix_vente_gros
+        -
+        produit.prix_achat_base
+      )
+      *
+      quantite;
+
+    const commission =
+      benefice *
+      (
+        produit.commission_pourcentage
+        / 100
+      );
 
     if (existingIndex >= 0) {
       const newQuantite = panier[existingIndex].quantite + quantite;
@@ -165,11 +161,30 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
         return;
       }
       const updated = [...panier];
+      const benefice =
+        (
+          produit.prix_vente_gros -
+          produit.prix_achat_base
+        )
+        *
+        newQuantite;
+
       updated[existingIndex] = {
+
         ...updated[existingIndex],
+
         quantite: newQuantite,
-        total: newQuantite * produit.prix_vente_detail,
-        commission: (newQuantite * produit.prix_vente_detail) * (produit.commission_pourcentage / 100)
+
+        total:
+          newQuantite *
+          produit.prix_vente_gros,
+
+        commission:
+          benefice *
+          (
+            produit.commission_pourcentage
+            / 100
+          )
       };
       setPanier(updated);
     } else {
@@ -177,7 +192,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
         idProduit: produit.idProduit,
         designation: produit.designation,
         quantite: quantite,
-        prix_vente: produit.prix_vente_detail,
+        prix_vente: produit.prix_vente_gros,
         prix_achat: produit.prix_achat_base || 0,
         commission: commission,
         total: total,
@@ -193,95 +208,117 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     setPanier(updated);
   };
 
-  const totalHT = panier.reduce((sum, item) => sum + item.total, 0);
-  const totalCommission = panier.reduce((sum, item) => sum + item.commission, 0);
-  const netAPayer = totalHT - totalCommission;
-  const totalTTC = netAPayer;
+  const totalVente =
+    panier.reduce(
+      (s, i) =>
+        s + i.total,
+      0
+    );
 
-  const handleSubmit = async () => {
-    if (!selectedClient) {
-      notifications.show({ title: 'Erreur', message: "Sélectionnez un client", color: 'red' });
-      return;
-    }
-    if (panier.length === 0) {
-      notifications.show({ title: 'Erreur', message: "Ajoutez des produits", color: 'red' });
-      return;
-    }
+  const totalCommission =
+    panier.reduce(
+      (s, i) =>
+        s + i.commission,
+      0
+    );
 
-    setSaving(true);
-    setError("");
+  const netAPayer =
+    totalVente -
+    totalCommission;
 
-    try {
-      const db = await getDb();
+  const handleSubmit =
+    async () => {
 
-      const result = await db.execute(`
-        INSERT INTO decomptes (
-          idClient, 
-          date_decompte, 
-          objet,
-          montant_ht, 
-          montant_ttc, 
-          code_recu,
-          date_echeance,
-          mode_paiement,
-          statut
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
-      `, [
-        selectedClient.idClient,
-        dateDecompte ? dateDecompte.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        objet || null,
-        totalHT,
-        totalTTC,
-        codeDecompte,
-        null,
-        modePaiement
-      ]);
+      if (!selectedClient) {
 
-      const decompteId = result.lastInsertId;
+        notifications.show({
 
-      // Insérer les détails
-      for (const item of panier) {
-        await db.execute(`
-          INSERT INTO decompte_details (
-            idDecompte, 
-            idProduit, 
-            QteDecompte, 
-            PrixUnitaireVente, 
-            Description
-          ) VALUES (?, ?, ?, ?, ?)
-        `, [
-          decompteId,
-          item.idProduit,
-          item.quantite,
-          item.prix_vente,
-          `Commission: ${(item.commission).toLocaleString()} FCFA`
-        ]);
+          title: "Erreur",
 
-        // Mettre à jour le stock
-        await db.execute(`
-          UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-        `, [item.quantite, item.idProduit]);
+          message:
+            "Sélectionnez un revendeur",
+
+          color: "red"
+
+        });
+
+        return;
       }
 
-      notifications.show({
-        title: 'Succès',
-        message: `Décompte ${codeDecompte} créé avec succès`,
-        color: 'green',
-      });
+      if (panier.length === 0) {
 
-      onSuccess();
-    } catch (err: any) {
-      console.error(err);
-      notifications.show({
-        title: 'Erreur',
-        message: err.message || "Erreur lors de l'enregistrement",
-        color: 'red',
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+        notifications.show({
 
+          title: "Erreur",
+
+          message:
+            "Ajoutez au moins un produit",
+
+          color: "red"
+
+        });
+
+        return;
+      }
+
+      try {
+
+        setSaving(true);
+
+        const idDecompte =
+          await decompteRepository
+            .create(
+              {
+                idClient:
+                  selectedClient.idClient,
+
+                observation:
+                  objet
+              },
+              panier.map(
+                item => ({
+                  idProduit:
+                    item.idProduit,
+
+                  qte_decompte:
+                    item.quantite
+                })
+              )
+            );
+
+        notifications.show({
+
+          title: "Succès",
+
+          message:
+            `Décompte créé (#${idDecompte})`,
+
+          color: "green"
+
+        });
+
+        onSuccess();
+
+      } catch (error: any) {
+
+        notifications.show({
+
+          title: "Erreur",
+
+          message:
+            error.message,
+
+          color: "red"
+
+        });
+
+      } finally {
+
+        setSaving(false);
+
+      }
+
+    };
   if (loading) {
     return (
       <Card withBorder radius="md" p="lg" ta="center">
@@ -300,12 +337,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     p.designation.toLowerCase().includes(recherche.toLowerCase())
   );
 
-  const modePaiementOptions = [
-    { value: 'especes', label: 'Espèces' },
-    { value: 'virement_bancaire', label: 'Virement bancaire' },
-    { value: 'cheque_bancaire', label: 'Chèque bancaire' },
-    { value: 'autres', label: 'Autres' },
-  ];
 
   return (
     <Box p="md">
@@ -334,19 +365,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
           </Flex>
         </Paper>
 
-        {/* Code décompte */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
-          <TextInput
-            label="Code décompte"
-            value={codeDecompte}
-            readOnly
-            disabled
-            size="md"
-            style={{ width: 250 }}
-            leftSection={<IconFileText size={16} />}
-          />
-        </Card>
-
         {/* Partie client */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group gap="xs" mb="md">
@@ -361,9 +379,47 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
             label="Client revendeur"
             placeholder="Sélectionner un client"
             data={clientData}
-            onChange={(val) => {
-              const client = clients.find(c => c.idClient.toString() === val);
-              setSelectedClient(client || null);
+            onChange={async (val) => {
+
+              const client =
+                clients.find(
+                  c =>
+                    c.idClient.toString() === val
+                );
+
+              setSelectedClient(
+                client || null
+              );
+
+              if (!client) {
+
+                setProduits([]);
+                setPanier([]);
+                return;
+              }
+
+              if (
+                client.TypeClient !==
+                "revendeur"
+              ) {
+
+                notifications.show({
+                  title: "Erreur",
+                  message:
+                    "Le client doit être un revendeur",
+                  color: "red"
+                });
+
+                setProduits([]);
+                setPanier([]);
+
+                return;
+              }
+
+              await loadStockRevendeur(
+                client.idClient
+              );
+
             }}
             leftSection={<IconUser size={16} />}
             required
@@ -404,7 +460,18 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
                 size="sm"
                 style={{ width: 250 }}
               />
-              <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={loadProduits} size="sm">
+              <Button
+                variant="light"
+                leftSection={<IconRefresh size={16} />}
+                onClick={() => {
+                  if (selectedClient) {
+                    loadStockRevendeur(
+                      selectedClient.idClient
+                    );
+                  }
+                }}
+                size="sm"
+              >
                 Actualiser
               </Button>
             </Group>
@@ -426,7 +493,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
                 {produitsFiltres.map((p) => (
                   <Table.Tr key={p.idProduit}>
                     <Table.Td fw={500}>{p.designation}</Table.Td>
-                    <Table.Td ta="right">{p.prix_vente_detail.toLocaleString()} FCFA</Table.Td>
+                    <Table.Td ta="right">{p.prix_vente_gros.toLocaleString()} FCFA</Table.Td>
                     <Table.Td ta="center">
                       <Badge color={p.qte_stock <= 5 ? "orange" : "green"} variant="light">
                         {p.qte_stock}
@@ -511,8 +578,12 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
               <Flex justify="flex-end">
                 <Stack gap={4} align="flex-end">
                   <Group>
-                    <Text size="sm">Total HT :</Text>
-                    <Text fw={600}>{totalHT.toLocaleString()} FCFA</Text>
+                    <Text size="sm">
+                      Total ventes :
+                    </Text>
+                    <Text fw={600}>
+                      {totalVente.toLocaleString()} FCFA
+                    </Text>
                   </Group>
                   <Group>
                     <Text size="sm" c="orange">Commission :</Text>
@@ -531,14 +602,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
           <Divider my="md" />
 
           <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-            <TextInput
-              label="Date du décompte"
-              type="date"
-              value={dateDecompte ? dateDecompte.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
-              onChange={(e) => setDateDecompte(new Date(e.target.value))}
-              leftSection={<IconCalendar size={16} />}
-              size="md"
-            />
+
             <TextInput
               label="Objet"
               placeholder="Motif du décompte..."
@@ -546,13 +610,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
               onChange={(e) => setObjet(e.target.value)}
               size="md"
             />
-            <Select
-              label="Mode de paiement"
-              data={modePaiementOptions}
-              value={modePaiement}
-              onChange={(val) => setModePaiement(val || 'especes')}
-              size="md"
-            />
+
           </SimpleGrid>
 
           <Divider my="md" />

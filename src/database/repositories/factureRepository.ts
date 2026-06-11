@@ -1,267 +1,270 @@
 // src/database/repositories/factureRepository.ts
-import { getDb } from '../db';
+
+import { getDb } from "../db";
 
 export interface Facture {
+  NomComplet: string;
+  client_nom: string;
   idFacture: number;
   code_facture: string;
+  idClient: number;
   idCommande: number;
-  idClient?: number;
   date_facture: string;
-  montant_ht: number;
   montant_ttc: number;
-  type_facture: 'STANDARD' | 'REVENDEUR';
-  statut: 'EN_ATTENTE' | 'PARTIELLEMENT_REGLEE' | 'REGLEE' | 'ANNULEE';
-}
-
-export interface FactureWithDetails extends Facture {
-  nom_client: string | undefined;
-  DateFacture: string;
-  id: number;
-  MontantHT: number;
-  CodeFacture: string;
-  commande_code?: string;
-  client_nom?: string;
-  client_societe?: string;
-  client_tel?: string;
-  montant_regle?: number;
-  montant_restant?: number;
-  commission_totale?: number;
-  benefice_total?: number;
+  montant_regle: number;
+  statut: string;
 }
 
 export const factureRepository = {
-  getAll: async (): Promise<Facture[]> => {
+
+  async getAll(): Promise<any[]> {
+
     const db = await getDb();
-    const factures = await db.select<any[]>(`
-      SELECT 
+
+    return await db.select<any[]>(`
+
+      SELECT
+
         f.*,
-        cl.NomComplet as client_nom,
-        c.code_commande as code_commande
+
+        c.NomComplet,
+        c.Societe,
+
+        cmd.code_commande
+
       FROM factures f
-      LEFT JOIN clients cl ON f.idClient = cl.idClient
-      LEFT JOIN commandes c ON f.idCommande = c.idCommande
-      ORDER BY f.date_facture DESC
+
+      LEFT JOIN clients c
+        ON c.idClient = f.idClient
+
+      LEFT JOIN commandes cmd
+        ON cmd.idCommande = f.idCommande
+
+      ORDER BY f.idFacture DESC
+
     `);
-    return factures as Facture[];
   },
 
-getById: async (id: number): Promise<FactureWithDetails | null> => {
-  const db = await getDb();
-  try {
-    // Version simplifiée SANS la sous-requête
-    const factures = await db.select<any[]>(`
-      SELECT 
-        f.*,
-        c.code_commande as commande_code,
-        c.type_commande,
-        cl.NomComplet as client_nom,
-        cl.Societe as client_societe,
-        cl.Adresse as client_adresse,
-        cl.Tel as client_tel,
-        cl.Email as client_email,
-        cl.Ville as client_ville,
-        cl.TypeClient as client_type
-      FROM factures f
-      JOIN commandes c ON f.idCommande = c.idCommande
-      LEFT JOIN clients cl ON c.idClient = cl.idClient
-      WHERE f.idFacture = ?
-    `, [id]);
+  async getById(
+    idFacture: number
+  ) {
 
-    if (factures.length === 0) return null;
-
-    const commandeId = factures[0].idCommande;
-    const typeCommande = factures[0].type_commande;
-
-    const details = await db.select<any[]>(`
-      SELECT 
-        cd.*,
-        p.designation as produit_nom,
-        p.code_produit,
-        p.categorie
-      FROM commande_details cd
-      LEFT JOIN products p ON cd.idProduit = p.idProduit
-      WHERE cd.idCommande = ?
-    `, [commandeId]);
-
-    let benefice_total = 0;
-    let commission_totale = 0;
-
-    if (typeCommande === 'REVENDEUR') {
-      benefice_total = details.reduce((sum, d) => {
-        return sum + ((d.prix_unitaire_vente - (d.prix_achat_base || 0)) * d.qte_commande);
-      }, 0);
-
-      commission_totale = details.reduce((sum, d) => {
-        const benefice = (d.prix_unitaire_vente - (d.prix_achat_base || 0)) * d.qte_commande;
-        return sum + (benefice * ((d.commission_pourcentage || 0) / 100));
-      }, 0);
-    }
-
-    return {
-      ...factures[0],
-      montant_regle: 0,
-      montant_restant: factures[0].montant_ttc || 0,
-      benefice_total,
-      commission_totale,
-      details: details.map(d => ({
-        ...d,
-        quantite: d.qte_commande,
-        prix_vente: d.prix_unitaire_vente,
-        total: d.prix_unitaire_vente * d.qte_commande,
-        benefice: typeCommande === 'REVENDEUR' ? (d.prix_unitaire_vente - (d.prix_achat_base || 0)) * d.qte_commande : 0,
-        commission: typeCommande === 'REVENDEUR' ? ((d.prix_unitaire_vente - (d.prix_achat_base || 0)) * d.qte_commande * ((d.commission_pourcentage || 0) / 100)) : 0
-      }))
-    };
-  } catch (error) {
-    console.error('Erreur getById facture:', error);
-    return null;
-  }
-},
-
-  createFromCommande: async (idCommande: number): Promise<number> => {
     const db = await getDb();
 
-    try {
-      const commande = await db.select<any[]>(`
-        SELECT 
-          c.idCommande, 
-          c.idClient, 
-          c.type_commande, 
-          c.montant_ht, 
-          c.montant_ttc,
-          cl.TypeClient as client_type
-        FROM commandes c
-        LEFT JOIN clients cl ON c.idClient = cl.idClient
-        WHERE c.idCommande = ?
-      `, [idCommande]);
+    const facture =
+      await db.select<any[]>(`
 
-      if (commande.length === 0) {
-        throw new Error('Commande non trouvée');
-      }
+        SELECT
 
-      const cmd = commande[0];
-      
-      // Générer un code facture unique
-      const year = new Date().getFullYear();
-      const lastFacture = await db.select<any[]>(`
-        SELECT code_facture FROM factures 
-        WHERE code_facture LIKE 'F-${year}-%'
-        ORDER BY idFacture DESC LIMIT 1
-      `);
-      
-      let nextNumber = 1;
-      if (lastFacture.length > 0) {
-        const lastCode = lastFacture[0].code_facture;
-        const match = lastCode.match(/F-\d+-(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1]) + 1;
-        }
-      }
-      
-      const codeFacture = `F-${year}-${nextNumber.toString().padStart(6, '0')}`;
-      const dateFacture = new Date().toISOString().split('T')[0];
-      
-      const typeFacture = cmd.type_commande === 'REVENDEUR' || cmd.client_type === 'revendeur' 
-        ? 'REVENDEUR' 
-        : 'STANDARD';
+          f.*,
 
-      const result = await db.execute(`
-        INSERT INTO factures (
-          code_facture, 
-          idCommande, 
-          idClient, 
-          date_facture, 
-          montant_ht, 
-          montant_ttc, 
-          statut, 
-          type_facture
-        ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE', ?)
+          c.NomComplet,
+          c.Societe,
+          c.Tel,
+          c.Adresse,
+
+          cmd.code_commande,
+          cmd.type_commande
+
+        FROM factures f
+
+        INNER JOIN clients c
+          ON c.idClient = f.idClient
+
+        INNER JOIN commandes cmd
+          ON cmd.idCommande = f.idCommande
+
+        WHERE f.idFacture = ?
+
+      `, [idFacture]);
+
+    if (facture.length === 0) {
+      return null;
+    }
+
+    const details =
+      await db.select<any[]>(`
+
+        SELECT
+
+          cd.idDetail,
+          cd.idProduit,
+          cd.qte_commande,
+          cd.prix_unitaire_vente,
+
+          p.code_produit,
+          p.designation,
+          p.categorie,
+          p.unite_base,
+
+          p.prix_achat_base,
+          p.prix_vente_gros,
+          p.commission_pourcentage
+
+        FROM commande_details cd
+
+        INNER JOIN products p
+          ON p.idProduit = cd.idProduit
+
+        WHERE cd.idCommande = ?
+
       `, [
-        codeFacture, 
-        idCommande, 
-        cmd.idClient,
-        dateFacture,
-        cmd.montant_ht || 0, 
-        cmd.montant_ttc || 0, 
-        typeFacture
+        facture[0].idCommande
       ]);
 
-      await db.execute(`
-        UPDATE commandes SET 
-          code_facture = ?, 
-          date_facture = ?,
-          statut = 'FACTUREE'
+    return {
+      ...facture[0],
+      details
+    };
+  },
+
+  async createFromCommande(
+    idCommande: number
+  ): Promise<number> {
+
+    const db = await getDb();
+
+    const commande =
+      await db.select<any[]>(`
+
+        SELECT *
+
+        FROM commandes
+
         WHERE idCommande = ?
-      `, [codeFacture, dateFacture, idCommande]);
 
-      if (typeFacture === 'REVENDEUR') {
-        await db.execute(`
-          UPDATE produits_revendeur SET code_facture = ?
-          WHERE idCommande = ?
-        `, [codeFacture, idCommande]);
-      }
+      `, [idCommande]);
 
-      return Number(result.lastInsertId);
-      
-    } catch (error: any) {
-      console.error('Erreur createFromCommande:', error?.message);
-      throw error;
+    if (commande.length === 0) {
+
+      throw new Error(
+        "Commande introuvable"
+      );
     }
-  },
 
-  updateStatus: async (id: number, statut: Facture['statut']): Promise<void> => {
-    const db = await getDb();
-    try {
-      await db.execute(`UPDATE factures SET statut = ? WHERE idFacture = ?`, [statut, id]);
-    } catch (error) {
-      console.error('Erreur updateStatus:', error);
-      throw error;
-    }
-  },
+    const cmd =
+      commande[0];
 
-  getUnpaidInvoices: async (): Promise<Facture[]> => {
-    const db = await getDb();
-    const factures = await db.select<any[]>(`
-      SELECT 
-        f.*,
-        cl.NomComplet as client_nom,
-        c.code_commande as code_commande
-      FROM factures f
-      LEFT JOIN clients cl ON f.idClient = cl.idClient
-      LEFT JOIN commandes c ON f.idCommande = c.idCommande
-      WHERE f.statut != 'REGLEE' 
-      ORDER BY f.date_facture DESC
-    `);
-    return factures as Facture[];
-  },
+    const existe =
+      await db.select<any[]>(`
 
-  getByPeriod: async (startDate: string, endDate: string): Promise<Facture[]> => {
-    const db = await getDb();
-    try {
-      return await db.select<any[]>(`
-        SELECT * FROM factures
-        WHERE date(date_facture) BETWEEN ? AND ?
-        ORDER BY date_facture DESC
-      `, [startDate, endDate]);
-    } catch (error) {
-      console.error('Erreur getByPeriod:', error);
-      return [];
-    }
-  },
+        SELECT idFacture
 
-  getCA: async (startDate: string, endDate: string): Promise<number> => {
-    const db = await getDb();
-    try {
-      const result = await db.select<any[]>(`
-        SELECT COALESCE(SUM(montant_ttc), 0) as total
         FROM factures
-        WHERE date(date_facture) BETWEEN ? AND ?
-        AND statut != 'ANNULEE'
-      `, [startDate, endDate]);
-      return result[0]?.total || 0;
-    } catch (error) {
-      console.error('Erreur getCA:', error);
-      return 0;
+
+        WHERE idCommande = ?
+
+      `, [idCommande]);
+
+    if (existe.length > 0) {
+
+      return Number(
+        existe[0].idFacture
+      );
     }
+
+    const codeFacture =
+      `FAC-${Date.now()}`;
+
+    const result =
+      await db.execute(`
+
+        INSERT INTO factures
+        (
+          code_facture,
+          idClient,
+          idCommande,
+          montant_ttc,
+          montant_regle,
+          statut
+        )
+        VALUES
+        (
+          ?,?,?,?,?,?
+        )
+
+      `, [
+
+        codeFacture,
+        cmd.idClient,
+        idCommande,
+        cmd.montant_ttc,
+        0,
+        "EN_ATTENTE"
+
+      ]);
+
+    await db.execute(`
+
+      UPDATE commandes
+
+      SET code_facture = ?
+
+      WHERE idCommande = ?
+
+    `, [
+
+      codeFacture,
+      idCommande
+
+    ]);
+
+    return Number(
+      result.lastInsertId
+    );
+  },
+
+  async updateStatus(
+    idFacture: number,
+    statut: string
+  ) {
+
+    const db = await getDb();
+
+    await db.execute(`
+
+      UPDATE factures
+
+      SET statut = ?
+
+      WHERE idFacture = ?
+
+    `, [
+      statut,
+      idFacture
+    ]);
+  },
+
+  async getUnpaidInvoices() {
+
+    const db = await getDb();
+
+    return await db.select<any[]>(`
+
+      SELECT *
+
+      FROM factures
+
+      WHERE statut <> 'REGLEE'
+
+      ORDER BY idFacture DESC
+
+    `);
+  },
+
+  async delete(
+    idFacture: number
+  ) {
+
+    const db = await getDb();
+
+    await db.execute(`
+
+      DELETE FROM factures
+
+      WHERE idFacture = ?
+
+    `, [idFacture]);
   }
+
 };

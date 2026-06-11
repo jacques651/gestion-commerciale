@@ -383,7 +383,6 @@ CREATE TABLE IF NOT EXISTS ventes (
     idVente INTEGER PRIMARY KEY AUTOINCREMENT,
     code_vente TEXT UNIQUE NOT NULL,
     idClient INTEGER,
-    idCaissier INTEGER,
     date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
     montant_ht REAL DEFAULT 0,
     montant_tva REAL DEFAULT 0,

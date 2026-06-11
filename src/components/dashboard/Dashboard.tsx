@@ -17,7 +17,8 @@ import {
   Box,
   Paper,
   Flex,
-  Avatar} from '@mantine/core';
+  Avatar
+} from '@mantine/core';
 import {
   IconUsers,
   IconShoppingBag,
@@ -31,7 +32,9 @@ import {
   IconFileInvoice,
   IconTrendingUp,
   IconTrendingDown,
-  IconCalendar} from '@tabler/icons-react';
+  IconCalendar,
+  IconPercentage,
+} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 
@@ -57,20 +60,29 @@ const formatCurrency = (v?: number) => `${(v || 0).toLocaleString('fr-FR')} FCFA
 
 const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
   const [loading, setLoading] = useState(true);
+
   const [stats, setStats] = useState({
     clients: 0,
+    revendeurs: 0,
     produits: 0,
     commandes: 0,
     ventes: 0,
+    decomptes: 0,
     factures: 0,
     chiffreAffaires: 0,
+    commissions: 0,
+    netAReverser: 0,
     encaissements: 0,
     resteARecouvrer: 0,
     commandesRevendeur: 0,
+    stockCentral: 0,
     stockRevendeur: 0
   });
-  const [recentVentes, setRecentVentes] = useState<any[]>([]);
+
+  const [recentDecomptes, setRecentDecomptes] = useState<any[]>([]);
   const [recentCommandes, setRecentCommandes] = useState<any[]>([]);
+  const [recentVentes, setRecentVentes] = useState<any[]>([]);
+
   const [infoModalOpen, setInfoModalOpen] = useState(false);
 
   useEffect(() => {
@@ -79,91 +91,230 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
       try {
         const db = await getDb();
 
-        const clients = await db.select<any[]>("SELECT COUNT(*) as total FROM clients");
-        const produits = await db.select<any[]>("SELECT COUNT(*) as total FROM products");
+        // Vérifier la structure de la table decomptes
+        let hasMontantVente = false;
+        let hasMontantCommission = false;
+
+        try {
+          const tableInfo = await db.select<any[]>(`PRAGMA table_info(decomptes)`);
+          hasMontantVente = tableInfo.some(col => col.name === 'montant_vente');
+          hasMontantCommission = tableInfo.some(col => col.name === 'montant_commission');
+          console.log('Table decomptes - montant_vente:', hasMontantVente, 'montant_commission:', hasMontantCommission);
+        } catch (err) {
+          console.warn('Impossible de vérifier la structure de decomptes:', err);
+        }
+
+        // Nombre de clients
+        const clients = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM clients
+        `);
+
+        // Nombre de revendeurs
+        const revendeurs = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM clients
+          WHERE TypeClient = 'revendeur'
+        `);
+
+        // Produits actifs
+        const produits = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM products
+          WHERE est_supprime = 0
+        `);
+
+        // Nombre de commandes (non annulées)
         const commandes = await db.select<any[]>(`
-          SELECT COUNT(*) as total FROM commandes WHERE statut != 'ANNULEE'
+          SELECT COUNT(*) as total
+          FROM commandes
+          WHERE statut != 'ANNULEE'
         `);
-        const ventes = await db.select<any[]>("SELECT COUNT(*) as total FROM ventes");
-        const factures = await db.select<any[]>("SELECT COUNT(*) as total FROM factures");
-        
-        const ca = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant_ttc), 0) as total FROM ventes
+
+        // Nombre de ventes
+        const ventes = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM ventes
         `);
-        
+
+        // Nombre de décomptes
+        const decomptes = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM decomptes
+        `);
+
+        // Nombre de factures
+        const factures = await db.select<any[]>(`
+          SELECT COUNT(*) as total
+          FROM factures
+        `);
+
+        // CA GLOBAL = Commandes (non annulées) + Ventes comptoir
+        const commandesCA = await db.select<any[]>(`
+          SELECT COALESCE(SUM(montant_ttc), 0) as total
+          FROM commandes
+          WHERE statut != 'ANNULEE'
+        `);
+
+        const ventesCA = await db.select<any[]>(`
+          SELECT COALESCE(SUM(montant_ttc), 0) as total
+          FROM ventes
+        `);
+
+        const totalCommandes = Number(commandesCA[0]?.total || 0);
+        const totalVentes = Number(ventesCA[0]?.total || 0);
+        const chiffreAffairesGlobal = totalCommandes + totalVentes;
+
+        // ✅ CORRECTION: Total des commissions (si la colonne existe)
+        let totalCommissions = 0;
+        let netAReverser = 0;
+
+        if (hasMontantCommission) {
+          const commissions = await db.select<any[]>(`
+            SELECT COALESCE(SUM(montant_commission), 0) as total
+            FROM decomptes
+          `);
+          totalCommissions = Number(commissions[0]?.total || 0);
+        }
+
+        // Net à reverser (si les colonnes existent)
+        if (hasMontantVente && hasMontantCommission) {
+          const net = await db.select<any[]>(`
+            SELECT COALESCE(SUM(montant_vente - montant_commission), 0) as total
+            FROM decomptes
+          `);
+          netAReverser = Number(net[0]?.total || 0);
+        } else if (hasMontantVente) {
+          const ventesRevendeur = await db.select<any[]>(`
+            SELECT COALESCE(SUM(montant_vente), 0) as total
+            FROM decomptes
+          `);
+          netAReverser = Number(ventesRevendeur[0]?.total || 0);
+        }
+
+        // Encaissements reçus
         const encaissements = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant), 0) as total FROM reglements
+          SELECT COALESCE(SUM(montant), 0) as total
+          FROM reglements
         `);
-        
+
+        // Factures impayées
         const facturesImpayees = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant_ttc), 0) as total 
-          FROM factures 
+          SELECT COALESCE(SUM(montant_ttc), 0) as total
+          FROM factures
           WHERE statut IN ('EN_ATTENTE', 'PARTIELLEMENT_REGLEE')
         `);
 
-        // Statistiques revendeurs
+        // Nombre de commandes revendeur
         const commandesRevendeur = await db.select<any[]>(`
-          SELECT COUNT(*) as total FROM commandes WHERE type_commande = 'REVENDEUR'
+          SELECT COUNT(*) as total
+          FROM commandes
+          WHERE UPPER(type_commande) = 'REVENDEUR'
+          AND statut != 'ANNULEE'
         `);
-        
+
+        // Stock central
+        const stockCentral = await db.select<any[]>(`
+          SELECT COALESCE(SUM(qte_stock), 0) as total
+          FROM products
+          WHERE est_supprime = 0
+        `);
+
+        // Stock revendeur
         const stockRevendeur = await db.select<any[]>(`
-          SELECT COALESCE(SUM(qte_stock), 0) as total FROM produits_revendeur
+          SELECT COALESCE(SUM(qte_stock), 0) as total
+          FROM stock_revendeur
         `);
 
         setStats({
-          clients: clients[0]?.total || 0,
-          produits: produits[0]?.total || 0,
-          commandes: commandes[0]?.total || 0,
-          ventes: ventes[0]?.total || 0,
-          factures: factures[0]?.total || 0,
-          chiffreAffaires: ca[0]?.total || 0,
-          encaissements: encaissements[0]?.total || 0,
-          resteARecouvrer: facturesImpayees[0]?.total || 0,
-          commandesRevendeur: commandesRevendeur[0]?.total || 0,
-          stockRevendeur: stockRevendeur[0]?.total || 0
+          clients: Number(clients[0]?.total || 0),
+          revendeurs: Number(revendeurs[0]?.total || 0),
+          produits: Number(produits[0]?.total || 0),
+          commandes: Number(commandes[0]?.total || 0),
+          ventes: Number(ventes[0]?.total || 0),
+          decomptes: Number(decomptes[0]?.total || 0),
+          factures: Number(factures[0]?.total || 0),
+          chiffreAffaires: chiffreAffairesGlobal,
+          commissions: totalCommissions,
+          netAReverser: netAReverser,
+          encaissements: Number(encaissements[0]?.total || 0),
+          resteARecouvrer: Number(facturesImpayees[0]?.total || 0),
+          commandesRevendeur: Number(commandesRevendeur[0]?.total || 0),
+          stockCentral: Number(stockCentral[0]?.total || 0),
+          stockRevendeur: Number(stockRevendeur[0]?.total || 0)
         });
 
-        const lastVentes = await db.select<any[]>(`
-          SELECT 
-            v.code_vente,
-            v.date_vente,
-            v.montant_ttc,
-            v.type_vente,
-            v.statut,
-            cl.NomComplet as client_nom,
-            cl.Societe as client_societe,
-            cl.Tel as client_tel
-          FROM ventes v
-          LEFT JOIN clients cl ON v.idClient = cl.idClient
-          ORDER BY v.date_vente DESC
-          LIMIT 10
-        `);
-        setRecentVentes(lastVentes || []);
+        // ✅ CORRECTION: Derniers décomptes (avec gestion des colonnes manquantes)
+        let lastDecomptesQuery = `
+          SELECT
+            d.idDecompte,
+            d.code_decompte,
+            d.date_decompte,
+            c.NomComplet
+        `;
 
+        if (hasMontantVente) {
+          lastDecomptesQuery += `, d.montant_vente`;
+        } else {
+          lastDecomptesQuery += `, 0 as montant_vente`;
+        }
+
+        if (hasMontantCommission) {
+          lastDecomptesQuery += `, d.montant_commission`;
+        } else {
+          lastDecomptesQuery += `, 0 as montant_commission`;
+        }
+
+        lastDecomptesQuery += `
+          FROM decomptes d
+          INNER JOIN clients c ON c.idClient = d.idClient
+          ORDER BY d.idDecompte DESC
+          LIMIT 10
+        `;
+
+        const lastDecomptes = await db.select<any[]>(lastDecomptesQuery);
+        setRecentDecomptes(lastDecomptes || []);
+
+        // Dernières commandes
         const lastCommandes = await db.select<any[]>(`
-          SELECT 
+          SELECT
             c.idCommande,
             c.code_commande,
-            datetime(c.date_commande, 'localtime') as date_commande,
+            c.date_commande,
             c.montant_ttc,
             c.statut,
             c.type_commande,
             cl.NomComplet as client_nom,
-            cl.Societe as client_societe,
-            cl.TypeClient as client_type
+            cl.Societe as client_societe
           FROM commandes c
-          LEFT JOIN clients cl ON c.idClient = cl.idClient
+          LEFT JOIN clients cl ON cl.idClient = c.idClient
           ORDER BY c.idCommande DESC
           LIMIT 5
         `);
         setRecentCommandes(lastCommandes || []);
 
+        // Dernières ventes
+        const lastVentes = await db.select<any[]>(`
+          SELECT
+            v.code_vente,
+            v.date_vente,
+            v.montant_ttc,
+            v.type_vente,
+            c.NomComplet as client_nom,
+            c.Societe as client_societe
+          FROM ventes v
+          LEFT JOIN clients c ON c.idClient = v.idClient
+          ORDER BY v.idVente DESC
+          LIMIT 10
+        `);
+        setRecentVentes(lastVentes || []);
+
       } catch (error) {
-        console.error('Erreur chargement dashboard:', error);
+        console.error("Erreur dashboard", error);
         notifications.show({
-          title: 'Erreur',
-          message: 'Erreur lors du chargement des statistiques',
-          color: 'red',
+          title: "Erreur",
+          message: "Impossible de charger les statistiques",
+          color: "red"
         });
       } finally {
         setLoading(false);
@@ -174,8 +325,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
   }, []);
 
   const benefice = stats.encaissements - stats.chiffreAffaires;
-  const tauxRecouvrement = stats.chiffreAffaires > 0 
-    ? (stats.encaissements / stats.chiffreAffaires) * 100 
+  const tauxRecouvrement = stats.chiffreAffaires > 0
+    ? (stats.encaissements / stats.chiffreAffaires) * 100
     : 0;
 
   const quickLinks = [
@@ -236,7 +387,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        {/* HEADER ATTRACTIF */}
+        {/* HEADER ATTRACTIF - identique à votre version */}
         <Paper
           p="xl"
           radius="lg"
@@ -246,6 +397,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             overflow: 'hidden'
           }}
         >
+          {/* ... contenu identique ... */}
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
@@ -268,7 +420,6 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             </Button>
           </Flex>
 
-          {/* Cartes statistiques principales */}
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
@@ -317,7 +468,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </SimpleGrid>
         </Paper>
 
-        {/* LIENS RAPIDES */}
+        {/* LIENS RAPIDES - identique */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group gap="xs" mb="md">
             <ThemeIcon color="blue" variant="light" size="sm">
@@ -358,7 +509,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </SimpleGrid>
         </Card>
 
-        {/* KPI CARDS */}
+        {/* KPI CARDS - identique */}
         <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md">
           <Card withBorder radius="md" p="sm">
             <Group justify="space-between">
@@ -421,7 +572,33 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </Card>
         </SimpleGrid>
 
-        {/* STATISTIQUES FINANCIÈRES */}
+        {/* SECTION DÉCOMPTES REVENDEURS */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Group gap="xs" mb="md">
+            <ThemeIcon color="violet" variant="light" size="sm">
+              <IconFileInvoice size={16} />
+            </ThemeIcon>
+            <Text fw={600}>📊 Suivi Revendeurs</Text>
+            <Badge color="violet" variant="light">Décomptes</Badge>
+          </Group>
+          <Divider mb="md" />
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+            <Card withBorder radius="md" p="sm">
+              <Text size="xs" c="dimmed">Nombre de décomptes</Text>
+              <Text fw={700} size="xl">{stats.decomptes}</Text>
+            </Card>
+            <Card withBorder radius="md" p="sm">
+              <Text size="xs" c="dimmed">Total commissions</Text>
+              <Text fw={700} size="xl" c="orange">{formatCurrency(stats.commissions)}</Text>
+            </Card>
+            <Card withBorder radius="md" p="sm">
+              <Text size="xs" c="dimmed">Net à reverser</Text>
+              <Text fw={700} size="xl" c="green">{formatCurrency(stats.netAReverser)}</Text>
+            </Card>
+          </SimpleGrid>
+        </Card>
+
+        {/* STATISTIQUES FINANCIÈRES - identique */}
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           <Card withBorder radius="lg" shadow="sm" p="lg">
             <Group gap="xs" mb="md">
@@ -436,7 +613,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             <Divider mb="md" />
             <Stack gap="md">
               <Group justify="space-between">
-                <Text size="sm" c="dimmed">Chiffre d'affaires (ventes)</Text>
+                <Text size="sm" c="dimmed">Chiffre d'affaires (Commandes + Ventes)</Text>
                 <Text fw={700} c="blue">{formatCurrency(stats.chiffreAffaires)}</Text>
               </Group>
               <Group justify="space-between">
@@ -539,6 +716,42 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </ScrollArea>
         </Card>
 
+        {/* DERNIERS DÉCOMPTES */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Group gap="xs" mb="md">
+            <ThemeIcon color="grape" variant="light" size="sm">
+              <IconPercentage size={16} />  {/* ✅ Remplacer IconCommission */}
+            </ThemeIcon>
+            <Text fw={600}>📋 Derniers décomptes revendeurs</Text>
+            <Badge color="grape" variant="light">10 derniers</Badge>
+          </Group>
+          <Divider mb="md" />
+          <ScrollArea h={250}>
+            <Stack gap="xs">
+              {recentDecomptes.length === 0 ? (
+                <Text ta="center" size="sm" c="dimmed">Aucun décompte récent</Text>
+              ) : (
+                recentDecomptes.map((d, i) => (
+                  <Group key={i} justify="space-between" wrap="wrap" p="xs" style={{ borderBottom: '1px solid #e9ecef' }}>
+                    <div>
+                      <Text size="sm" fw={500}>{d.code_decompte}</Text>
+                      <Text size="xs" c="dimmed">{d.NomComplet || 'Revendeur inconnu'}</Text>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      {d.montant_vente !== undefined && (
+                        <Text size="xs" c="dimmed">Ventes: {formatCurrency(d.montant_vente || 0)}</Text>
+                      )}
+                      {d.montant_commission !== undefined && (
+                        <Text size="xs" c="orange">Commission: {formatCurrency(d.montant_commission || 0)}</Text>
+                      )}
+                    </div>
+                  </Group>
+                ))
+              )}
+            </Stack>
+          </ScrollArea>
+        </Card>
+
         {/* MODAL INSTRUCTIONS */}
         <Modal
           opened={infoModalOpen}
@@ -546,11 +759,6 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           title="📋 Instructions d'utilisation"
           size="md"
           centered
-          styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-            title: { color: 'white', fontWeight: 600 },
-            body: { padding: '20px' }
-          }}
         >
           <Stack gap="md">
             <Text fw={600} size="sm">Bienvenue dans votre application de gestion commerciale !</Text>
@@ -563,10 +771,11 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             <Text size="sm">5. <strong>Produits</strong> - Gérez votre catalogue et les stocks</Text>
             <Text size="sm">6. <strong>Factures</strong> - Générez des factures et suivez les paiements</Text>
             <Text size="sm">7. <strong>Règlements</strong> - Enregistrez les paiements clients</Text>
+            <Text size="sm">8. <strong>Décomptes</strong> - Suivez les commissions des revendeurs</Text>
 
             <Divider />
             <Text size="xs" c="dimmed" ta="center">
-              Version 2.0.0 - Gestion Commerciale Pro
+              Version 3.0.0 - Gestion Commerciale Pro
             </Text>
           </Stack>
         </Modal>

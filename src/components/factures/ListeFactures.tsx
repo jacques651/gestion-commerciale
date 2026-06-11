@@ -3,14 +3,19 @@ import React, { useState, useMemo } from 'react';
 import {
   Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
   Pagination, Select, Grid, Box, Loader, Paper, Flex, ThemeIcon, SimpleGrid,
-  TextInput, Modal, Divider, Avatar} from '@mantine/core';
+  TextInput, Modal, Divider, Avatar
+} from '@mantine/core';
 import {
   IconEye, IconPrinter, IconDownload, IconSearch, IconRefresh, IconX,
   IconFileInvoice, IconCalendar, IconBuildingStore,
-  IconTruck, IconCurrencyFrank} from '@tabler/icons-react';
+  IconTruck, IconCurrencyFrank
+} from '@tabler/icons-react';
 import { useFactures } from '../../hooks/useFactures';
+import { factureRepository } from '../../database/repositories/factureRepository';
+import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 import { FactureStandard } from './FactureStandard';
 import { FactureRevendeur } from './FactureRevendeur';
+import { notifications } from '@mantine/notifications';
 
 export const ListeFactures: React.FC = () => {
   const { factures, loading, refresh } = useFactures();
@@ -22,6 +27,7 @@ export const ListeFactures: React.FC = () => {
   const [dateFin, setDateFin] = useState<string | null>(null);
   const [selectedFacture, setSelectedFacture] = useState<any>(null);
   const [factureModalOpened, setFactureModalOpened] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -32,24 +38,125 @@ export const ListeFactures: React.FC = () => {
     return num.toLocaleString('fr-FR');
   };
 
-  const getTypeFactureLabel = (facture: any) => {
-    const type = facture.type_commande || facture.type_facture || facture.commande?.type_commande;
-    if (type === 'REVENDEUR' || type === 'revendeur') return 'Revendeur';
+  // ✅ Déterminer le type de facture
+  const getTypeFactureLabel = (facture: any): string => {
+    // Si c'est une facture revendeur (provient de factures_revendeur)
+    if (facture.idFactureRevendeur !== undefined) {
+      return 'Revendeur';
+    }
+    // Si c'est une facture standard avec type_commande
+    if (facture.type_commande === 'REVENDEUR') {
+      return 'Revendeur';
+    }
     return 'Standard';
   };
 
-  const isRevendeur = (facture: any): boolean => {
-    const type = facture.type_commande || facture.type_facture || facture.commande?.type_commande;
-    return type === 'REVENDEUR' || type === 'revendeur';
+  // ✅ Vérifier si c'est une facture revendeur
+  const isRevendeurFacture = (facture: any): boolean => {
+    return facture.idFactureRevendeur !== undefined || facture.type_commande === 'REVENDEUR';
   };
 
+  // ✅ Charger les détails selon le type
+  const handleViewFacture = async (facture: any) => {
+    try {
+      setLoadingDetails(true);
+      
+      let completeFacture = null;
+      
+      if (isRevendeurFacture(facture)) {
+        // Facture revendeur
+        const factureId = facture.idFactureRevendeur;
+        if (factureId) {
+          completeFacture = await factureRevendeurRepository.getById(factureId);
+        }
+      } else {
+        // Facture standard
+        const factureId = facture.idFacture;
+        if (factureId) {
+          completeFacture = await factureRepository.getById(factureId);
+        }
+      }
+      
+      if (completeFacture) {
+        setSelectedFacture(completeFacture);
+        setFactureModalOpened(true);
+      } else {
+        // Fallback : afficher une notification d'erreur
+        notifications.show({
+          title: 'Erreur',
+          message: 'Impossible de charger les détails de la facture',
+          color: 'red'
+        });
+      }
+    } catch (error) {
+      console.error('Erreur chargement facture:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: error instanceof Error ? error.message : 'Erreur lors du chargement',
+        color: 'red'
+      });
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleDownload = async (facture: any) => {
+    try {
+      let completeFacture = null;
+      
+      if (isRevendeurFacture(facture)) {
+        const factureId = facture.idFactureRevendeur;
+        if (factureId) {
+          completeFacture = await factureRevendeurRepository.getById(factureId);
+        }
+      } else {
+        const factureId = facture.idFacture;
+        if (factureId) {
+          completeFacture = await factureRepository.getById(factureId);
+        }
+      }
+      
+      if (completeFacture) {
+        const dataStr = JSON.stringify(completeFacture, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        const codeFacture = completeFacture.code_facture || completeFacture.code_facture_revendeur || 'facture';
+        const exportFileDefaultName = `${codeFacture}.json`;
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+        
+        notifications.show({
+          title: 'Succès',
+          message: 'Facture téléchargée avec succès',
+          color: 'green'
+        });
+      }
+    } catch (error) {
+      console.error('Erreur téléchargement:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de télécharger la facture',
+        color: 'red'
+      });
+    }
+  };
+
+  // ✅ Extraire les dates disponibles pour les filtres
   const datesDisponibles = useMemo(() => {
-    const dates = factures.map(facture => {
-      const dateStr = facture.date_facture || facture.DateFacture;
-      if (!dateStr) return null;
-      const date = new Date(dateStr);
-      return isNaN(date.getTime()) ? null : date.toLocaleDateString('fr-FR');
-    }).filter(date => date !== null);
+    const dates = factures
+      .map(facture => {
+        const dateStr = facture.date_facture;
+        if (!dateStr) return null;
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? null : date.toLocaleDateString('fr-FR');
+      })
+      .filter(date => date !== null);
 
     const uniqueDates = [...new Set(dates)];
     return uniqueDates.sort((a, b) => {
@@ -69,15 +176,18 @@ export const ListeFactures: React.FC = () => {
     return isNaN(date.getTime()) ? null : date;
   };
 
+  // ✅ Filtrer les factures
   const filteredFactures = useMemo(() => {
     let filtered = [...factures];
 
+    // Filtre par nom du client
     if (searchClient) {
       filtered = filtered.filter(facture =>
-        (facture.client_nom || facture.nom_client || '').toLowerCase().includes(searchClient.toLowerCase())
+        (facture.NomComplet || '').toLowerCase().includes(searchClient.toLowerCase())
       );
     }
 
+    // Filtre par type
     if (typeFacture && typeFacture !== 'all') {
       filtered = filtered.filter(facture => {
         const type = getTypeFactureLabel(facture).toLowerCase();
@@ -85,12 +195,13 @@ export const ListeFactures: React.FC = () => {
       });
     }
 
+    // Filtre par date
     const dateDebutObj = stringToDate(dateDebut);
     const dateFinObj = stringToDate(dateFin);
 
     if (dateDebutObj || dateFinObj) {
       filtered = filtered.filter(facture => {
-        const dateFacture = new Date(facture.date_facture || facture.DateFacture);
+        const dateFacture = new Date(facture.date_facture);
 
         if (dateDebutObj) {
           const debut = new Date(dateDebutObj);
@@ -119,19 +230,10 @@ export const ListeFactures: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const handleViewFacture = (facture: any) => {
-    setSelectedFacture(facture);
-    setFactureModalOpened(true);
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // Statistiques
+  // ✅ Statistiques
   const stats = {
     total: factures.length,
-    montantTotal: factures.reduce((sum, f) => sum + (f.montant_ttc || f.MontantTTC || 0), 0),
+    montantTotal: factures.reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
     revendeurs: factures.filter(f => getTypeFactureLabel(f) === 'Revendeur').length,
     standards: factures.filter(f => getTypeFactureLabel(f) === 'Standard').length
   };
@@ -190,7 +292,7 @@ export const ListeFactures: React.FC = () => {
           </Flex>
 
           {/* Cartes statistiques */}
-          <SimpleGrid cols={4} spacing="md" mt="xl">
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
                 <ThemeIcon color="white" variant="light" size="lg">
@@ -231,7 +333,7 @@ export const ListeFactures: React.FC = () => {
                 </ThemeIcon>
                 <div>
                   <Text c="white" size="xs">Montant total</Text>
-                  <Text c="white" fw={700} size="xl">{formatMontant(stats.montantTotal)} F</Text>
+                  <Text c="white" fw={700} size="xl">{formatMontant(stats.montantTotal)} FCFA</Text>
                 </div>
               </Group>
             </Card>
@@ -250,7 +352,7 @@ export const ListeFactures: React.FC = () => {
             </Button>
           </Group>
 
-          <Grid >
+          <Grid>
             <Grid.Col span={4}>
               <TextInput
                 label="Nom du client"
@@ -290,17 +392,17 @@ export const ListeFactures: React.FC = () => {
               />
             </Grid.Col>
             <Grid.Col span={2}>
-              <Button
-                fullWidth
-                mt="auto"
+              <Select
+                label="Date de fin"
+                placeholder="Sélectionner"
+                value={dateFin}
+                onChange={setDateFin}
+                data={datesDisponibles}
                 size="md"
-                variant="filled"
-                color="adminBlue"
-                onClick={() => setCurrentPage(1)}
-                leftSection={<IconSearch size={16} />}
-              >
-                Rechercher
-              </Button>
+                clearable
+                searchable
+                leftSection={<IconCalendar size={14} />}
+              />
             </Grid.Col>
           </Grid>
         </Card>
@@ -314,77 +416,107 @@ export const ListeFactures: React.FC = () => {
                 <Title order={3} size="h4">Liste des factures</Title>
                 <Badge size="lg" variant="light" color="blue">{filteredFactures.length} factures</Badge>
               </Group>
-              <Button variant="subtle" rightSection={<IconDownload size={16} />} size="sm">
-                Exporter
-              </Button>
             </Flex>
           </Paper>
 
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',}}>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
                   <Table.Th w={60}>N°</Table.Th>
                   <Table.Th>Client</Table.Th>
                   <Table.Th w={120}>Date facture</Table.Th>
                   <Table.Th w={110}>Type</Table.Th>
-                  <Table.Th w={150}>Montant HT</Table.Th>
-                  <Table.Th w={150}>CodeFacture</Table.Th>
+                  <Table.Th w={150}>Montant TTC</Table.Th>
+                  <Table.Th w={150}>Code Facture</Table.Th>
                   <Table.Th ta="center" w={160}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedFactures.map((facture, index) => {
+                {paginatedFactures.map((facture: any, index) => {
                   const typeLabel = getTypeFactureLabel(facture);
+                  const uniqueKey = facture.idFacture || facture.idFactureRevendeur;
+                  const clientName = facture.NomComplet || '-';
+                  const codeFacture = facture.code_facture || '-';
+
                   return (
-                    <Table.Tr key={facture.idFacture || facture.id}>
-                      <Table.Td fw={500}>{index + 1}</Table.Td>
+                    <Table.Tr key={uniqueKey}>
+                      <Table.Td fw={500}>
+                        {(currentPage - 1) * itemsPerPage + index + 1}
+                      </Table.Td>
+
                       <Table.Td>
                         <Group gap="sm">
                           <Avatar size="md" radius="xl" color="blue">
-                            {(facture.client_nom || facture.nom_client || 'C').charAt(0).toUpperCase()}
+                            {clientName.charAt(0).toUpperCase()}
                           </Avatar>
-                          <Text fw={500} size="sm">{facture.client_nom || facture.nom_client || '-'}</Text>
+                          <Text fw={500} size="sm">
+                            {clientName}
+                          </Text>
                         </Group>
                       </Table.Td>
+
                       <Table.Td>
-                        {new Date(facture.date_facture || facture.DateFacture).toLocaleDateString('fr-FR')}
+                        {facture.date_facture
+                          ? new Date(facture.date_facture).toLocaleDateString("fr-FR")
+                          : "-"}
                       </Table.Td>
+
                       <Table.Td>
                         <Badge
                           size="md"
-                          color={typeLabel === 'Revendeur' ? 'green' : 'blue'}
+                          color={typeLabel === "Revendeur" ? "green" : "blue"}
                           variant="light"
-                          leftSection={typeLabel === 'Revendeur' ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+                          leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
                         >
                           {typeLabel}
                         </Badge>
                       </Table.Td>
+
                       <Table.Td>
-                        <Text fw={600} c="adminBlue">{formatMontant(facture.montant_ht || facture.MontantHT)} FCFA</Text>
+                        <Text fw={600} c="blue">
+                          {formatMontant(facture.montant_ttc)} FCFA
+                        </Text>
                       </Table.Td>
+
                       <Table.Td>
-                        <Text fw={500} size="sm">{facture.code_facture || facture.CodeFacture}</Text>
+                        <Text fw={500} size="sm">
+                          {codeFacture}
+                        </Text>
                       </Table.Td>
+
                       <Table.Td ta="center">
                         <Group gap="xs" justify="center">
                           <Tooltip label="Voir détails">
                             <ActionIcon
                               variant="light"
-                              color="adminBlue"
+                              color="blue"
                               size="lg"
                               onClick={() => handleViewFacture(facture)}
+                              loading={loadingDetails}
                             >
                               <IconEye size={18} />
                             </ActionIcon>
                           </Tooltip>
+
                           <Tooltip label="Imprimer">
-                            <ActionIcon variant="light" color="teal" size="lg">
+                            <ActionIcon
+                              variant="light"
+                              color="teal"
+                              size="lg"
+                              onClick={handlePrint}
+                            >
                               <IconPrinter size={18} />
                             </ActionIcon>
                           </Tooltip>
+
                           <Tooltip label="Télécharger">
-                            <ActionIcon variant="light" color="blue" size="lg">
+                            <ActionIcon
+                              variant="light"
+                              color="grape"
+                              size="lg"
+                              onClick={() => handleDownload(facture)}
+                            >
                               <IconDownload size={18} />
                             </ActionIcon>
                           </Tooltip>
@@ -419,7 +551,7 @@ export const ListeFactures: React.FC = () => {
       <Modal
         opened={factureModalOpened}
         onClose={() => setFactureModalOpened(false)}
-        title={`Facture ${selectedFacture?.code_facture || selectedFacture?.CodeFacture || ''}`}
+        title={`Facture ${selectedFacture?.code_facture || ''}`}
         size="xl"
         fullScreen
       >
@@ -435,7 +567,7 @@ export const ListeFactures: React.FC = () => {
               </Button>
               <Button
                 variant="filled"
-                color="adminBlue"
+                color="blue"
                 leftSection={<IconPrinter size={16} />}
                 onClick={handlePrint}
               >
@@ -445,7 +577,11 @@ export const ListeFactures: React.FC = () => {
 
             <Divider mb="md" />
 
-            {isRevendeur(selectedFacture) ? (
+            {loadingDetails ? (
+              <Flex justify="center" py={60}>
+                <Loader size="xl" />
+              </Flex>
+            ) : isRevendeurFacture(selectedFacture) ? (
               <FactureRevendeur facture={selectedFacture} />
             ) : (
               <FactureStandard facture={selectedFacture} />

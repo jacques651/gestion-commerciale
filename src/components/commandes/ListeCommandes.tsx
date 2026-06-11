@@ -1,325 +1,246 @@
-// src/components/commandes/ListeCommandes.tsx
-import React, { useState, useMemo } from 'react';
+// src/components/commandes/ListeCommande.tsx
+import { useState, useMemo } from 'react';
 import {
-  Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
-  Pagination, Modal, Divider, TextInput, Select, Grid,
-  Paper, Box, SimpleGrid, Loader, Alert, ThemeIcon, Flex, Avatar} from '@mantine/core';
+  Table,
+  Badge,
+  Button,
+  Group,
+  Text,
+  Modal,
+  Stack,
+  Paper,
+  Title,
+  Card,
+  ScrollArea,
+  ActionIcon,
+  Tooltip,
+  Select,
+  SimpleGrid,
+  ThemeIcon,
+  Flex,
+  Avatar,
+  Alert,
+  Loader,
+  Pagination,
+  TextInput
+} from '@mantine/core';
+import { DateInput } from '@mantine/dates';
+import '@mantine/dates/styles.css';
+import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
+import { FormulaireCommande } from './FormulaireCommande';
 import {
-  IconSearch, IconPlus, IconDownload, IconReceipt,
-  IconEdit, IconEye, IconPrinter, IconTrash, IconX, IconAlertCircle,
-  IconShoppingCart, IconPackage, IconTruck, IconBuildingStore, IconCalendar,
-  IconCurrencyFrank, IconFileInvoice
+  IconEye,
+  IconX,
+  IconCheck,
+  IconReceipt,
+  IconPackage,
+  IconRefresh,
+  IconShoppingBag,
+  IconCalendar,
+  IconAlertCircle,
+  IconPlus,
+  IconSearch,
+  IconFilter
 } from '@tabler/icons-react';
 import { useCommandes } from '../../hooks/useCommandes';
-import { useFactures } from '../../hooks/useFactures';
-import { FormulaireCommande } from './FormulaireCommande';
-import { FactureStandard } from '../factures/FactureStandard';
-import { FactureRevendeur } from '../factures/FactureRevendeur';
-import { notifications } from '@mantine/notifications';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
-export const ListeCommandes: React.FC = () => {
-  const { commandes, loading, refresh, getCommandeById, cancelCommande, deleteCommande } = useCommandes();
+interface CommandeDetail {
+  idDetail: number;
+  idProduit: number;
+  qte_commande: number;
+  prix_unitaire_vente: number;
+  code_produit: string;
+  designation: string;
+}
 
-  const { createFacture, getFactureById } = useFactures();
+interface CommandeComplete {
+  idCommande: number;
+  code_commande: string;
+  idClient: number;
+  type_commande: string;
+  date_commande: string;
+  montant_ht: number;
+  montant_ttc: number;
+  code_facture?: string;
+  statut: string;
+  NomComplet: string;
+  Societe: string;
+  Tel: string;
+  details: CommandeDetail[];
+}
 
-  // États
-  const [modalOpened, setModalOpened] = useState(false);
-  const [detailsModalOpened, setDetailsModalOpened] = useState(false);
-  const [factureModalOpened, setFactureModalOpened] = useState(false);
-  const [cancelModalOpened, setCancelModalOpened] = useState(false);
-  const [deleteModalOpened, setDeleteModalOpened] = useState(false);
-  const [selectedCommande, setSelectedCommande] = useState<any>(null);
-  const [factureData, setFactureData] = useState<any>(null);
-  const [loadingFacture, setLoadingFacture] = useState(false);
-  const [loadingAction, setLoadingAction] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchNomClient, setSearchNomClient] = useState('');
-  const [typeCommande, setTypeCommande] = useState<string | null>(null);
+export function ListeCommande() {
+  const [selectedCommande, setSelectedCommande] = useState<CommandeComplete | null>(null);
+  const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false);
+  const [cancelOpened, { open: openCancel, close: closeCancel }] = useDisclosure(false);
+  const [commandeToCancel, setCommandeToCancel] = useState<number | null>(null);
+  const [formulaireOpened, setFormulaireOpened] = useState(false);
+
+  // États des filtres
+  const [statusFilter, setStatusFilter] = useState<string | null>('all');
+  const [typeFilter, setTypeFilter] = useState<string | null>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [dateDebut, setDateDebut] = useState<string | null>(null);
   const [dateFin, setDateFin] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const itemsPerPage = 10;
 
-  // Formatage
-  const formatMontant = (value: any): string => {
-    if (value === undefined || value === null) return '0';
-    const num = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(num)) return '0';
-    return num.toLocaleString('fr-FR');
-  };
+  const {
+    commandes,
+    loading,
+    updateStatus,
+    cancelCommande,
+    getCommandeById,
+    refresh
+  } = useCommandes();
 
-  // Obtenir toutes les dates uniques des commandes
-  const datesDisponibles = useMemo(() => {
-    const dates = commandes.map(commande => {
-      const dateStr = commande.DateCommande || commande.date_commande;
-      if (!dateStr) return null;
-      const date = new Date(dateStr);
-      return isNaN(date.getTime()) ? null : date.toLocaleDateString('fr-FR');
-    }).filter(date => date !== null);
-
-    const uniqueDates = [...new Set(dates)];
-    return uniqueDates.sort((a, b) => {
-      const dateA = new Date(a.split('/').reverse().join('-'));
-      const dateB = new Date(b.split('/').reverse().join('-'));
-      return dateA.getTime() - dateB.getTime();
-    });
-  }, [commandes]);
-
-  const getCommandeDate = (commande: any): Date | null => {
-    const dateStr = commande.DateCommande || commande.date_commande;
-    if (!dateStr) return null;
-    const date = new Date(dateStr);
-    return isNaN(date.getTime()) ? null : date;
-  };
-
-  const stringToDate = (dateStr: string | null): Date | null => {
-    if (!dateStr) return null;
-    const parts = dateStr.split('/');
-    if (parts.length !== 3) return null;
-    const date = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-    return isNaN(date.getTime()) ? null : date;
-  };
-
-  const getClientDisplayName = (commande: any) => {
-    if (commande.client_nom) return commande.client_nom;
-    if (commande.client_societe) return commande.client_societe;
-    if (commande.NomComplet) return commande.NomComplet;
-    if (commande.Societe) return commande.Societe;
-    return 'Client sans nom';
-  };
-
-  const getTypeCommandeLabel = (commande: any) => {
-    const type = commande.type_commande || commande.client_type;
-    if (type === 'REVENDEUR' || type === 'revendeur') return 'Revendeur';
-    return 'Standard';
-  };
-
-  const isRevendeur = (commande: any): boolean => {
-    const type = commande.type_commande || commande.client_type;
-    return type === 'REVENDEUR' || type === 'revendeur';
-  };
-
-  // Filtrage des commandes
+  // Filtrer les commandes
   const filteredCommandes = useMemo(() => {
     let filtered = [...commandes];
 
-    if (searchNomClient) {
-      filtered = filtered.filter(commande =>
-        getClientDisplayName(commande).toLowerCase().includes(searchNomClient.toLowerCase())
+    // Filtre par statut
+    if (statusFilter && statusFilter !== 'all') {
+      filtered = filtered.filter(c => c.statut === statusFilter);
+    }
+
+    // Filtre par type
+    if (typeFilter && typeFilter !== 'all') {
+      filtered = filtered.filter(c => c.type_commande === typeFilter);
+    }
+
+    // Filtre par recherche (code commande ou client)
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(c =>
+        c.code_commande?.toLowerCase().includes(term) ||
+        c.NomComplet?.toLowerCase().includes(term) ||
+        c.Societe?.toLowerCase().includes(term)
       );
     }
 
-    if (typeCommande && typeCommande !== 'all') {
-      filtered = filtered.filter(commande => {
-        const type = getTypeCommandeLabel(commande).toLowerCase();
-        return type === typeCommande.toLowerCase();
-      });
+    // Filtre par date
+    if (dateDebut) {
+      const debut = new Date(dateDebut);
+      debut.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(c => new Date(c.date_commande) >= debut);
     }
 
-    const dateDebutObj = stringToDate(dateDebut);
-    const dateFinObj = stringToDate(dateFin);
-
-    if (dateDebutObj || dateFinObj) {
-      filtered = filtered.filter(commande => {
-        const commandeDate = getCommandeDate(commande);
-        if (!commandeDate) return false;
-
-        if (dateDebutObj) {
-          const debut = new Date(dateDebutObj);
-          debut.setHours(0, 0, 0, 0);
-          if (commandeDate < debut) return false;
-        }
-
-        if (dateFinObj) {
-          const fin = new Date(dateFinObj);
-          fin.setHours(23, 59, 59, 999);
-          if (commandeDate > fin) return false;
-        }
-
-        return true;
-      });
+    if (dateFin) {
+      const fin = new Date(dateFin);
+      fin.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(c => new Date(c.date_commande) <= fin);
     }
 
     return filtered;
-  }, [commandes, searchNomClient, typeCommande, dateDebut, dateFin]);
+  }, [commandes, statusFilter, typeFilter, searchTerm, dateDebut, dateFin]);
 
-  const resetFilters = () => {
-    setSearchNomClient('');
-    setTypeCommande(null);
-    setDateDebut(null);
-    setDateFin(null);
-    setCurrentPage(1);
-  };
-
-  const handleSearch = () => {
-    setCurrentPage(1);
-  };
-
-  const handleCancelCommande = async () => {
-    if (!selectedCommande) return;
-    setLoadingAction(true);
-    try {
-      await cancelCommande(selectedCommande.idCommande);
-      notifications.show({
-        title: 'Succès',
-        message: `Commande ${selectedCommande.code_commande} annulée avec succès`,
-        color: 'orange',
-      });
-      setCancelModalOpened(false);
-      refresh();
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Erreur lors de l\'annulation de la commande',
-        color: 'red',
-      });
-    } finally {
-      setLoadingAction(false);
-    }
-  };
-
-  const handleDeleteCommande = async () => {
-    if (!selectedCommande) return;
-    setLoadingAction(true);
-    try {
-      await deleteCommande(selectedCommande.idCommande);
-      notifications.show({
-        title: 'Succès',
-        message: `Commande ${selectedCommande.code_commande} supprimée avec succès`,
-        color: 'green',
-      });
-      setDeleteModalOpened(false);
-      refresh();
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Erreur lors de la suppression de la commande',
-        color: 'red',
-      });
-    } finally {
-      setLoadingAction(false);
-    }
-  };
-
-  const handleViewFacture = async (commande: any) => {
-    setLoadingFacture(true);
-    try {
-      const commandeComplete = await getCommandeById(commande.idCommande);
-      const existingFacture = commande.facture || commande.Facture;
-
-      if (existingFacture) {
-        const factureConstruite = {
-          ...existingFacture,
-          details: commandeComplete?.details || [],
-          client_nom: getClientDisplayName(commandeComplete || commande),
-          client_societe: commandeComplete?.client_societe || commande.client_societe,
-          client_tel: commandeComplete?.client_tel || commande.client_tel,
-          client_email: commandeComplete?.client_email || commande.client_email,
-          client_adresse: commandeComplete?.client_adresse || commande.client_adresse,
-          code_commande: commandeComplete?.code_commande || commande.code_commande,
-          date_commande: commandeComplete?.DateCommande || commande.DateCommande,
-        };
-        setFactureData(factureConstruite);
-        setSelectedCommande(commandeComplete || commande);
-        setFactureModalOpened(true);
-      } else {
-        notifications.show({
-          title: 'Information',
-          message: 'Aucune facture trouvée pour cette commande',
-          color: 'blue',
-        });
-      }
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger la facture',
-        color: 'red',
-      });
-    } finally {
-      setLoadingFacture(false);
-    }
-  };
-
-
-const handleGenerateFacture = async (commande: any) => {
-  setLoadingFacture(true);
-  try {
-    // Récupérer la commande complète
-    const commandeComplete = await getCommandeById(commande.idCommande);
-    
-    if (!commandeComplete) {
-      throw new Error('Impossible de charger les détails de la commande');
-    }
-    
-    // Créer la facture via le repository
-    const factureId = await createFacture(commande.idCommande);
-    
-    // Récupérer la facture créée
-    const factureComplete = await getFactureById(factureId);
-    
-    notifications.show({
-      title: 'Succès',
-      message: `Facture générée avec succès`,
-      color: 'green',
-    });
-    
-    setFactureData(factureComplete);
-    setSelectedCommande(commandeComplete);
-    setFactureModalOpened(true);
-    refresh();
-    
-  } catch (error: any) {
-    const errorMessage = error?.message || 'Erreur lors de la génération';
-    
-    // Vérifier si c'est une erreur de code dupliqué
-    if (errorMessage.includes('UNIQUE constraint')) {
-      notifications.show({
-        title: 'Information',
-        message: 'Une facture existe déjà pour cette commande',
-        color: 'blue',
-      });
-    } else {
-      notifications.show({
-        title: 'Erreur',
-        message: errorMessage,
-        color: 'red',
-      });
-    }
-  } finally {
-    setLoadingFacture(false);
-  }
-};
-
-  const handleViewDetails = async (commande: any) => {
-    try {
-      const fullDetails = await getCommandeById(commande.idCommande);
-      setSelectedCommande(fullDetails || commande);
-      setDetailsModalOpened(true);
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger les détails',
-        color: 'red',
-      });
-    }
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
+  // Pagination
   const totalPages = Math.ceil(filteredCommandes.length / itemsPerPage);
   const paginatedCommandes = filteredCommandes.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  // Statistiques
+  // Statistiques globales
   const stats = {
     total: commandes.length,
-    revendeurs: commandes.filter(c => getTypeCommandeLabel(c) === 'Revendeur').length,
-    standards: commandes.filter(c => getTypeCommandeLabel(c) === 'Standard').length,
-    totalMontant: commandes.reduce((sum, c) => sum + (c.MontantHT || c.montant_ht || 0), 0)
+    montantTotal: commandes.reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
+    livrees: commandes.filter(c => c.statut === 'LIVREE').length,
+    revendeurs: commandes.filter(c => c.type_commande === 'REVENDEUR').length,
+    enCours: commandes.filter(c => c.statut === 'EN_COURS').length,
+    annulees: commandes.filter(c => c.statut === 'ANNULEE').length
+  };
+
+  const resetFilters = () => {
+    setStatusFilter('all');
+    setTypeFilter('all');
+    setSearchTerm('');
+    setDateDebut(null);
+    setDateFin(null);
+    setCurrentPage(1);
+  };
+
+  const handleViewDetails = async (idCommande: number) => {
+    const commande = await getCommandeById(idCommande);
+    if (commande) {
+      setSelectedCommande(commande as CommandeComplete);
+      openDetails();
+    } else {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les détails de la commande',
+        color: 'red'
+      });
+    }
+  };
+
+  const handleUpdateStatus = async (idCommande: number, newStatus: string) => {
+    try {
+      await updateStatus(idCommande, newStatus);
+      await refresh();
+      notifications.show({
+        title: 'Succès',
+        message: `Commande marquée comme ${newStatus === 'LIVREE' ? 'livrée' : newStatus}`,
+        color: 'green'
+      });
+    } catch (err) {
+      console.error('Erreur mise à jour statut:', err);
+    }
+  };
+
+  const handleCancelCommande = async () => {
+    if (!commandeToCancel) return;
+
+    try {
+      await cancelCommande(commandeToCancel);
+      closeCancel();
+      setCommandeToCancel(null);
+      await refresh();
+      notifications.show({
+        title: 'Succès',
+        message: 'Commande annulée avec succès',
+        color: 'green'
+      });
+    } catch (err) {
+      console.error('Erreur annulation:', err);
+    }
+  };
+
+  const handleRefresh = async () => {
+    await refresh();
+    resetFilters();
+    notifications.show({
+      title: 'Actualisé',
+      message: 'La liste des commandes a été actualisée',
+      color: 'blue'
+    });
+  };
+
+  const getStatusBadge = (statut: string) => {
+    switch (statut) {
+      case 'CONFIRMEE':
+        return <Badge color="green" variant="light" size="sm">Confirmée</Badge>;
+      case 'EN_COURS':
+        return <Badge color="yellow" variant="light" size="sm">En cours</Badge>;
+      case 'LIVREE':
+        return <Badge color="blue" variant="light" size="sm">Livrée</Badge>;
+      case 'ANNULEE':
+        return <Badge color="red" variant="light" size="sm">Annulée</Badge>;
+      default:
+        return <Badge variant="light" size="sm">{statut}</Badge>;
+    }
+  };
+
+  const getTypeIcon = (type: string) => {
+    return type === 'REVENDEUR' ? <IconPackage size={16} /> : <IconReceipt size={16} />;
+  };
+
+  const getTypeLabel = (type: string) => {
+    return type === 'REVENDEUR' ? 'Revendeur' : 'Standard';
   };
 
   if (loading && commandes.length === 0) {
@@ -333,47 +254,44 @@ const handleGenerateFacture = async (commande: any) => {
 
   return (
     <Stack gap="lg" p="md">
-      {/* EN-TÊTE ATTRACTIF */}
-      <Paper
-        p="xl"
-        radius="lg"
-        style={{
-          background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
-          position: 'relative',
-          overflow: 'hidden'
-        }}
-      >
+      {/* En-tête avec gradient */}
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
-          <Stack gap={4}>
-            <Group gap="md">
-              <ThemeIcon size={50} radius="md" color="white" variant="light">
-                <IconShoppingCart size={30} />
-              </ThemeIcon>
-              <div>
-                <Title order={1} c="white" style={{ fontSize: '2rem' }}>Commandes</Title>
-                <Text c="gray.3" size="sm">Gérez et suivez toutes vos commandes clients</Text>
-              </div>
-            </Group>
-          </Stack>
+          <Group gap="md">
+            <ThemeIcon size={50} radius="md" color="white" variant="light">
+              <IconShoppingBag size={30} />
+            </ThemeIcon>
+            <div>
+              <Title order={1} c="white">Gestion des Commandes</Title>
+              <Text c="gray.3" size="sm">Suivez et gérez toutes vos commandes</Text>
+            </div>
+          </Group>
           <Group>
             <Button
-              size="md"
               variant="light"
               color="white"
               leftSection={<IconPlus size={18} />}
-              onClick={() => setModalOpened(true)}
+              onClick={() => setFormulaireOpened(true)}
             >
               Nouvelle commande
+            </Button>
+            <Button
+              variant="light"
+              color="white"
+              leftSection={<IconRefresh size={18} />}
+              onClick={handleRefresh}
+            >
+              Actualiser
             </Button>
           </Group>
         </Flex>
 
         {/* Cartes statistiques */}
-        <SimpleGrid cols={4} spacing="md" mt="xl">
+        <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
             <Group>
               <ThemeIcon color="white" variant="light" size="lg">
-                <IconShoppingCart size={20} />
+                <IconShoppingBag size={20} />
               </ThemeIcon>
               <div>
                 <Text c="white" size="xs">Total commandes</Text>
@@ -384,353 +302,429 @@ const handleGenerateFacture = async (commande: any) => {
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
             <Group>
               <ThemeIcon color="green" variant="light" size="lg">
-                <IconTruck size={20} />
+                <IconCheck size={20} />
               </ThemeIcon>
               <div>
-                <Text c="white" size="xs">Commandes revendeurs</Text>
-                <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
-              </div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="blue" variant="light" size="lg">
-                <IconBuildingStore size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Commandes standard</Text>
-                <Text c="white" fw={700} size="xl">{stats.standards}</Text>
+                <Text c="white" size="xs">Livrées</Text>
+                <Text c="white" fw={700} size="xl">{stats.livrees}</Text>
               </div>
             </Group>
           </Card>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
             <Group>
               <ThemeIcon color="yellow" variant="light" size="lg">
-                <IconCurrencyFrank size={20} />
+                <IconAlertCircle size={20} />
               </ThemeIcon>
               <div>
-                <Text c="white" size="xs">Chiffre d'affaires</Text>
-                <Text c="white" fw={700} size="xl">{formatMontant(stats.totalMontant)} F</Text>
+                <Text c="white" size="xs">En cours</Text>
+                <Text c="white" fw={700} size="xl">{stats.enCours}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="violet" variant="light" size="lg">
+                <IconPackage size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Revendeurs</Text>
+                <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="yellow" variant="light" size="lg">
+                <IconReceipt size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Montant total</Text>
+                <Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text>
               </div>
             </Group>
           </Card>
         </SimpleGrid>
       </Paper>
 
-      {/* SECTION RECHERCHE */}
+      {/* Barre de filtres */}
       <Card withBorder radius="lg" shadow="sm" p="lg">
-        <Group justify="space-between" mb="md">
-          <Group>
-            <IconSearch size={20} color="#1b365d" />
-            <Title order={3} size="h4">Rechercher</Title>
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconFilter size={20} color="#1b365d" />
+              <Title order={3} size="h4">Filtres</Title>
+            </Group>
+            <Button variant="light" onClick={resetFilters} size="xs" leftSection={<IconRefresh size={14} />}>
+              Réinitialiser
+            </Button>
           </Group>
-          <Button variant="light" color="gray" onClick={resetFilters} size="xs" leftSection={<IconX size={14} />}>
-            Réinitialiser
-          </Button>
-        </Group>
 
-        <Grid>
-          <Grid.Col span={4}>
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} spacing="md">
             <TextInput
-              label="Nom du client"
-              placeholder="Rechercher par nom..."
-              value={searchNomClient}
-              onChange={(e) => setSearchNomClient(e.target.value)}
+              placeholder="Rechercher..."
               leftSection={<IconSearch size={16} />}
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
             />
-          </Grid.Col>
-          <Grid.Col span={3}>
+
             <Select
-              label="Type de commande"
-              placeholder="Tous les types"
-              value={typeCommande}
-              onChange={setTypeCommande}
+              placeholder="Statut"
+              label="Statut"
+              value={statusFilter}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setCurrentPage(1);
+              }}
               data={[
-                { value: 'all', label: 'Tous les types' },
-                { value: 'standard', label: 'Standard' },
-                { value: 'revendeur', label: 'Revendeur' },
+                { value: 'all', label: 'Tous les statuts' },
+                { value: 'CONFIRMEE', label: 'Confirmée' },
+                { value: 'EN_COURS', label: 'En cours' },
+                { value: 'LIVREE', label: 'Livrée' },
+                { value: 'ANNULEE', label: 'Annulée' }
               ]}
               clearable
             />
-          </Grid.Col>
-          <Grid.Col span={3}>
+
             <Select
-              label="Date de début"
-              placeholder="Sélectionner"
+              placeholder="Type"
+              label="Type"
+              value={typeFilter}
+              onChange={(value) => {
+                setTypeFilter(value);
+                setCurrentPage(1);
+              }}
+              data={[
+                { value: 'all', label: 'Tous les types' },
+                { value: 'STANDARD', label: 'Standard' },
+                { value: 'REVENDEUR', label: 'Revendeur' }
+              ]}
+              clearable
+            />
+
+            <DateInput
+              placeholder="Date début"
+              label="Date début"
               value={dateDebut}
               onChange={setDateDebut}
-              data={datesDisponibles}
               clearable
-              searchable
-              leftSection={<IconCalendar size={14} />}
             />
-          </Grid.Col>
-          <Grid.Col span={2}>
-            <Button
-              fullWidth
-              mt="auto"
-              variant="filled"
-              color="adminBlue"
-              onClick={handleSearch}
-              leftSection={<IconSearch size={16} />}
-            >
-              Rechercher
-            </Button>
-          </Grid.Col>
-        </Grid>
+
+            <DateInput
+              placeholder="Date fin"
+              label="Date fin"
+              value={dateFin}
+              onChange={setDateFin}
+              clearable
+            />
+          </SimpleGrid>
+
+          <Text size="sm" c="dimmed" ta="right">
+            {filteredCommandes.length} commande(s) trouvée(s)
+          </Text>
+        </Stack>
       </Card>
 
-      {/* TABLEAU PRINCIPAL */}
+      {/* Tableau des commandes */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
-        <Paper bg="gray.0" p="md" style={{ borderBottom: '1px solid #e5e7eb' }}>
-          <Flex justify="space-between" align="center">
-            <Group>
-              <IconFileInvoice size={20} color="#1b365d" />
-              <Title order={3} size="h4">Liste des commandes</Title>
-              <Badge size="lg" variant="light" color="blue">{filteredCommandes.length} commandes</Badge>
-            </Group>
-            <Button variant="subtle" rightSection={<IconDownload size={16} />} size="sm">
-              Exporter
-            </Button>
-          </Flex>
-        </Paper>
-
-        <Box style={{ overflowX: 'auto' }}>
-          <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
-            <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',}}>
-                <Table.Th w={60}>N°</Table.Th>
-                <Table.Th>Client</Table.Th>
-                <Table.Th w={120}>Date</Table.Th>
-                <Table.Th w={110}>Type</Table.Th>
-                <Table.Th w={130}>Montant HT</Table.Th>
-                <Table.Th w={130}>CodeFacture</Table.Th>
-                <Table.Th w={100}>Date Facture</Table.Th>
-                <Table.Th ta="center" w={100}>Facture</Table.Th>
-                <Table.Th ta="center" w={80}>Détails</Table.Th>
-                <Table.Th ta="center" w={130}>Actions</Table.Th>
+        <ScrollArea h="calc(100vh - 500px)">
+          <Table striped highlightOnHover>
+            <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+              <Table.Tr>
+                <Table.Th c="white">N° Commande</Table.Th>
+                <Table.Th c="white">Client</Table.Th>
+                <Table.Th c="white">Date</Table.Th>
+                <Table.Th c="white">Type</Table.Th>
+                <Table.Th c="white" ta="right">Montant TTC</Table.Th>
+                <Table.Th c="white">Statut</Table.Th>
+                <Table.Th c="white" ta="center">Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {paginatedCommandes.map((commande, index) => {
-                const numCommande = (currentPage - 1) * itemsPerPage + index + 1;
-                const typeLabel = getTypeCommandeLabel(commande);
-                const codeFacture = commande.facture?.code_facture || commande.Facture?.code_facture || '-';
-                const dateFacture = commande.facture?.date_facture || commande.Facture?.date_facture || null;
-                const dateFactureFormatted = dateFacture ? new Date(dateFacture).toLocaleDateString('fr-FR') : '-';
-                const commandeDate = getCommandeDate(commande);
-                const hasFacture = codeFacture !== '-';
-
-                return (
+              {paginatedCommandes.length === 0 ? (
+                <Table.Tr>
+                  <Table.Td colSpan={7} align="center">
+                    <Stack align="center" py={50}>
+                      <IconShoppingBag size={50} color="gray" />
+                      <Text c="dimmed">Aucune commande trouvée</Text>
+                      <Button variant="light" onClick={resetFilters} size="xs">
+                        Réinitialiser les filtres
+                      </Button>
+                    </Stack>
+                  </Table.Td>
+                </Table.Tr>
+              ) : (
+                paginatedCommandes.map((commande) => (
                   <Table.Tr key={commande.idCommande}>
-                    <Table.Td fw={500}>{numCommande}</Table.Td>
                     <Table.Td>
-                      <Group gap="xs">
+                      <Text fw={600} size="sm">{commande.code_commande}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="sm">
                         <Avatar size="sm" radius="xl" color="blue">
-                          {getClientDisplayName(commande).charAt(0).toUpperCase()}
+                          {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
                         </Avatar>
-                        <Text fw={500} size="sm">{getClientDisplayName(commande)}</Text>
+                        <div>
+                          <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
+                          {commande.Societe && (
+                            <Text size="xs" c="dimmed">{commande.Societe}</Text>
+                          )}
+                        </div>
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      {commandeDate ? commandeDate.toLocaleDateString('fr-FR') : '-'}
+                      <Group gap={4}>
+                        <IconCalendar size={12} color="#adb5bd" />
+                        <Text size="sm">
+                          {format(new Date(commande.date_commande), 'dd/MM/yyyy HH:mm', { locale: fr })}
+                        </Text>
+                      </Group>
                     </Table.Td>
                     <Table.Td>
                       <Badge
-                        size="md"
-                        color={typeLabel === 'Revendeur' ? 'green' : 'blue'}
+                        color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
                         variant="light"
-                        leftSection={typeLabel === 'Revendeur' ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+                        size="sm"
+                        leftSection={getTypeIcon(commande.type_commande)}
                       >
-                        {typeLabel}
+                        {getTypeLabel(commande.type_commande)}
                       </Badge>
                     </Table.Td>
-                    <Table.Td>
-                      <Text fw={600} c="adminBlue">{formatMontant(commande.MontantHT || commande.montant_ht)} FCFA</Text>
+                    <Table.Td ta="right">
+                      <Text fw={700} size="sm" c="blue">
+                        {commande.montant_ttc.toLocaleString('fr-FR')} FCFA
+                      </Text>
                     </Table.Td>
                     <Table.Td>
-                      <Text fw={500} size="sm">{codeFacture}</Text>
-                    </Table.Td>
-                    <Table.Td>{dateFactureFormatted}</Table.Td>
-                    <Table.Td ta="center">
-                      <Tooltip label={hasFacture ? "Voir la facture" : "Générer la facture"}>
-                        <ActionIcon
-                          variant={hasFacture ? "light" : "filled"}
-                          color={hasFacture ? "green" : "adminBlue"}
-                          size="lg"
-                          onClick={() => hasFacture ? handleViewFacture(commande) : handleGenerateFacture(commande)}
-                          loading={loadingFacture}
-                        >
-                          <IconReceipt size={18} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td ta="center">
-                      <Tooltip label="Voir détails">
-                        <ActionIcon
-                          variant="light"
-                          color="adminBlue"
-                          size="lg"
-                          onClick={() => handleViewDetails(commande)}
-                        >
-                          <IconEye size={18} />
-                        </ActionIcon>
-                      </Tooltip>
+                      {getStatusBadge(commande.statut)}
                     </Table.Td>
                     <Table.Td ta="center">
                       <Group gap={4} justify="center">
-                        <Tooltip label="Modifier">
-                          <ActionIcon variant="light" color="adminBlue" size="md">
-                            <IconEdit size={16} />
+                        <Tooltip label="Voir détails">
+                          <ActionIcon
+                            variant="light"
+                            color="blue"
+                            size="md"
+                            onClick={() => handleViewDetails(commande.idCommande)}
+                          >
+                            <IconEye size={16} />
                           </ActionIcon>
                         </Tooltip>
-                        {commande.statut !== 'ANNULEE' && (
-                          <Tooltip label="Annuler">
+
+                        {commande.statut !== 'ANNULEE' && commande.statut !== 'LIVREE' && (
+                          <>
+                            <Tooltip label="Marquer comme livrée">
+                              <ActionIcon
+                                variant="light"
+                                color="green"
+                                size="md"
+                                onClick={() => handleUpdateStatus(commande.idCommande, 'LIVREE')}
+                              >
+                                <IconCheck size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+
+                            <Tooltip label="Annuler la commande">
+                              <ActionIcon
+                                variant="light"
+                                color="red"
+                                size="md"
+                                onClick={() => {
+                                  setCommandeToCancel(commande.idCommande);
+                                  openCancel();
+                                }}
+                              >
+                                <IconX size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </>
+                        )}
+
+                        {commande.type_commande === 'REVENDEUR' && commande.statut === 'LIVREE' && (
+                          <Tooltip label="Facture revendeur">
                             <ActionIcon
                               variant="light"
-                              color="orange"
+                              color="grape"
                               size="md"
                               onClick={() => {
-                                setSelectedCommande(commande);
-                                setCancelModalOpened(true);
+                                notifications.show({
+                                  title: 'Facture revendeur',
+                                  message: `Génération de la facture pour la commande ${commande.code_commande}`,
+                                  color: 'grape'
+                                });
                               }}
                             >
-                              <IconX size={16} />
+                              <IconReceipt size={16} />
                             </ActionIcon>
                           </Tooltip>
                         )}
-                        <Tooltip label="Supprimer">
-                          <ActionIcon
-                            variant="light"
-                            color="red"
-                            size="md"
-                            onClick={() => {
-                              setSelectedCommande(commande);
-                              setDeleteModalOpened(true);
-                            }}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
-                );
-              })}
+                ))
+              )}
             </Table.Tbody>
           </Table>
-        </Box>
-
-        {filteredCommandes.length === 0 && (
-          <Flex justify="center" align="center" direction="column" py={60}>
-            <IconPackage size={60} color="#ccc" />
-            <Text ta="center" c="dimmed" mt="md">Aucune commande trouvée</Text>
-          </Flex>
-        )}
+        </ScrollArea>
 
         {totalPages > 1 && (
           <Group justify="center" p="md">
-            <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="md" />
+            <Pagination
+              total={totalPages}
+              value={currentPage}
+              onChange={setCurrentPage}
+              size="md"
+            />
           </Group>
         )}
       </Card>
 
-      {/* MODALS... (les mêmes que précédemment) */}
-      <Modal opened={detailsModalOpened} onClose={() => setDetailsModalOpened(false)} title={`Détails commande ${selectedCommande?.code_commande || ''}`} size="lg" centered>
-        {/* Contenu du modal - identique */}
+      {/* Modal Détails Commande */}
+      <Modal
+        opened={detailsOpened}
+        onClose={closeDetails}
+        title={`Détails de la commande ${selectedCommande?.code_commande}`}
+        size="xl"
+        scrollAreaComponent={ScrollArea.Autosize}
+      >
         {selectedCommande && (
-          <Stack>
-            <SimpleGrid cols={2} spacing="md">
-              <Card withBorder p="sm">
-                <Text size="xs" c="dimmed">Client</Text>
-                <Text fw={500}>{getClientDisplayName(selectedCommande)}</Text>
-              </Card>
-              <Card withBorder p="sm">
-                <Text size="xs" c="dimmed">Type</Text>
-                <Badge color={getTypeCommandeLabel(selectedCommande) === 'Revendeur' ? 'green' : 'blue'}>
-                  {getTypeCommandeLabel(selectedCommande)}
-                </Badge>
-              </Card>
-              <Card withBorder p="sm">
-                <Text size="xs" c="dimmed">Date commande</Text>
-                <Text>{getCommandeDate(selectedCommande)?.toLocaleDateString('fr-FR') || '-'}</Text>
-              </Card>
-              <Card withBorder p="sm">
-                <Text size="xs" c="dimmed">Montant HT</Text>
-                <Text fw={600} c="adminBlue">{formatMontant(selectedCommande.MontantHT || selectedCommande.montant_ht)} FCFA</Text>
-              </Card>
+          <Stack gap="md">
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+              <div>
+                <Text size="sm" c="dimmed">Client</Text>
+                <Text fw={500}>{selectedCommande.NomComplet}</Text>
+              </div>
+              <div>
+                <Text size="sm" c="dimmed">Société</Text>
+                <Text fw={500}>{selectedCommande.Societe || '-'}</Text>
+              </div>
+              <div>
+                <Text size="sm" c="dimmed">Téléphone</Text>
+                <Text fw={500}>{selectedCommande.Tel || '-'}</Text>
+              </div>
+              <div>
+                <Text size="sm" c="dimmed">Date</Text>
+                <Text fw={500}>
+                  {format(new Date(selectedCommande.date_commande), 'dd/MM/yyyy HH:mm', { locale: fr })}
+                </Text>
+              </div>
+              <div>
+                <Text size="sm" c="dimmed">Type</Text>
+                <Group gap={4}>
+                  {getTypeIcon(selectedCommande.type_commande)}
+                  <Text>{getTypeLabel(selectedCommande.type_commande)}</Text>
+                </Group>
+              </div>
+              <div>
+                <Text size="sm" c="dimmed">Statut</Text>
+                {getStatusBadge(selectedCommande.statut)}
+              </div>
             </SimpleGrid>
-            <Divider label="Produits" labelPosition="center" />
-            <Table striped>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Produit</Table.Th>
-                  <Table.Th ta="center">Qté</Table.Th>
-                  <Table.Th ta="right">Prix unitaire</Table.Th>
-                  <Table.Th ta="right">Total</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {(selectedCommande.details || []).map((detail: any, idx: number) => (
-                  <Table.Tr key={idx}>
-                    <Table.Td>{detail.produit_designation || detail.nom_produit || '-'}</Table.Td>
-                    <Table.Td ta="center">{detail.quantite || detail.qte_commande}</Table.Td>
-                    <Table.Td ta="right">{formatMontant(detail.prix_unitaire_vente)} FCFA</Table.Td>
-                    <Table.Td ta="right" fw={500}>{formatMontant((detail.prix_unitaire_vente || 0) * (detail.quantite || 0))} FCFA</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-            <Group justify="flex-end" mt="md">
-              <Button variant="light" onClick={() => setDetailsModalOpened(false)}>Fermer</Button>
-              <Button color="adminBlue" onClick={() => { setDetailsModalOpened(false); handleGenerateFacture(selectedCommande); }}>Générer facture</Button>
-            </Group>
+
+            <div>
+              <Text fw={700} mb="sm">Produits commandés</Text>
+              <ScrollArea style={{ maxHeight: 300 }}>
+                <Table striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Code</Table.Th>
+                      <Table.Th>Désignation</Table.Th>
+                      <Table.Th ta="right">Quantité</Table.Th>
+                      <Table.Th ta="right">Prix unitaire</Table.Th>
+                      <Table.Th ta="right">Total</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {selectedCommande.details?.map((detail, idx) => (
+                      <Table.Tr key={idx}>
+                        <Table.Td>
+                          <Text size="sm">{detail.code_produit}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{detail.designation}</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="sm">{detail.qte_commande}</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="sm">{detail.prix_unitaire_vente.toLocaleString('fr-FR')} FCFA</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="sm" fw={500}>
+                            {(detail.qte_commande * detail.prix_unitaire_vente).toLocaleString('fr-FR')} FCFA
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--mantine-color-gray-3)', paddingTop: 16 }}>
+              <Group justify="space-between">
+                <div>
+                  <Text size="sm" c="dimmed">Montant HT</Text>
+                  <Text fw={500} size="lg">
+                    {selectedCommande.montant_ht.toLocaleString('fr-FR')} FCFA
+                  </Text>
+                </div>
+                <div>
+                  <Text size="sm" c="dimmed">Montant TTC</Text>
+                  <Text fw={700} size="xl" c="blue">
+                    {selectedCommande.montant_ttc.toLocaleString('fr-FR')} FCFA
+                  </Text>
+                </div>
+              </Group>
+            </div>
+
+            {selectedCommande.code_facture && (
+              <Button variant="light" fullWidth mt="md">
+                Voir la facture
+              </Button>
+            )}
           </Stack>
         )}
       </Modal>
 
-      <Modal opened={factureModalOpened} onClose={() => setFactureModalOpened(false)} title={`Facture - ${selectedCommande?.code_commande || ''}`} size="xl" centered fullScreen>
-        {factureData && selectedCommande && (
-          <>
-            <Group justify="flex-end" mb="md">
-              <Button variant="outline" onClick={() => setFactureModalOpened(false)}>Fermer</Button>
-              <Button variant="filled" color="adminBlue" leftSection={<IconPrinter size={16} />} onClick={handlePrint}>Imprimer</Button>
-            </Group>
-            <Divider mb="md" />
-            {isRevendeur(selectedCommande) ? <FactureRevendeur facture={factureData} /> : <FactureStandard facture={factureData} />}
-          </>
-        )}
-      </Modal>
-
-      <Modal opened={cancelModalOpened} onClose={() => setCancelModalOpened(false)} title="Annuler la commande" centered>
-        <Stack>
-          <Alert icon={<IconAlertCircle size={16} />} color="orange" title="Confirmation">
+      {/* Modal Confirmation Annulation */}
+      <Modal
+        opened={cancelOpened}
+        onClose={closeCancel}
+        title="Confirmation d'annulation"
+        size="md"
+        centered
+      >
+        <Stack gap="md">
+          <Alert icon={<IconAlertCircle size={16} />} color="red">
             Êtes-vous sûr de vouloir annuler cette commande ?
-            <Text size="sm" mt="md">- Annuler la commande<br />- Restaurer les quantités en stock</Text>
           </Alert>
+          <Text size="sm" c="red">
+            ⚠️ Attention : Cette action est irréversible. Le stock sera automatiquement réajusté.
+          </Text>
           <Group justify="flex-end" mt="md">
-            <Button variant="outline" onClick={() => setCancelModalOpened(false)}>Non, retour</Button>
-            <Button color="orange" onClick={handleCancelCommande} loading={loadingAction}>Oui, annuler</Button>
+            <Button variant="outline" onClick={closeCancel}>
+              Non, retour
+            </Button>
+            <Button color="red" onClick={handleCancelCommande}>
+              Oui, annuler la commande
+            </Button>
           </Group>
         </Stack>
       </Modal>
 
-      <Modal opened={deleteModalOpened} onClose={() => setDeleteModalOpened(false)} title="Supprimer la commande" centered>
-        <Stack>
-          <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
-            Êtes-vous sûr de vouloir supprimer définitivement cette commande ?
-            <Text size="sm" mt="md" c="red">Action irréversible ! Les stocks seront restaurés.</Text>
-          </Alert>
-          <Group justify="flex-end" mt="md">
-            <Button variant="outline" onClick={() => setDeleteModalOpened(false)}>Non, retour</Button>
-            <Button color="red" onClick={handleDeleteCommande} loading={loadingAction}>Oui, supprimer</Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <FormulaireCommande opened={modalOpened} onClose={() => { setModalOpened(false); refresh(); }} />
+      {/* Formulaire de création de commande */}
+      <FormulaireCommande
+        opened={formulaireOpened}
+        onClose={() => {
+          setFormulaireOpened(false);
+          refresh();
+        }}
+      />
     </Stack>
   );
-};
+}
 
-export default ListeCommandes;
+export default ListeCommande;

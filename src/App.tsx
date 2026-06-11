@@ -1,14 +1,14 @@
 // src/App.tsx
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Routes, Route, BrowserRouter, useNavigate } from 'react-router-dom';
-import { AppShell, Loader, Center, Button, Notification } from '@mantine/core';
+import { Routes, Route, BrowserRouter, useNavigate, useParams } from 'react-router-dom';
+import { AppShell, Loader, Center, Button, Notification, MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Notifications } from '@mantine/notifications';
 import Navbar from './components/common/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { initDatabase, getDb, isDatabaseConnected } from './database/db';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
-import { ListeFacturesRevendeur } from './components/factures/ListeFacturesRevendeur';
 
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
@@ -20,10 +20,18 @@ const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const ListeClients = lazy(() => import('./components/clients/ListeClients'));
 const ListeFactures = lazy(() => import('./components/factures/ListeFactures'));
 const ListeVentes = lazy(() => import('./components/ventes/ListeVentes'));
-const ListeCommandes = lazy(() => import('./components/commandes/ListeCommandes').then(module => ({ default: module.default })));
+const ListeCommandes = lazy(() => import('./components/commandes/ListeCommandes').then(module => ({ default: module.ListeCommande })));
+const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireCommande'));
 
 // ==================== REVENDEURS ====================
-const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur').then(module => ({ default: module.default })));
+const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur').then(module => ({ default: module.ListeCommandesRevendeur })));
+const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
+const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
+const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
+const HistoriqueRevendeur = lazy(() => import('./components/pages/revendeurs/HistoriqueRevendeur'));
+const ListeStockRevendeur = lazy(() => import('./components/pages/revendeurs/ListeStockRevendeur'));
+const DashboardRevendeurs = lazy(() => import('./components/pages/revendeurs/DashboardRevendeurs'));
+const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompte'));
 
 // ==================== PRODUITS & STOCK ====================
 const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
@@ -51,7 +59,11 @@ type PageKey =
   | 'reglements'
   | 'utilisateurs'
   | 'parametres'
-  | 'commandes-revendeur';
+  | 'commandes-revendeur'
+  | 'dashboard-revendeurs'
+  | 'stock-revendeurs'
+  | 'factures-revendeur'
+  | 'revendeurs-historique';
 
 // ==================== COMPOSANTS ====================
 const LoadingFallback = () => (
@@ -60,18 +72,15 @@ const LoadingFallback = () => (
   </Center>
 );
 
-// Composant de vérification DB
+// Vérification de la base de données (sans réinitialisation)
 function DatabaseStatus() {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [, setTablesCount] = useState(0);
 
   useEffect(() => {
     const checkDb = async () => {
       try {
         console.log('🔄 Vérification de la base de données...');
-
-        await initDatabase();
 
         if (isDatabaseConnected()) {
           const db = await getDb();
@@ -80,7 +89,6 @@ function DatabaseStatus() {
             SELECT COUNT(*) as count FROM sqlite_master 
             WHERE type='table' AND name NOT LIKE 'sqlite_%'
           `);
-          setTablesCount(tables[0]?.count || 0);
 
           console.log(`✅ Base de données prête - ${tables[0]?.count || 0} tables disponibles`);
           setIsReady(true);
@@ -135,6 +143,26 @@ function RouteGuard({ children, roles }: { children: React.ReactNode; roles?: st
   return <>{children}</>;
 }
 
+// Wrapper pour NouveauDecompte avec navigation
+function NouveauDecompteWrapper() {
+  const navigate = useNavigate();
+
+  return (
+    <NouveauDecompte
+      onSuccess={() => navigate('/decomptes')}
+      onCancel={() => navigate('/decomptes')}
+    />
+  );
+}
+
+// Wrapper pour PrintRecuDecompte avec useParams
+function PrintRecuDecompteWrapper() {
+  const { id } = useParams<{ id: string }>();
+  const idDecompte = id ? parseInt(id, 10) : 0;
+
+  return <PrintRecuDecompte idDecompte={idDecompte} />;
+}
+
 // ==================== APP AUTHENTIFIÉE ====================
 function AuthenticatedApp() {
   const { user, logout, isAuthenticated, loading } = useAuth();
@@ -160,7 +188,11 @@ function AuthenticatedApp() {
       reglements: '/reglements',
       utilisateurs: '/utilisateurs',
       parametres: '/parametres',
-      'commandes-revendeur': '/commandes-revendeur'
+      'commandes-revendeur': '/commandes-revendeur',
+      'dashboard-revendeurs': '/dashboard-revendeurs',
+      'stock-revendeurs': '/stock-revendeurs',
+      'factures-revendeur': '/factures-revendeur',
+      'revendeurs-historique': '/revendeurs/historique'
     };
     navigate(routeMap[page] || '/');
   };
@@ -198,6 +230,13 @@ function AuthenticatedApp() {
                 <ListeCommandes />
               </RouteGuard>
             } />
+            <Route path="/commandes/nouveau" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <FormulaireCommande opened={false} onClose={function (): void {
+                  throw new Error('Function not implemented.');
+                } } />
+              </RouteGuard>
+            } />
             <Route path="/factures" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeFactures />
@@ -210,6 +249,11 @@ function AuthenticatedApp() {
             } />
 
             {/* REVENDEURS */}
+            <Route path="/dashboard-revendeurs" element={
+              <RouteGuard roles={['admin']}>
+                <DashboardRevendeurs />
+              </RouteGuard>
+            } />
             <Route path="/commandes-revendeur" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeCommandesRevendeur />
@@ -218,6 +262,16 @@ function AuthenticatedApp() {
             <Route path="/factures-revendeur" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeFacturesRevendeur />
+              </RouteGuard>
+            } />
+            <Route path="/stock-revendeurs" element={
+              <RouteGuard roles={['admin']}>
+                <ListeStockRevendeur />
+              </RouteGuard>
+            } />
+            <Route path="/revendeurs/historique" element={
+              <RouteGuard roles={['admin']}>
+                <HistoriqueRevendeur />
               </RouteGuard>
             } />
 
@@ -237,6 +291,21 @@ function AuthenticatedApp() {
             <Route path="/decomptes" element={
               <RouteGuard roles={['admin']}>
                 <ListeDecomptes />
+              </RouteGuard>
+            } />
+            <Route path="/decomptes/nouveau" element={
+              <RouteGuard roles={['admin']}>
+                <NouveauDecompteWrapper />
+              </RouteGuard>
+            } />
+            <Route path="/decomptes/:id" element={
+              <RouteGuard roles={['admin']}>
+                <DetailDecompte />
+              </RouteGuard>
+            } />
+            <Route path="/decomptes/:id/print" element={
+              <RouteGuard roles={['admin']}>
+                <PrintRecuDecompteWrapper />
               </RouteGuard>
             } />
             <Route path="/reglements" element={
@@ -313,14 +382,17 @@ function App() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
-          <DatabaseStatus />
-          <AuthenticatedApp />
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <MantineProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AuthProvider>
+            <Notifications position="top-right" />
+            <DatabaseStatus />
+            <AuthenticatedApp />
+          </AuthProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </MantineProvider>
   );
 }
 

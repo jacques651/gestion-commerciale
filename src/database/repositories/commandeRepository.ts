@@ -1,323 +1,398 @@
 // src/database/repositories/commandeRepository.ts
 import { getDb } from '../db';
+import { factureRevendeurRepository } from "./factureRevendeurRepository";
+import { factureRepository } from "./factureRepository";
 
 export interface Commande {
-  DateCommande: string;
-  facture: any;
-  Facture: any;
-  MontantHT: number;
+  NomComplet: string;
+  Societe: string;
   idCommande: number;
   code_commande: string;
   idClient: number;
   type_commande: string;
   date_commande: string;
-  adresse_livraison: string | null;
   montant_ht: number;
-  montant_tva: number;
   montant_ttc: number;
-  montant_remise: number;
-  montant_net: number;
+  code_facture?: string;
   statut: string;
-  source: string;
-  notes: string | null;
-  signature_base64: string | null;
-  code_facture: string | null;
-  date_facture: string | null;
-  client_nom?: string;
-  client_societe?: string;
-  client_tel?: string;
-  client_email?: string;
-  client_adresse?: string;
-  client_ville?: string;
 }
 
-export interface CommandeDetail {
-  idDetail: number;
-  idCommande: number;
-  idProduit: number;
-  idConditionnement: number | null;
-  qte_commande: number;
-  prix_unitaire_vente: number;
-  remise: number;
-  produit_designation?: string;
-  code_produit?: string;
-  categorie?: string;
-}
-
-export type CreateCommandeInput = {
+export interface CreateCommandeInput {
   code_commande: string;
   idClient: number;
-  type_commande?: string;
+  type_commande: string;
   montant_ht: number;
-  montant_tva: number;
   montant_ttc: number;
-  montant_remise?: number;
-  montant_net?: number;
   statut?: string;
-  source?: string;
-  notes?: string;
-  adresse_livraison?: string;
-};
+}
 
-export type CreateCommandeDetailInput = {
+export interface CreateCommandeDetailInput {
   idProduit: number;
   qte_commande: number;
   prix_unitaire_vente: number;
-  remise?: number;
-  idConditionnement?: number | null;
-};
+}
 
 export const commandeRepository = {
-  getAll: async (): Promise<Commande[]> => {
+  async getAll(): Promise<any[]> {
     const db = await getDb();
-    const commandes = await db.select<any[]>(`
-      SELECT 
+    return await db.select<any[]>(`
+      SELECT
         c.*,
-        cl.NomComplet as client_nom,
-        cl.Societe as client_societe,
-        cl.Tel as client_tel,
-        cl.Email as client_email,
-        cl.Adresse as client_adresse,
-        cl.Ville as client_ville
+        cl.NomComplet,
+        cl.Societe,
+        cl.TypeClient
       FROM commandes c
-      LEFT JOIN clients cl ON c.idClient = cl.idClient
+      INNER JOIN clients cl ON cl.idClient = c.idClient
       ORDER BY c.idCommande DESC
     `);
-    return commandes as Commande[];
   },
 
-  getById: async (id: number): Promise<any> => {
+  async getById(idCommande: number) {
     const db = await getDb();
-
-    const commandes = await db.select<any[]>(`
-      SELECT 
+    const commande = await db.select<any[]>(`
+      SELECT
         c.*,
-        cl.NomComplet as client_nom,
-        cl.Societe as client_societe,
-        cl.Tel as client_tel,
-        cl.Email as client_email,
-        cl.Adresse as client_adresse,
-        cl.Ville as client_ville
+        cl.NomComplet,
+        cl.Societe,
+        cl.Tel
       FROM commandes c
-      LEFT JOIN clients cl ON c.idClient = cl.idClient
+      INNER JOIN clients cl ON cl.idClient = c.idClient
       WHERE c.idCommande = ?
-    `, [id]);
+    `, [idCommande]);
 
-    if (commandes.length === 0) return null;
+    if (commande.length === 0) {
+      return null;
+    }
 
     const details = await db.select<any[]>(`
-      SELECT 
+      SELECT
         cd.*,
-        p.designation as produit_designation,
         p.code_produit,
-        p.categorie
+        p.designation
       FROM commande_details cd
-      LEFT JOIN products p ON cd.idProduit = p.idProduit
+      INNER JOIN products p ON p.idProduit = cd.idProduit
       WHERE cd.idCommande = ?
-    `, [id]);
+    `, [idCommande]);
 
     return {
-      ...commandes[0],
-      details: details
+      ...commande[0],
+      details
     };
   },
 
+  async create(
+    commande: CreateCommandeInput,
+    details: CreateCommandeDetailInput[]
+  ): Promise<number> {
+    const db = await getDb();
 
-create: async (commande: CreateCommandeInput, details: CreateCommandeDetailInput[]): Promise<number> => {
-  const db = await getDb();
-
-  try {
-    const result = await db.execute(`
-      INSERT INTO commandes (
-        code_commande,
-        idClient,
-        type_commande,
-        montant_ht,
-        montant_tva,
-        montant_ttc,
-        montant_remise,
-        montant_net,
-        statut,
-        source,
-        notes,
-        date_commande
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `, [
-      commande.code_commande,
-      commande.idClient,
-      commande.type_commande || 'STANDARD',
-      commande.montant_ht,
-      commande.montant_tva || 0,
-      commande.montant_ttc,
-      commande.montant_remise || 0,
-      commande.montant_net || commande.montant_ttc,
-      commande.statut || 'CONFIRMEE',
-      commande.source || 'DIRECT',
-      commande.notes || null
-    ]);
-
-    const commandeId = result.lastInsertId;
-
-    if (!commandeId) {
-      throw new Error('Impossible de récupérer l\'ID de la commande');
-    }
-
-    for (const detail of details) {
-      await db.execute(`
-        INSERT INTO commande_details (
-          idCommande,
-          idProduit,
-          qte_commande,
-          prix_unitaire_vente,
-          remise
-        ) VALUES (?, ?, ?, ?, ?)
+    try {
+      // ✅ Pas de BEGIN TRANSACTION
+      const result = await db.execute(`
+        INSERT INTO commandes (
+          code_commande,
+          idClient,
+          type_commande,
+          montant_ht,
+          montant_ttc,
+          statut
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
       `, [
-        commandeId,
-        detail.idProduit,
-        detail.qte_commande,
-        detail.prix_unitaire_vente,
-        detail.remise || 0
+        commande.code_commande,
+        commande.idClient,
+        commande.type_commande,
+        commande.montant_ht,
+        commande.montant_ttc,
+        commande.statut || "CONFIRMEE"
       ]);
 
-      await db.execute(`
-        UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-      `, [detail.qte_commande, detail.idProduit]);
+      const idCommande = Number(result.lastInsertId);
+
+      for (const detail of details) {
+        const produit = await db.select<any[]>(`
+          SELECT *
+          FROM products
+          WHERE idProduit = ?
+        `, [detail.idProduit]);
+
+        if (produit.length === 0) {
+          throw new Error("Produit introuvable");
+        }
+
+        const p = produit[0];
+
+        if (Number(p.qte_stock) < detail.qte_commande) {
+          throw new Error(`Stock insuffisant pour ${p.designation}`);
+        }
+
+        await db.execute(`
+          INSERT INTO commande_details (
+            idCommande,
+            idProduit,
+            qte_commande,
+            prix_unitaire_vente
+          )
+          VALUES (?, ?, ?, ?)
+        `, [
+          idCommande,
+          detail.idProduit,
+          detail.qte_commande,
+          detail.prix_unitaire_vente
+        ]);
+
+        const stockAvant = Number(p.qte_stock);
+        const stockApres = stockAvant - detail.qte_commande;
+
+        await db.execute(`
+          UPDATE products
+          SET qte_stock = ?
+          WHERE idProduit = ?
+        `, [stockApres, detail.idProduit]);
+
+        await db.execute(`
+          INSERT INTO mouvements_stock (
+            idProduit,
+            type_mouvement,
+            quantite,
+            stock_avant,
+            stock_apres,
+            idCommande
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          detail.idProduit,
+          "SORTIE",
+          detail.qte_commande,
+          stockAvant,
+          stockApres,
+          idCommande
+        ]);
+
+        // Gestion du stock revendeur
+        if (commande.type_commande === "REVENDEUR") {
+          const stockRevendeur = await db.select<any[]>(`
+            SELECT *
+            FROM stock_revendeur
+            WHERE idProduit = ? AND idRevendeur = ?
+          `, [detail.idProduit, commande.idClient]);
+
+          if (stockRevendeur.length > 0) {
+            await db.execute(`
+              UPDATE stock_revendeur
+              SET qte_stock = qte_stock + ?
+              WHERE idStockRevendeur = ?
+            `, [detail.qte_commande, stockRevendeur[0].idStockRevendeur]);
+          } else {
+            await db.execute(`
+              INSERT INTO stock_revendeur (
+                idProduit,
+                idRevendeur,
+                qte_stock,
+                prix_achat,
+                prix_vente,
+                commission_pourcentage
+              )
+              VALUES (?, ?, ?, ?, ?, ?)
+            `, [
+              detail.idProduit,
+              commande.idClient,
+              detail.qte_commande,
+              p.prix_achat_base,
+              p.prix_vente_gros,
+              p.commission_pourcentage
+            ]);
+          }
+
+          await db.execute(`
+            INSERT INTO mouvements_revendeur (
+              idProduit,
+              idRevendeur,
+              idCommande,
+              type_mouvement,
+              qte_mouvement
+            )
+            VALUES (?, ?, ?, ?, ?)
+          `, [
+            detail.idProduit,
+            commande.idClient,
+            idCommande,
+            "ENTREE",
+            detail.qte_commande
+          ]);
+        }
+      }
+
+      // ✅ Génération automatique de la facture
+      if (commande.type_commande === "REVENDEUR") {
+        await factureRevendeurRepository.createFromCommande(idCommande);
+      } else {
+        await factureRepository.createFromCommande(idCommande);
+      }
+
+      return idCommande;
+
+    } catch (error) {
+      console.error("Erreur création commande:", error);
+      throw error;
     }
-    
-    return Number(commandeId);
+  },
 
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Erreur création commande';
-    console.error('Erreur création commande:', errorMsg);
-    throw error;
-  }
-},
-
-
-  updateStatus: async (id: number, statut: string): Promise<void> => {
+  async updateStatus(idCommande: number, statut: string) {
     const db = await getDb();
     await db.execute(`
-      UPDATE commandes SET statut = ? WHERE idCommande = ?
-    `, [statut, id]);
+      UPDATE commandes
+      SET statut = ?
+      WHERE idCommande = ?
+    `, [statut, idCommande]);
   },
 
-  cancel: async (id: number): Promise<void> => {
+  async cancel(idCommande: number): Promise<void> {
     const db = await getDb();
 
-    const details = await db.select<any[]>(`
-      SELECT idProduit, qte_commande FROM commande_details WHERE idCommande = ?
-    `, [id]);
+    try {
+      const commande = await db.select<any[]>(`
+        SELECT *
+        FROM commandes
+        WHERE idCommande = ?
+      `, [idCommande]);
 
-    for (const detail of details) {
+      if (commande.length === 0) {
+        throw new Error("Commande introuvable");
+      }
+
+      const cmd = commande[0];
+
+      if (cmd.statut === "ANNULEE") {
+        throw new Error("Commande déjà annulée");
+      }
+
+      const details = await db.select<any[]>(`
+        SELECT *
+        FROM commande_details
+        WHERE idCommande = ?
+      `, [idCommande]);
+
+      for (const detail of details) {
+        const produit = await db.select<any[]>(`
+          SELECT *
+          FROM products
+          WHERE idProduit = ?
+        `, [detail.idProduit]);
+
+        if (produit.length === 0) continue;
+
+        const p = produit[0];
+        const stockAvant = Number(p.qte_stock);
+        const stockApres = stockAvant + Number(detail.qte_commande);
+
+        await db.execute(`
+          UPDATE products
+          SET qte_stock = ?
+          WHERE idProduit = ?
+        `, [stockApres, detail.idProduit]);
+
+        await db.execute(`
+          INSERT INTO mouvements_stock (
+            idProduit,
+            type_mouvement,
+            quantite,
+            stock_avant,
+            stock_apres,
+            idCommande
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          detail.idProduit,
+          "ANNULATION",
+          detail.qte_commande,
+          stockAvant,
+          stockApres,
+          idCommande
+        ]);
+
+        if (cmd.type_commande === "REVENDEUR") {
+          const stockRevendeur = await db.select<any[]>(`
+            SELECT *
+            FROM stock_revendeur
+            WHERE idProduit = ? AND idRevendeur = ?
+          `, [detail.idProduit, cmd.idClient]);
+
+          if (stockRevendeur.length > 0) {
+            const sr = stockRevendeur[0];
+            const nouveauStock = Math.max(0, Number(sr.qte_stock) - Number(detail.qte_commande));
+
+            await db.execute(`
+              UPDATE stock_revendeur
+              SET qte_stock = ?
+              WHERE idStockRevendeur = ?
+            `, [nouveauStock, sr.idStockRevendeur]);
+          }
+
+          await db.execute(`
+            INSERT INTO mouvements_revendeur (
+              idProduit,
+              idRevendeur,
+              idCommande,
+              type_mouvement,
+              qte_mouvement
+            )
+            VALUES (?, ?, ?, ?, ?)
+          `, [
+            detail.idProduit,
+            cmd.idClient,
+            idCommande,
+            "ANNULATION",
+            detail.qte_commande
+          ]);
+        }
+      }
+
       await db.execute(`
-        UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?
-      `, [detail.qte_commande, detail.idProduit]);
-    }
+        UPDATE commandes
+        SET statut = 'ANNULEE'
+        WHERE idCommande = ?
+      `, [idCommande]);
 
-    await db.execute(`
-      UPDATE commandes SET statut = 'ANNULEE' WHERE idCommande = ?
-    `, [id]);
+    } catch (error) {
+      console.error("Erreur annulation commande:", error);
+      throw error;
+    }
   },
 
-
-// src/database/repositories/commandeRepository.ts
-
-delete: async (id: number): Promise<void> => {
-  console.log('🔍 Tentative de suppression commande ID:', id);
-  const db = await getDb();
-  
-  try {
-    // 1. Vérifier si la commande existe
-    const commande = await db.select<any[]>(`
-      SELECT idCommande, code_commande FROM commandes WHERE idCommande = ?
-    `, [id]);
-    
-    if (commande.length === 0) {
-      console.log('❌ Commande non trouvée');
-      throw new Error('Commande non trouvée');
-    }
-    
-    console.log('📦 Commande trouvée:', commande[0].code_commande);
-    
-    // 2. Récupérer les détails pour restaurer le stock
-    const details = await db.select<any[]>(`
-      SELECT idProduit, qte_commande FROM commande_details WHERE idCommande = ?
-    `, [id]);
-    
-    console.log(`📋 ${details.length} détail(s) trouvé(s)`);
-    
-    // 3. Restaurer le stock
-    for (const detail of details) {
-      await db.execute(`
-        UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?
-      `, [detail.qte_commande, detail.idProduit]);
-      console.log(`✅ Stock restauré pour produit ${detail.idProduit}: +${detail.qte_commande}`);
-    }
-    
-    // 4. Supprimer les détails
-    if (details.length > 0) {
-      await db.execute(`DELETE FROM commande_details WHERE idCommande = ?`, [id]);
-      console.log('🗑️ Détails supprimés');
-    }
-    
-    // 5. Supprimer la commande
-    await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [id]);
-    console.log('✅ Commande supprimée avec succès');
-    
-  } catch (error: any) {
-    const errorMsg = error?.message || 'Erreur lors de la suppression de la commande';
-    console.error('❌ Erreur delete commande:', errorMsg);
-    throw new Error(errorMsg);
-  }
-},
-
-  getByClient: async (clientId: number): Promise<Commande[]> => {
+  async getByClient(idClient: number) {
     const db = await getDb();
-    const commandes = await db.select<any[]>(`
-      SELECT 
-        c.*,
-        cl.NomComplet as client_nom,
-        cl.Societe as client_societe,
-        cl.Tel as client_tel,
-        cl.Email as client_email,
-        cl.Adresse as client_adresse,
-        cl.Ville as client_ville
-      FROM commandes c
-      LEFT JOIN clients cl ON c.idClient = cl.idClient
-      WHERE c.idClient = ?
-      ORDER BY c.date_commande DESC
-    `, [clientId]);
-    return commandes as Commande[];
+    return await db.select<any[]>(`
+      SELECT *
+      FROM commandes
+      WHERE idClient = ?
+      ORDER BY idCommande DESC
+    `, [idClient]);
   },
 
-  getByStatus: async (statut: string): Promise<Commande[]> => {
+  async getByStatus(statut: string) {
     const db = await getDb();
-    const commandes = await db.select<any[]>(`
-      SELECT 
-        c.*,
-        cl.NomComplet as client_nom,
-        cl.Societe as client_societe,
-        cl.Tel as client_tel,
-        cl.Email as client_email,
-        cl.Adresse as client_adresse,
-        cl.Ville as client_ville
-      FROM commandes c
-      LEFT JOIN clients cl ON c.idClient = cl.idClient
-      WHERE c.statut = ?
-      ORDER BY c.date_commande DESC
+    return await db.select<any[]>(`
+      SELECT *
+      FROM commandes
+      WHERE statut = ?
+      ORDER BY idCommande DESC
     `, [statut]);
-    return commandes as Commande[];
   },
 
-  getTodayCommandes: async (): Promise<{ total: number; count: number }> => {
+  async getTodayCommandes() {
     const db = await getDb();
-    const results = await db.select<any[]>(`
-      SELECT 
-        COALESCE(SUM(montant_ttc), 0) as total,
-        COUNT(*) as count
+    const result = await db.select<any[]>(`
+      SELECT
+        COUNT(*) as total,
+        COALESCE(SUM(montant_ttc), 0) as montant
       FROM commandes
       WHERE date(date_commande) = date('now')
+      AND statut != 'ANNULEE'
     `);
-    return { total: results[0]?.total || 0, count: results[0]?.count || 0 };
+    return {
+      total: Number(result[0]?.total || 0),
+      montant: Number(result[0]?.montant || 0)
+    };
   }
 };

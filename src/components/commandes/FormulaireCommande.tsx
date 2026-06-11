@@ -212,28 +212,21 @@ const handleSubmit = async () => {
   
   try {
     const montantHT = montantTotal / 1.18;
-    const montantTVA = montantTotal - montantHT;
     
-    const commande = {
-      code_commande: codeCommande,
-      idClient: parseInt(selectedClientId),
-      type_commande: typeCommande,
-      montant_ht: montantHT,
-      montant_tva: montantTVA,
-      montant_ttc: montantTotal,
-      montant_remise: 0,
-      montant_net: montantTotal,
-      statut: 'CONFIRMEE',
-      source: 'DIRECT'
-    };
+   const commande = {
+  code_commande: codeCommande,
+  idClient: parseInt(selectedClientId),
+  type_commande: typeCommande,
+  montant_ht: montantHT,
+  montant_ttc: montantTotal,
+  statut: 'CONFIRMEE'
+};
     
     const details = cart.map(item => ({
-      idProduit: item.idProduit,
-      qte_commande: item.quantite_commande,
-      prix_unitaire_vente: item.prix_vente,
-      remise: 0,
-      idConditionnement: null
-    }));
+  idProduit: item.idProduit,
+  qte_commande: item.quantite_commande,
+  prix_unitaire_vente: item.prix_vente
+}));
     
     // Utiliser la méthode du hook (elle gère sa propre transaction)
     await createCommande(commande, details);

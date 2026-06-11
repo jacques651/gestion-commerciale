@@ -12,7 +12,6 @@ import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
 import { useSales } from '../../hooks/useSales';
 import { getNextVenteCode } from '../../services/codeGeneratorService';
-import { getDb } from '../../database/db';
 import { FormulaireClient } from '../clients/FormulaireClient';
 
 interface FormulaireVenteProps {
@@ -171,68 +170,59 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     setCart(cart.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async () => {
-    // Les infos client sont optionnelles - on vérifie seulement le panier
-    if (cart.length === 0) {
-      notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
-      return;
-    }
 
-    setSubmitting(true);
+const handleSubmit = async () => {
+  if (cart.length === 0) {
+    notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
+    return;
+  }
 
-    try {
-      const sale = {
-        code_vente: codeVente,
-        idClient: selectedClientId ? parseInt(selectedClientId) : null,
-        nom_prenom: ajouterClient ? clientNom : 'Client anonyme',
-        contact: ajouterClient ? (clientContact || null) : null,
-        montant_ht: totalHT,
-        montant_tva: tva,
-        montant_ttc: totalTTC,
-        type_vente: 'COMPTOIR',
-        statut: 'COMPLETEE',
-        observation: null,
-        date_vente: new Date().toISOString()
-      };
+  setSubmitting(true);
 
-      const details = cart.map(item => ({
-        idProduit: item.idProduit,
-        quantite: item.quantite,
-        prix_unitaire_ht: item.prix_vente,
-        prix_unitaire_ttc: item.prix_vente * 1.18,
-        tva_taux: 18,
-        remise_percent: 0
-      }));
+  try {
+    const sale = {
+      code_vente: codeVente,
+      idClient: selectedClientId ? parseInt(selectedClientId) : null,
+      nom_prenom: ajouterClient ? clientNom : 'Client anonyme',
+      contact: ajouterClient ? (clientContact || null) : null,
+      montant_ht: totalHT,
+      montant_tva: tva,
+      montant_ttc: totalTTC,
+      type_vente: 'COMPTOIR',
+      observation: ajouterClient ? `Client: ${clientNom} ${clientContact ? `(${clientContact})` : ''}` : null
+    };
 
-      await createSale(sale, details);
+    const details = cart.map(item => ({
+      idProduit: item.idProduit,
+      quantite: item.quantite,
+      prix_unitaire_ht: item.prix_vente,
+      prix_unitaire_ttc: item.prix_vente * 1.18,
+      tva_taux: 18,
+      remise_percent: 0
+    }));
 
-      // Mettre à jour le stock
-      const db = await getDb();
-      for (const item of cart) {
-        await db.execute(`
-          UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-        `, [item.quantite, item.idProduit]);
-      }
+    // Appel à createSale (sans la mise à jour manuelle du stock car le repository s'en occupe)
+    await createSale(sale, details);
 
-      notifications.show({
-        title: 'Succès',
-        message: `Vente ${codeVente} enregistrée`,
-        color: 'green',
-      });
+    notifications.show({
+      title: 'Succès',
+      message: `Vente ${codeVente} enregistrée`,
+      color: 'green',
+    });
 
-      onSuccess();
+    onSuccess();
 
-    } catch (error) {
-      console.error(error);
-      notifications.show({
-        title: 'Erreur',
-        message: 'Erreur lors de l\'enregistrement',
-        color: 'red',
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  } catch (error) {
+    console.error(error);
+    notifications.show({
+      title: 'Erreur',
+      message: 'Erreur lors de l\'enregistrement',
+      color: 'red',
+    });
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';

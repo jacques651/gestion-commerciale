@@ -31,8 +31,8 @@ import {
   IconTruck,
   IconFileInvoice,
   IconCalculator,
-  IconReportAnalytics,
   IconList,
+  IconTruckDelivery,
 } from '@tabler/icons-react';
 import { Role } from '../../types/auth';
 
@@ -126,9 +126,10 @@ interface SectionProps {
   defaultOpen?: boolean;
   userRole?: Role;
   roles?: Role[];
+  description?: string;
 }
 
-function NavSection({ title, icon, children, defaultOpen = false, userRole, roles }: SectionProps) {
+function NavSection({ title, icon, children, defaultOpen = false, userRole, roles, description }: SectionProps) {
   const [opened, setOpened] = useState(defaultOpen);
   const theme = useMantineTheme();
 
@@ -158,9 +159,16 @@ function NavSection({ title, icon, children, defaultOpen = false, userRole, role
       >
         <Group gap="xs">
           <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>
-          <Text size="sm" fw={600} c="gray.2" tt="uppercase" style={{ letterSpacing: '1px' }}>
-            {title}
-          </Text>
+          <div>
+            <Text size="sm" fw={600} c="gray.2" tt="uppercase" style={{ letterSpacing: '1px' }}>
+              {title}
+            </Text>
+            {description && (
+              <Text size="xs" c="gray.5" style={{ fontSize: '10px' }}>
+                {description}
+              </Text>
+            )}
+          </div>
         </Group>
         {opened ? (
           <IconChevronDown size={16} color="gray.4" />
@@ -191,7 +199,7 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
 
   return (
     <Stack gap={0} style={{ height: '100%', backgroundColor: darkBlue }}>
-      {/* HEADER FIXE - Logo */}
+      {/* HEADER - Logo et profil utilisateur */}
       <Box p="md" pb="xs">
         <Text
           fw={800}
@@ -224,10 +232,11 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
 
       <Divider color={theme.colors.adminBlue?.[6]} />
 
-      {/* ZONE DE DÉFILEMENT */}
+      {/* ZONE DE NAVIGATION PRINCIPALE */}
       <ScrollArea style={{ flex: 1 }} scrollbarSize={6} offsetScrollbars>
         <Stack gap={4} p="md" pt="sm">
-          {/* DASHBOARD */}
+          
+          {/* 1. ACCUEIL */}
           <NavItem
             label="Tableau de bord"
             path="/"
@@ -237,10 +246,11 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
 
           <Divider color={theme.colors.adminBlue?.[6]} my="md" />
 
-          {/* SECTION COMMERCIAL */}
+          {/* 2. GESTION COMMERCIALE */}
           <NavSection
-            title="COMMERCIAL"
+            title="VENTES & CLIENTS"
             icon={<IconShoppingBag size={20} color="white" />}
+            description="Gestion des clients, commandes et factures"
             userRole={userRole}
             roles={allRoles}
           >
@@ -266,7 +276,7 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
               userRole={userRole}
             />
             <NavItem
-              label="Ventes"
+              label="Ventes comptoir"
               path="/ventes"
               icon={<IconBuildingStore size={16} color="gray.4" />}
               roles={adminAndManager}
@@ -274,10 +284,11 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
             />
           </NavSection>
 
-          {/* SECTION PRODUITS & STOCK */}
+          {/* 3. CATALOGUE & STOCK */}
           <NavSection
-            title="STOCK"
+            title="PRODUITS & STOCK"
             icon={<IconPackage size={20} color="white" />}
+            description="Gestion du catalogue et des inventaires"
             userRole={userRole}
             roles={allRoles}
           >
@@ -289,7 +300,7 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
               userRole={userRole}
             />
             <NavItem
-              label="Stock"
+              label="Stock global"
               path="/stock"
               icon={<IconBuildingStore size={16} color="gray.4" />}
               roles={adminAndManager}
@@ -297,33 +308,50 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
             />
           </NavSection>
 
-          {/* SECTION REVENDEURS */}
+          {/* 4. RÉSEAU DE REVENDEURS */}
           <NavSection
-            title="REVENDEURS"
+            title="RÉSEAU DE REVENDEURS"
             icon={<IconTruck size={20} color="white" />}
+            description="Gestion des revendeurs, stocks et commissions"
             userRole={userRole}
             roles={revendeurAccess}
           >
             <NavItem
-              label="Stocks revendeurs"
+              label="Dashboard revendeurs"
+              path="/dashboard-revendeurs"
+              icon={<IconChartBar size={16} color="gray.4" />}
+              roles={adminOnly}
+              userRole={userRole}
+              badge="Nouveau"
+              badgeColor="green"
+            />
+            <NavItem
+              label="Commandes revendeurs"
               path="/commandes-revendeur"
-              icon={<IconList size={16} color="gray.4" />}
+              icon={<IconTruckDelivery size={16} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
               badge="Stock"
-              badgeColor="green"
+              badgeColor="teal"
+            />
+            <NavItem
+              label="Stocks revendeurs"
+              path="/stock-revendeurs"
+              icon={<IconList size={16} color="gray.4" />}
+              roles={adminAndManager}
+              userRole={userRole}
             />
             <NavItem
               label="Décomptes"
               path="/decomptes"
               icon={<IconCalculator size={16} color="gray.4" />}
-              roles={adminAndManager}
+              roles={adminOnly}
               userRole={userRole}
               badge="Ventes"
               badgeColor="orange"
             />
             <NavItem
-              label="Factures revendeur"
+              label="Factures revendeurs"
               path="/factures-revendeur"
               icon={<IconFileInvoice size={16} color="gray.4" />}
               roles={adminOnly}
@@ -333,46 +361,30 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
             />
           </NavSection>
 
-          {/* SECTION FINANCES */}
+          {/* 5. FINANCES & COMPTABILITÉ */}
           <NavSection
             title="FINANCES"
             icon={<IconMoneybag size={20} color="white" />}
+            description="Suivi des paiements"
             userRole={userRole}
             roles={adminAndManager}
           >
             <NavItem
-              label="Règlements"
+              label="Règlements clients"
               path="/reglements"
               icon={<IconCash size={16} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
-            <NavItem
-              label="Rapports"
-              path="/rapports"
-              icon={<IconReportAnalytics size={16} color="gray.4" />}
-              roles={adminOnly}
-              userRole={userRole}
-              badge="Nouveau"
-              badgeColor="cyan"
-            />
           </NavSection>
-
-          {/* SECTION STATISTIQUES */}
-          <NavItem
-            label="Statistiques"
-            path="/statistiques"
-            icon={<IconChartBar size={18} />}
-            userRole={userRole}
-            roles={adminAndManager}
-          />
 
           <Divider color={theme.colors.adminBlue?.[6]} my="md" />
 
-          {/* SECTION PARAMÈTRES */}
+          {/* 6. ADMINISTRATION & PARAMÈTRES */}
           <NavSection
-            title="PARAMÈTRES"
+            title="ADMINISTRATION"
             icon={<IconSettings size={20} color="white" />}
+            description="Configuration et gestion des utilisateurs"
             userRole={userRole}
             roles={adminOnly}
             defaultOpen={userRole === 'admin'}
@@ -385,7 +397,7 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
               userRole={userRole}
             />
             <NavItem
-              label="Atelier"
+              label="Configuration atelier"
               path="/parametres"
               icon={<IconSettings size={16} color="gray.4" />}
               roles={adminOnly}
@@ -397,14 +409,14 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
               icon={<IconBusinessplan size={16} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
-              badge="Nouveau"
+              badge="Premium"
               badgeColor="cyan"
             />
           </NavSection>
         </Stack>
       </ScrollArea>
 
-      {/* FOOTER FIXE */}
+      {/* FOOTER - Déconnexion et infos */}
       <Box p="md" pt="xs">
         <Divider color={theme.colors.adminBlue?.[6]} mb="sm" />
         {onLogout && (
@@ -437,7 +449,7 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
           © 2026 Gestion Commerciale Pro
         </Text>
         <Text size="xs" c="dimmed" ta="center">
-          v3.0.0
+          Version 3.0.0
         </Text>
       </Box>
     </Stack>

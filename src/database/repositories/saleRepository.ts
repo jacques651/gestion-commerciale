@@ -1,5 +1,6 @@
 // src/database/repositories/saleRepository.ts
-import { getDb } from '../db';
+
+import { getDb } from "../db";
 
 export interface Sale {
   idVente: number;
@@ -26,53 +27,52 @@ export interface SaleDetail {
   tva_taux: number;
 }
 
-export type CreateSaleDetailInput = Omit<SaleDetail, 'idDetail' | 'idVente'>;
-export type CreateSaleInput = Omit<Sale, 'idVente' | 'date_vente'>;
+export type CreateSaleDetailInput =
+  Omit<SaleDetail, "idDetail" | "idVente">;
+
+export type CreateSaleInput =
+  Omit<Sale, "idVente" | "date_vente">;
 
 export const saleRepository = {
-  getAll: async (): Promise<Sale[]> => {
+
+  async getAll(): Promise<any[]> {
     const db = await getDb();
     const sales = await db.select<any[]>(`
-      SELECT 
+      SELECT
         v.*,
         COALESCE(
-          CASE 
-            WHEN cl.nom IS NOT NULL AND cl.prenom IS NOT NULL THEN cl.nom || ' ' || cl.prenom
-            WHEN cl.raison_sociale IS NOT NULL THEN cl.raison_sociale
-            ELSE NULL
-          END,
+          c.NomComplet,
+          c.Societe,
           v.nom_prenom
         ) as client_nom
       FROM ventes v
-      LEFT JOIN clients cl ON v.idClient = cl.idClient
+      LEFT JOIN clients c ON c.idClient = v.idClient
       ORDER BY v.date_vente DESC
     `);
-    return sales as Sale[];
+    return sales;
   },
 
-  getById: async (id: number): Promise<any> => {
+  async getById(id: number): Promise<any> {
     const db = await getDb();
-    
     const sales = await db.select<any[]>(`
-      SELECT 
+      SELECT
         v.*,
         COALESCE(
-          CASE 
-            WHEN cl.nom IS NOT NULL AND cl.prenom IS NOT NULL THEN cl.nom || ' ' || cl.prenom
-            WHEN cl.raison_sociale IS NOT NULL THEN cl.raison_sociale
-            ELSE NULL
-          END,
+          c.NomComplet,
+          c.Societe,
           v.nom_prenom
         ) as client_nom
       FROM ventes v
-      LEFT JOIN clients cl ON v.idClient = cl.idClient
+      LEFT JOIN clients c ON c.idClient = v.idClient
       WHERE v.idVente = ?
     `, [id]);
-    
-    if (sales.length === 0) return null;
-    
+
+    if (sales.length === 0) {
+      return null;
+    }
+
     const details = await db.select<any[]>(`
-      SELECT 
+      SELECT
         vd.idDetail,
         vd.idVente,
         vd.idProduit,
@@ -84,129 +84,176 @@ export const saleRepository = {
         p.designation as produit_nom,
         p.code_produit
       FROM vente_details vd
-      JOIN products p ON vd.idProduit = p.idProduit
+      INNER JOIN products p ON p.idProduit = vd.idProduit
       WHERE vd.idVente = ?
     `, [id]);
-    
+
     return {
       ...sales[0],
-      details: details
+      details
     };
   },
 
-  create: async (sale: CreateSaleInput, details: CreateSaleDetailInput[]): Promise<number> => {
-    const db = await getDb();
-    let transactionActive = false;
-    
-    try {
-      // CORRECTION: Utiliser execute pour BEGIN TRANSACTION
-      await db.execute('BEGIN TRANSACTION');
-      transactionActive = true;
-      
-      // 1. Insérer la vente
-      const result = await db.execute(`
-        INSERT INTO ventes (
-          code_vente, idClient, nom_prenom, contact,
-          montant_ht, montant_tva, montant_ttc, type_vente, observation
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        sale.code_vente, 
-        sale.idClient, 
-        sale.nom_prenom,
-        sale.contact, 
-        sale.montant_ht,
-        sale.montant_tva,
-        sale.montant_ttc,
-        sale.type_vente,
-        sale.observation
-      ]);
-      
-      const venteId = result.lastInsertId;
-      
-      if (!venteId) {
-        throw new Error('Impossible de récupérer l\'ID de la vente');
-      }
-      
-      // 2. Insérer les détails
-      for (const detail of details) {
-        await db.execute(`
-          INSERT INTO vente_details (
-            idVente, idProduit, quantite, 
-            prix_unitaire_ht, prix_unitaire_ttc, 
-            remise_percent, tva_taux
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [
-          venteId, 
-          detail.idProduit, 
-          detail.quantite,
-          detail.prix_unitaire_ht,
-          detail.prix_unitaire_ttc,
-          detail.remise_percent || 0,
-          detail.tva_taux || 18
-        ]);
-        
-        // Mettre à jour le stock
-        await db.execute(`
-          UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-        `, [detail.quantite, detail.idProduit]);
-      }
-      
-      await db.execute('COMMIT');
-      transactionActive = false;
-      return Number(venteId);
-      
-    } catch (error) {
-      console.error('❌ Erreur lors de la création de la vente:', error);
-      
-      // CORRECTION: Vérifier si une transaction est active avant de faire ROLLBACK
-      if (transactionActive) {
-        try {
-          await db.execute('ROLLBACK');
-        } catch (rollbackError) {
-          console.error('Erreur lors du rollback:', rollbackError);
-        }
-      }
-      throw error;
-    }
-  },
 
-  getTodaySales: async (): Promise<{ total: number; count: number }> => {
+async create(
+  sale: CreateSaleInput,
+  details: CreateSaleDetailInput[]
+): Promise<number> {
+  const db = await getDb();
+
+  try {
+    const result = await db.execute(`
+      INSERT INTO ventes
+      (
+        code_vente,
+        idClient,
+        nom_prenom,
+        contact,
+        montant_ht,
+        montant_tva,
+        montant_ttc,
+        type_vente,
+        observation
+      )
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `, [
+      sale.code_vente,
+      sale.idClient || null,
+      sale.nom_prenom || 'Client anonyme',
+      sale.contact || null,
+      sale.montant_ht || 0,
+      sale.montant_tva || 0,
+      sale.montant_ttc || 0,
+      sale.type_vente || 'COMPTOIR',
+      sale.observation || null
+    ]);
+
+    const venteId = Number(result.lastInsertId);
+
+    if (!venteId) {
+      throw new Error("Impossible de récupérer l'ID de la vente");
+    }
+
+    for (const detail of details) {
+      const stock = await db.select<any[]>(`
+        SELECT qte_stock
+        FROM products
+        WHERE idProduit = ?
+      `, [detail.idProduit]);
+
+      if (stock.length === 0) {
+        throw new Error("Produit introuvable");
+      }
+
+      const disponible = Number(stock[0].qte_stock);
+
+      if (disponible < detail.quantite) {
+        throw new Error(`Stock insuffisant pour le produit`);
+      }
+
+      await db.execute(`
+        INSERT INTO vente_details
+        (
+          idVente,
+          idProduit,
+          quantite,
+          prix_unitaire_ht,
+          prix_unitaire_ttc,
+          remise_percent,
+          tva_taux
+        )
+        VALUES (?,?,?,?,?,?,?)
+      `, [
+        venteId,
+        detail.idProduit,
+        detail.quantite,
+        detail.prix_unitaire_ht,
+        detail.prix_unitaire_ttc,
+        detail.remise_percent || 0,
+        detail.tva_taux || 18
+      ]);
+
+      await db.execute(`
+        UPDATE products
+        SET qte_stock = qte_stock - ?
+        WHERE idProduit = ?
+      `, [
+        detail.quantite,
+        detail.idProduit
+      ]);
+
+      // ✅ Version CORRECTE pour votre table - sans code_mouvement, avec idCommande
+      await db.execute(`
+        INSERT INTO mouvements_stock
+        (
+          idProduit,
+          type_mouvement,
+          quantite,
+          stock_avant,
+          stock_apres,
+          date_mouvement,
+          idCommande
+        )
+        VALUES (?,?,?,?,?,?,?)
+      `, [
+        detail.idProduit,
+        "VENTE",
+        detail.quantite,
+        disponible,
+        disponible - detail.quantite,
+        new Date().toISOString(),
+        null
+      ]);
+    }
+
+    return venteId;
+
+  } catch (error) {
+    console.error("ERREUR CREATE", error);
+    throw error;
+  }
+}
+,
+  async getTodaySales(): Promise<{ total: number; count: number; }> {
     const db = await getDb();
-    const results = await db.select<any[]>(`
-      SELECT 
+    const result = await db.select<any[]>(`
+      SELECT
         COALESCE(SUM(montant_ttc), 0) as total,
         COUNT(*) as count
       FROM ventes
-      WHERE date(date_vente) = date('now')
+      WHERE DATE(date_vente) = DATE('now')
     `);
-    return { total: results[0]?.total || 0, count: results[0]?.count || 0 };
+    return {
+      total: Number(result[0]?.total || 0),
+      count: Number(result[0]?.count || 0)
+    };
   },
 
-  getSalesByPeriod: async (startDate: string, endDate: string): Promise<any[]> => {
+  async getSalesByPeriod(startDate: string, endDate: string): Promise<any[]> {
     const db = await getDb();
     return await db.select<any[]>(`
-      SELECT 
-        date(date_vente) as date,
+      SELECT
+        DATE(date_vente) as date,
         COUNT(*) as nb_ventes,
         SUM(montant_ttc) as total
       FROM ventes
-      WHERE date(date_vente) BETWEEN ? AND ?
-      GROUP BY date(date_vente)
-      ORDER BY date(date_vente)
+      WHERE DATE(date_vente) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY DATE(date_vente)
+      ORDER BY DATE(date_vente)
     `, [startDate, endDate]);
   },
 
-  getTopProducts: async (limit: number = 10): Promise<any[]> => {
+  async getTopProducts(limit = 10): Promise<any[]> {
     const db = await getDb();
     return await db.select<any[]>(`
-      SELECT 
+      SELECT
         p.idProduit,
-        p.designation,
         p.code_produit,
+        p.designation,
         SUM(vd.quantite) as quantite_vendue,
         SUM(vd.quantite * vd.prix_unitaire_ht) as chiffre_affaires
       FROM vente_details vd
-      JOIN products p ON vd.idProduit = p.idProduit
+      INNER JOIN products p ON p.idProduit = vd.idProduit
       GROUP BY p.idProduit
       ORDER BY quantite_vendue DESC
       LIMIT ?

@@ -144,18 +144,19 @@ CREATE TABLE IF NOT EXISTS unites (
     FOREIGN KEY (unite_reference_id) REFERENCES unites(idUnite)
 );
 
+-- Table products
 CREATE TABLE IF NOT EXISTS products (
     idProduit INTEGER PRIMARY KEY AUTOINCREMENT,
     code_produit TEXT UNIQUE NOT NULL,
-    categorie TEXT,
     designation TEXT NOT NULL,
+    categorie TEXT,
     unite_base TEXT DEFAULT 'pièce',
     prix_achat_base REAL DEFAULT 0,
     prix_vente_detail REAL DEFAULT 0,
     prix_vente_gros REAL DEFAULT 0,
-    seuil_alerte INTEGER DEFAULT 0,
     commission_pourcentage REAL DEFAULT 0,
-    qte_stock INTEGER DEFAULT 0,
+    qte_stock REAL DEFAULT 0,
+    seuil_alerte REAL DEFAULT 0,
     date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
     est_supprime INTEGER DEFAULT 0
 );
@@ -182,24 +183,24 @@ CREATE TABLE IF NOT EXISTS conditionnements (
 
 CREATE TABLE IF NOT EXISTS clients (
     idClient INTEGER PRIMARY KEY AUTOINCREMENT,
-    NomComplet TEXT,
+    NomComplet TEXT NOT NULL,
     Societe TEXT,
     Adresse TEXT,
     Tel TEXT,
     Email TEXT,
     Ville TEXT,
-    TypeClient TEXT DEFAULT 'client' CHECK(TypeClient IN ('client', 'revendeur'))
+    TypeClient TEXT NOT NULL CHECK(TypeClient IN ('client', 'revendeur'))
 );
 
 -- =====================================================
--- 4. COMMANDES ET VENTES
+-- 4. COMMANDES
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS commandes (
     idCommande INTEGER PRIMARY KEY AUTOINCREMENT,
     code_commande TEXT UNIQUE NOT NULL,
     idClient INTEGER NOT NULL,
-    type_commande TEXT DEFAULT 'STANDARD',
+    type_commande TEXT NOT NULL,
     date_commande DATETIME DEFAULT CURRENT_TIMESTAMP,
     adresse_livraison TEXT,
     montant_ht REAL DEFAULT 0,
@@ -230,76 +231,126 @@ CREATE TABLE IF NOT EXISTS commande_details (
 );
 
 -- =====================================================
--- DÉCOMPTES REVENDEURS
+-- 5. STOCK REVENDEUR (table unique pour le stock des revendeurs)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS stock_revendeur (
+    idStockRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    qte_stock REAL DEFAULT 0,
+    prix_achat REAL DEFAULT 0,
+    prix_vente REAL DEFAULT 0,
+    commission_pourcentage REAL DEFAULT 0,
+    UNIQUE(idProduit, idRevendeur)
+);
+
+-- =====================================================
+-- 6. DÉCOMPTES REVENDEURS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS decomptes (
     idDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
     idClient INTEGER NOT NULL,
-    DateDecompte DATETIME DEFAULT CURRENT_TIMESTAMP,
-    Objet TEXT,
-    MontantHT REAL DEFAULT 0,
-    MontantTTC REAL DEFAULT 0,
-    CodeReçu TEXT UNIQUE,
-    DateReçu DATETIME,
-    ConditionPaiement TEXT DEFAULT 'NET',
-    DateEcheance DATE,
-    ModePaiement TEXT DEFAULT 'especes',
+    code_decompte TEXT UNIQUE,
+    date_decompte DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_achat REAL DEFAULT 0,
+    montant_vente REAL DEFAULT 0,
+    montant_benefice REAL DEFAULT 0,
+    montant_commission REAL DEFAULT 0,
+    montant_net REAL DEFAULT 0,
     statut TEXT DEFAULT 'EN_ATTENTE',
-    notes TEXT,
+    observation TEXT,
     FOREIGN KEY (idClient) REFERENCES clients(idClient)
 );
 
--- Table des détails des décomptes
 CREATE TABLE IF NOT EXISTS decompte_details (
     idDetailRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
     idDecompte INTEGER NOT NULL,
     idProduit INTEGER NOT NULL,
-    idRevendeur INTEGER NOT NULL,
-    QteDecompte REAL DEFAULT 0,
-    PrixUnitaireVente REAL DEFAULT 0,
-    DateVente DATETIME DEFAULT CURRENT_TIMESTAMP,
-    Description TEXT,
-    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
-    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
-    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
-);
-
--- Table des produits par revendeur (stock revendeur)
-CREATE TABLE IF NOT EXISTS produits_revendeur (
-    idProduitRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    idCommande INTEGER NOT NULL,
-    code_facture TEXT,
-    date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
-    idProduit INTEGER NOT NULL,
-    code_produit TEXT,
-    categorie TEXT,
-    designation TEXT NOT NULL,
-    unite_mesure TEXT DEFAULT 'pièce',
-    qte_stock REAL DEFAULT 0,
+    qte_decompte REAL NOT NULL DEFAULT 0,
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
-    idRevendeur INTEGER NOT NULL,
-    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
-    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
-    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
+    commission_pourcentage REAL DEFAULT 0,
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
--- Table des mouvements revendeur
+-- =====================================================
+-- 7. VENTES
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS ventes (
+    idVente INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_vente TEXT UNIQUE NOT NULL,
+    idClient INTEGER,
+    nom_prenom TEXT,
+    contact TEXT,
+    date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    type_vente TEXT DEFAULT 'COMPTOIR',
+    observation TEXT,
+    FOREIGN KEY (idClient) REFERENCES clients(idClient)
+);
+
+CREATE TABLE IF NOT EXISTS vente_details (
+    idDetail INTEGER PRIMARY KEY AUTOINCREMENT,
+    idVente INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_unitaire_ht REAL NOT NULL,
+    prix_unitaire_ttc REAL NOT NULL,
+    remise_percent REAL DEFAULT 0,
+    tva_taux REAL DEFAULT 18,
+    FOREIGN KEY (idVente) REFERENCES ventes(idVente) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vente_date ON ventes(date_vente);
+CREATE INDEX IF NOT EXISTS idx_vente_client ON ventes(idClient);
+CREATE INDEX IF NOT EXISTS idx_vente_detail_vente ON vente_details(idVente);
+CREATE INDEX IF NOT EXISTS idx_vente_detail_produit ON vente_details(idProduit);
+
+-- =====================================================
+-- 8. MOUVEMENTS STOCK
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS mouvements_stock (
+    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    type_mouvement TEXT NOT NULL,
+    quantite REAL NOT NULL,
+    stock_avant REAL NOT NULL,
+    stock_apres REAL NOT NULL,
+    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    idCommande INTEGER,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+);
+
+-- =====================================================
+-- 9. MOUVEMENTS REVENDEUR
+-- =====================================================
+
 CREATE TABLE IF NOT EXISTS mouvements_revendeur (
     idMouvementRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
     idProduit INTEGER NOT NULL,
     idRevendeur INTEGER NOT NULL,
-    type_mouvement TEXT CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
-    qte_mouvement REAL NOT NULL,
-    prix_unitaire REAL DEFAULT 0,
     idCommande INTEGER,
-    code_facture TEXT,
+    idDecompte INTEGER,
+    type_mouvement TEXT NOT NULL,
+    qte_mouvement REAL NOT NULL,
+    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (idProduit) REFERENCES products(idProduit),
     FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
-    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande)
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
 );
+
+-- =====================================================
+-- 10. FACTURES
+-- =====================================================
 
 CREATE TABLE IF NOT EXISTS factures (
     idFacture INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -319,50 +370,39 @@ CREATE TABLE IF NOT EXISTS factures (
     FOREIGN KEY (idCommande) REFERENCES commandes(idCommande)
 );
 
-CREATE TABLE IF NOT EXISTS ventes (
-    idVente INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_vente TEXT UNIQUE NOT NULL,
-    idClient INTEGER,
-    idCaissier INTEGER,
-    date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_ht REAL DEFAULT 0,
-    montant_tva REAL DEFAULT 0,
-    montant_ttc REAL DEFAULT 0,
-    montant_remise REAL DEFAULT 0,
-    montant_regle REAL DEFAULT 0,
-    monnaie_rendue REAL DEFAULT 0,
-    type_vente TEXT DEFAULT 'COMPTOIR',
-    statut TEXT DEFAULT 'COMPLETEE',
-    notes TEXT,
-    idFacture INTEGER,
-    FOREIGN KEY (idClient) REFERENCES clients(idClient),
-    FOREIGN KEY (idFacture) REFERENCES factures(idFacture)
+CREATE TABLE IF NOT EXISTS facture_details (
+    idDetailFacture INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFacture INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    qte REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    FOREIGN KEY (idFacture) REFERENCES factures(idFacture) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
-CREATE TABLE IF NOT EXISTS vente_details (
-    idDetail INTEGER PRIMARY KEY AUTOINCREMENT,
-    idVente INTEGER NOT NULL,
-    idProduit INTEGER NOT NULL,
-    idConditionnement INTEGER,
-    quantite REAL NOT NULL,
-    prix_unitaire_ht REAL NOT NULL,
-    prix_unitaire_ttc REAL NOT NULL,
-    remise_percent REAL DEFAULT 0,
-    tva_taux REAL DEFAULT 0,
-    FOREIGN KEY (idVente) REFERENCES ventes(idVente) ON DELETE CASCADE,
-    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
-    FOREIGN KEY (idConditionnement) REFERENCES conditionnements(idConditionnement)
+CREATE TABLE IF NOT EXISTS factures_revendeur (
+    idFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+    idCommande INTEGER NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    code_facture TEXT UNIQUE,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    commission REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
 );
 
 -- =====================================================
--- 5. REGLEMENTS
+-- 11. RÈGLEMENTS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS reglements (
     idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
     code_reglement TEXT UNIQUE NOT NULL,
     idClient INTEGER,
-    idFacture INTEGER,
+    idFacture INTEGER NOT NULL,
     idVente INTEGER,
     date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
     montant REAL NOT NULL,
@@ -380,31 +420,7 @@ CREATE TABLE IF NOT EXISTS reglements (
 );
 
 -- =====================================================
--- 6. MOUVEMENTS STOCK
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS mouvements_stock (
-    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_mouvement TEXT UNIQUE NOT NULL,
-    idProduit INTEGER NOT NULL,
-    idConditionnement INTEGER,
-    idLot INTEGER,
-    type_mouvement TEXT NOT NULL,
-    quantite REAL NOT NULL,
-    stock_avant REAL NOT NULL,
-    stock_apres REAL NOT NULL,
-    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
-    document_type TEXT,
-    document_id INTEGER,
-    reference TEXT,
-    motif TEXT,
-    idUtilisateur INTEGER,
-    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
-    FOREIGN KEY (idConditionnement) REFERENCES conditionnements(idConditionnement)
-);
-
--- =====================================================
--- 7. UTILISATEURS
+-- 12. UTILISATEURS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS utilisateurs (
@@ -421,7 +437,7 @@ CREATE TABLE IF NOT EXISTS utilisateurs (
 );
 
 -- =====================================================
--- 8. CONFIGURATION ATELIER
+-- 13. CONFIGURATION ATELIER
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS configuration_atelier (
@@ -437,7 +453,7 @@ CREATE TABLE IF NOT EXISTS configuration_atelier (
 );
 
 -- =====================================================
--- 9. CONFIGURATION COMMERCE
+-- 14. CONFIGURATION COMMERCE
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS config_commerce (
@@ -450,7 +466,7 @@ CREATE TABLE IF NOT EXISTS config_commerce (
 );
 
 -- =====================================================
--- 10. DONNEES PAR DEFAUT
+-- 15. DONNÉES PAR DÉFAUT
 -- =====================================================
 
 INSERT OR IGNORE INTO config_generale (id_config, nom_application, devise, taux_tva_default) 
@@ -508,30 +524,22 @@ export const getDb = async (): Promise<Database> => {
   }
 };
 
-// src/database/db.ts
-
 export const initDatabase = async (): Promise<void> => {
   try {
     const db = await getDb();
     
-    try {
-      await db.execute("DROP TABLE IF EXISTS commande_details");
-      await db.execute("DROP TABLE IF EXISTS commandes");
-      console.log("✅ Anciennes tables supprimées");
-    } catch (e) {
-      console.log("Tables non existantes ou déjà supprimées");
-    }
-    
+    // Exécuter le schéma complet
     await db.execute(SCHEMA_SQL);
     console.log('✅ Base de données initialisée avec succès');
     
-    const result = await db.select<any[]>("PRAGMA table_info(commandes)");
-    const hascode_commande = result && result.some((col: any) => col.name === 'code_commande');
-    console.log('Colonne code_commande existe:', hascode_commande);
+    // Vérification des tables principales
+    const tables = await db.select<any[]>(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' 
+      AND name IN ('products', 'clients', 'commandes', 'factures', 'ventes', 'stock_revendeur')
+    `);
     
-    if (!hascode_commande) {
-      console.warn('⚠️ La colonne code_commande est manquante');
-    }
+    console.log('📊 Tables vérifiées:', tables.map(t => t.name).join(', '));
     
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';
