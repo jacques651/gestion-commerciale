@@ -1,5 +1,6 @@
 // src/components/decomptes/NouveauDecompte.tsx
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Stack, Card, Title, Text, Group, Button, Select, Table, NumberInput,
   LoadingOverlay, Box, Divider, Alert, Badge, ScrollArea, ActionIcon,
@@ -13,9 +14,7 @@ import {
 import { getDb } from "../../database/db";
 import { notifications } from "@mantine/notifications";
 import { stockRevendeurRepository } from "../../database/repositories/stockRevendeurRepository";
-import {
-  decompteRepository
-} from "../../database/repositories/decompteRepository";
+import { decompteRepository } from "../../database/repositories/decompteRepository";
 
 interface Client {
   idClient: number;
@@ -27,15 +26,10 @@ interface Client {
 
 interface ProduitRevendeur {
   idProduit: number;
-
   designation: string;
-
   qte_stock: number;
-
   prix_achat_base: number;
-
   prix_vente_gros: number;
-
   commission_pourcentage: number;
 }
 
@@ -55,6 +49,7 @@ interface NouveauDecompteProps {
 }
 
 const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }) => {
+  const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [produits, setProduits] = useState<ProduitRevendeur[]>([]);
@@ -64,9 +59,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   const [error, setError] = useState("");
   const [recherche, setRecherche] = useState("");
   const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
-
   const [objet, setObjet] = useState("");
-
 
   // Charger les clients revendeurs
   useEffect(() => {
@@ -95,33 +88,16 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   }, []);
 
   // Charger les produits disponibles
-  const loadStockRevendeur =
-    async (
-      idRevendeur: number
-    ) => {
-
-      try {
-
-        const result =
-          await stockRevendeurRepository
-            .getByRevendeur(
-              idRevendeur
-            );
-
-        setProduits(result);
-
-        setPanier([]);
-
-        setQuantiteInput({});
-
-      } catch (error) {
-
-        console.error(error);
-
-      }
-
-    };
-
+  const loadStockRevendeur = async (idRevendeur: number) => {
+    try {
+      const result = await stockRevendeurRepository.getByRevendeur(idRevendeur);
+      setProduits(result);
+      setPanier([]);
+      setQuantiteInput({});
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const ajouterAuPanier = (produit: ProduitRevendeur, quantite: number) => {
     if (quantite <= 0) {
@@ -134,25 +110,9 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     }
 
     const existingIndex = panier.findIndex(p => p.idProduit === produit.idProduit);
-    const total =
-      quantite *
-      produit.prix_vente_gros;
-
-    const benefice =
-      (
-        produit.prix_vente_gros
-        -
-        produit.prix_achat_base
-      )
-      *
-      quantite;
-
-    const commission =
-      benefice *
-      (
-        produit.commission_pourcentage
-        / 100
-      );
+    const total = quantite * produit.prix_vente_gros;
+    const benefice = (produit.prix_vente_gros - produit.prix_achat_base) * quantite;
+    const commission = benefice * (produit.commission_pourcentage / 100);
 
     if (existingIndex >= 0) {
       const newQuantite = panier[existingIndex].quantite + quantite;
@@ -161,30 +121,12 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
         return;
       }
       const updated = [...panier];
-      const benefice =
-        (
-          produit.prix_vente_gros -
-          produit.prix_achat_base
-        )
-        *
-        newQuantite;
-
+      const benefice = (produit.prix_vente_gros - produit.prix_achat_base) * newQuantite;
       updated[existingIndex] = {
-
         ...updated[existingIndex],
-
         quantite: newQuantite,
-
-        total:
-          newQuantite *
-          produit.prix_vente_gros,
-
-        commission:
-          benefice *
-          (
-            produit.commission_pourcentage
-            / 100
-          )
+        total: newQuantite * produit.prix_vente_gros,
+        commission: benefice * (produit.commission_pourcentage / 100)
       };
       setPanier(updated);
     } else {
@@ -208,117 +150,63 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     setPanier(updated);
   };
 
-  const totalVente =
-    panier.reduce(
-      (s, i) =>
-        s + i.total,
-      0
-    );
+  const totalVente = panier.reduce((s, i) => s + i.total, 0);
+  const totalCommission = panier.reduce((s, i) => s + i.commission, 0);
+  const netAPayer = totalVente - totalCommission;
 
-  const totalCommission =
-    panier.reduce(
-      (s, i) =>
-        s + i.commission,
-      0
-    );
+  const handleSubmit = async () => {
+    if (!selectedClient) {
+      notifications.show({
+        title: "Erreur",
+        message: "Sélectionnez un revendeur",
+        color: "red"
+      });
+      return;
+    }
 
-  const netAPayer =
-    totalVente -
-    totalCommission;
+    if (panier.length === 0) {
+      notifications.show({
+        title: "Erreur",
+        message: "Ajoutez au moins un produit",
+        color: "red"
+      });
+      return;
+    }
 
-  const handleSubmit =
-    async () => {
+    try {
+      setSaving(true);
 
-      if (!selectedClient) {
+      const idDecompte = await decompteRepository.create(
+        {
+          idClient: selectedClient.idClient,
+          observation: objet
+        },
+        panier.map(item => ({
+          idProduit: item.idProduit,
+          qte_decompte: item.quantite
+        }))
+      );
 
-        notifications.show({
+      notifications.show({
+        title: "Succès",
+        message: `Décompte créé (#${idDecompte})`,
+        color: "green"
+      });
 
-          title: "Erreur",
+      // ✅ Rediriger vers la page d'impression du reçu
+      navigate(`/decomptes/${idDecompte}/print`);
 
-          message:
-            "Sélectionnez un revendeur",
+    } catch (error: any) {
+      notifications.show({
+        title: "Erreur",
+        message: error.message,
+        color: "red"
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
-          color: "red"
-
-        });
-
-        return;
-      }
-
-      if (panier.length === 0) {
-
-        notifications.show({
-
-          title: "Erreur",
-
-          message:
-            "Ajoutez au moins un produit",
-
-          color: "red"
-
-        });
-
-        return;
-      }
-
-      try {
-
-        setSaving(true);
-
-        const idDecompte =
-          await decompteRepository
-            .create(
-              {
-                idClient:
-                  selectedClient.idClient,
-
-                observation:
-                  objet
-              },
-              panier.map(
-                item => ({
-                  idProduit:
-                    item.idProduit,
-
-                  qte_decompte:
-                    item.quantite
-                })
-              )
-            );
-
-        notifications.show({
-
-          title: "Succès",
-
-          message:
-            `Décompte créé (#${idDecompte})`,
-
-          color: "green"
-
-        });
-
-        onSuccess();
-
-      } catch (error: any) {
-
-        notifications.show({
-
-          title: "Erreur",
-
-          message:
-            error.message,
-
-          color: "red"
-
-        });
-
-      } finally {
-
-        setSaving(false);
-
-      }
-
-    };
   if (loading) {
     return (
       <Card withBorder radius="md" p="lg" ta="center">
@@ -336,7 +224,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   const produitsFiltres = produits.filter(p =>
     p.designation.toLowerCase().includes(recherche.toLowerCase())
   );
-
 
   return (
     <Box p="md">
@@ -380,46 +267,24 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
             placeholder="Sélectionner un client"
             data={clientData}
             onChange={async (val) => {
-
-              const client =
-                clients.find(
-                  c =>
-                    c.idClient.toString() === val
-                );
-
-              setSelectedClient(
-                client || null
-              );
-
+              const client = clients.find(c => c.idClient.toString() === val);
+              setSelectedClient(client || null);
               if (!client) {
-
                 setProduits([]);
                 setPanier([]);
                 return;
               }
-
-              if (
-                client.TypeClient !==
-                "revendeur"
-              ) {
-
+              if (client.TypeClient !== "revendeur") {
                 notifications.show({
                   title: "Erreur",
-                  message:
-                    "Le client doit être un revendeur",
+                  message: "Le client doit être un revendeur",
                   color: "red"
                 });
-
                 setProduits([]);
                 setPanier([]);
-
                 return;
               }
-
-              await loadStockRevendeur(
-                client.idClient
-              );
-
+              await loadStockRevendeur(client.idClient);
             }}
             leftSection={<IconUser size={16} />}
             required
@@ -465,9 +330,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
                 leftSection={<IconRefresh size={16} />}
                 onClick={() => {
                   if (selectedClient) {
-                    loadStockRevendeur(
-                      selectedClient.idClient
-                    );
+                    loadStockRevendeur(selectedClient.idClient);
                   }
                 }}
                 size="sm"
@@ -578,12 +441,8 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
               <Flex justify="flex-end">
                 <Stack gap={4} align="flex-end">
                   <Group>
-                    <Text size="sm">
-                      Total ventes :
-                    </Text>
-                    <Text fw={600}>
-                      {totalVente.toLocaleString()} FCFA
-                    </Text>
+                    <Text size="sm">Total ventes :</Text>
+                    <Text fw={600}>{totalVente.toLocaleString()} FCFA</Text>
                   </Group>
                   <Group>
                     <Text size="sm" c="orange">Commission :</Text>
@@ -602,7 +461,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
           <Divider my="md" />
 
           <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-
             <TextInput
               label="Objet"
               placeholder="Motif du décompte..."
@@ -610,7 +468,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
               onChange={(e) => setObjet(e.target.value)}
               size="md"
             />
-
           </SimpleGrid>
 
           <Divider my="md" />

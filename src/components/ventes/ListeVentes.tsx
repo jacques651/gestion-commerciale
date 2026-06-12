@@ -4,33 +4,46 @@ import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   LoadingOverlay, Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper, Alert,
-  Loader
+  Loader, NumberInput,
+  Center
 } from "@mantine/core";
 import {
   IconBuildingStore, IconTrash, IconSearch, IconRefresh,
   IconInfoCircle, IconCalendar, IconCash, IconPlus, IconPrinter, IconEye,
-  IconShoppingCart, IconTruck, IconReceipt, IconAlertCircle} from "@tabler/icons-react";
+  IconShoppingCart, IconTruck, IconReceipt, IconAlertCircle, IconEdit,
+  IconDeviceFloppy, IconX
+} from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import FormulaireVente from "./FormulaireVente";
 import ReçuVente from "./ReçuVente";
 import { notifications } from "@mantine/notifications";
 
 interface Vente {
-  nom_prenom: string;
-  contact: any;
-  Tel: any;
-  montant_total: number;
   idVente: number;
   code_vente: string;
   idClient: number | null;
   client_nom: string;
   client_societe: string;
   client_tel: string;
+  nom_prenom: string;
+  contact: string;
+  Tel: string;
   date_vente: string;
   montant_ht: number;
   montant_ttc: number;
+  montant_total: number;
   type_vente: string;
   statut: string;
+}
+
+interface ProduitVente {
+  idDetail: number;
+  idProduit: number;
+  designation: string;
+  code_produit: string;
+  quantite: number;
+  prix_unitaire_ht: number;
+  total: number;
 }
 
 const ListeVentes: React.FC = () => {
@@ -47,6 +60,12 @@ const ListeVentes: React.FC = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [venteToDelete, setVenteToDelete] = useState<Vente | null>(null);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [venteToEdit, setVenteToEdit] = useState<Vente | null>(null);
+  const [editProduits, setEditProduits] = useState<ProduitVente[]>([]);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editQuantites, setEditQuantites] = useState<Record<number, number>>({});
+  
   const itemsPerPage = 10;
 
   const chargerVentes = async () => {
@@ -79,6 +98,126 @@ const ListeVentes: React.FC = () => {
   useEffect(() => {
     chargerVentes();
   }, []);
+
+  const handleEditVente = async (vente: Vente) => {
+    setEditLoading(true);
+    setVenteToEdit(vente);
+    try {
+      const db = await getDb();
+      const produits = await db.select<ProduitVente[]>(`
+        SELECT 
+          vd.idDetail,
+          vd.idProduit,
+          vd.quantite,
+          vd.prix_unitaire_ht,
+          (vd.quantite * vd.prix_unitaire_ht) as total,
+          p.designation,
+          p.code_produit
+        FROM vente_details vd
+        LEFT JOIN products p ON vd.idProduit = p.idProduit
+        WHERE vd.idVente = ?
+      `, [vente.idVente]);
+      
+      setEditProduits(produits);
+      const quantitesInit: Record<number, number> = {};
+      produits.forEach(p => {
+        quantitesInit[p.idProduit] = p.quantite;
+      });
+      setEditQuantites(quantitesInit);
+      setEditModalOpen(true);
+    } catch (error) {
+      console.error("Erreur chargement produits:", error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors du chargement des produits',
+        color: 'red',
+      });
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleUpdateQuantite = (idProduit: number, newQuantite: number, stockDisponible: number) => {
+    if (newQuantite < 0) return;
+    if (newQuantite > stockDisponible) {
+      notifications.show({
+        title: 'Erreur',
+        message: `Stock insuffisant. Maximum: ${stockDisponible}`,
+        color: 'red',
+      });
+      return;
+    }
+    setEditQuantites(prev => ({ ...prev, [idProduit]: newQuantite }));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!venteToEdit) return;
+    
+    setEditLoading(true);
+    try {
+      const db = await getDb();
+      
+      // Calculer les nouveaux montants
+      let nouveauMontantHT = 0;
+      for (const produit of editProduits) {
+        const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
+        nouveauMontantHT += nouvelleQuantite * produit.prix_unitaire_ht;
+      }
+      const nouveauMontantTTC = nouveauMontantHT * 1.18;
+      
+      // Mettre à jour la vente
+      await db.execute(`
+        UPDATE ventes 
+        SET montant_ht = ?, montant_ttc = ?
+        WHERE idVente = ?
+      `, [nouveauMontantHT, nouveauMontantTTC, venteToEdit.idVente]);
+      
+      // Mettre à jour les détails et ajuster les stocks
+      for (const produit of editProduits) {
+        const ancienneQuantite = produit.quantite;
+        const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
+        const difference = nouvelleQuantite - ancienneQuantite;
+        
+        if (difference !== 0) {
+          // Mettre à jour la quantité dans vente_details
+          await db.execute(`
+            UPDATE vente_details 
+            SET quantite = ?
+            WHERE idDetail = ?
+          `, [nouvelleQuantite, produit.idDetail]);
+          
+          // Ajuster le stock
+          await db.execute(`
+            UPDATE products 
+            SET qte_stock = qte_stock - ?
+            WHERE idProduit = ?
+          `, [difference, produit.idProduit]);
+        }
+      }
+      
+      notifications.show({
+        title: 'Succès',
+        message: 'Vente modifiée avec succès',
+        color: 'green',
+      });
+      
+      setEditModalOpen(false);
+      setVenteToEdit(null);
+      setEditProduits([]);
+      setEditQuantites({});
+      chargerVentes();
+      
+    } catch (error) {
+      console.error("Erreur modification:", error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors de la modification',
+        color: 'red',
+      });
+    } finally {
+      setEditLoading(false);
+    }
+  };
 
   const supprimerVente = async () => {
     if (!venteToDelete) return;
@@ -130,7 +269,8 @@ const ListeVentes: React.FC = () => {
           vd.*,
           p.designation as produit_nom,
           p.code_produit,
-          p.categorie
+          p.categorie,
+          p.qte_stock
         FROM vente_details vd
         LEFT JOIN products p ON vd.idProduit = p.idProduit
         WHERE vd.idVente = ?
@@ -244,7 +384,6 @@ const ListeVentes: React.FC = () => {
             </Group>
           </Flex>
 
-          {/* Cartes statistiques */}
           <SimpleGrid cols={4} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
@@ -264,7 +403,7 @@ const ListeVentes: React.FC = () => {
                 </ThemeIcon>
                 <div>
                   <Text c="white" size="xs">Chiffre d'affaires</Text>
-                  <Text c="white" fw={700} size="xl">{formatMontant(totalMontant)} F</Text>
+                  <Text c="white" fw={700} size="xl">{formatMontant(totalMontant)} FCFA</Text>
                 </div>
               </Group>
             </Card>
@@ -321,7 +460,7 @@ const ListeVentes: React.FC = () => {
             </Group>
             <Group>
               <Tooltip label="Actualiser">
-                <ActionIcon variant="light" onClick={() => chargerVentes()} size="lg" color="adminBlue">
+                <ActionIcon variant="light" onClick={() => chargerVentes()} size="lg" color="blue">
                   <IconRefresh size={18} />
                 </ActionIcon>
               </Tooltip>
@@ -353,14 +492,14 @@ const ListeVentes: React.FC = () => {
           <Box style={{ overflowX: "auto" }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',}}>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)'}}>
                   <Table.Th w={60}>N°</Table.Th>
                   <Table.Th>Code</Table.Th>
                   <Table.Th>Client</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Date</Table.Th>
                   <Table.Th ta="right">Montant</Table.Th>
-                  <Table.Th ta="center" w={160}>Actions</Table.Th>
+                  <Table.Th ta="center" w={200}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -395,12 +534,17 @@ const ListeVentes: React.FC = () => {
                       </Group>
                     </Table.Td>
                     <Table.Td ta="right">
-                      <Text fw={700} c="adminBlue" size="sm">{formatMontant(v.montant_ttc)} FCFA</Text>
+                      <Text fw={700} c="blue" size="sm">{formatMontant(v.montant_ttc)} FCFA</Text>
                     </Table.Td>
                     <Table.Td ta="center">
                       <Group gap={6} justify="center">
+                        <Tooltip label="Modifier">
+                          <ActionIcon size="md" color="yellow" variant="light" onClick={() => handleEditVente(v)}>
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                        </Tooltip>
                         <Tooltip label="Voir détails">
-                          <ActionIcon size="md" color="adminBlue" variant="light" onClick={() => handleViewDetails(v)}>
+                          <ActionIcon size="md" color="blue" variant="light" onClick={() => handleViewDetails(v)}>
                             <IconEye size={16} />
                           </ActionIcon>
                         </Tooltip>
@@ -447,7 +591,111 @@ const ListeVentes: React.FC = () => {
           )}
         </Card>
 
-        {/* Modal des détails */}
+        {/* Modal d'édition */}
+        <Modal
+          opened={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setVenteToEdit(null);
+            setEditProduits([]);
+            setEditQuantites({});
+          }}
+          title={`Modifier la vente ${venteToEdit?.code_vente || ''}`}
+          size="xl"
+          padding="md"
+          centered
+          styles={{
+            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            title: { color: 'white', fontWeight: 600 },
+            body: { padding: '20px' }
+          }}
+        >
+          {editLoading ? (
+            <Center py={50}>
+              <Loader size="xl" />
+            </Center>
+          ) : (
+            <Stack gap="md">
+              <Card withBorder p="sm" bg="gray.0" radius="md">
+                <SimpleGrid cols={2} spacing="md">
+                  <div>
+                    <Text size="xs" c="dimmed">Client</Text>
+                    <Text fw={500}>{venteToEdit?.client_nom || venteToEdit?.nom_prenom || 'Client inconnu'}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Contact</Text>
+                    <Text>{venteToEdit?.client_tel || venteToEdit?.contact || '-'}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Date</Text>
+                    <Text>{venteToEdit ? new Date(venteToEdit.date_vente).toLocaleDateString('fr-FR') : '-'}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Type</Text>
+                    <Badge color={venteToEdit?.type_vente === 'COMPTOIR' ? 'blue' : 'orange'} variant="light">
+                      {venteToEdit?.type_vente === 'COMPTOIR' ? 'Comptoir' : 'Livraison'}
+                    </Badge>
+                  </div>
+                </SimpleGrid>
+              </Card>
+
+              <Divider label="Produits" labelPosition="center" />
+
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Code</Table.Th>
+                    <Table.Th>Désignation</Table.Th>
+                    <Table.Th>Prix unitaire</Table.Th>
+                    <Table.Th>Quantité</Table.Th>
+                    <Table.Th>Total</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {editProduits.map((produit) => {
+                    const quantite = editQuantites[produit.idProduit] || 0;
+                    const total = quantite * produit.prix_unitaire_ht;
+                    return (
+                      <Table.Tr key={produit.idProduit}>
+                        <Table.Td>{produit.code_produit || '-'}</Table.Td>
+                        <Table.Td fw={500}>{produit.designation}</Table.Td>
+                        <Table.Td>{formatMontant(produit.prix_unitaire_ht)} FCFA</Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            size="xs"
+                            min={0}
+                            value={quantite}
+                            onChange={(val) => handleUpdateQuantite(produit.idProduit, Number(val) || 0, 9999)}
+                            style={{ width: 100 }}
+                          />
+                        </Table.Td>
+                        <Table.Td fw={600}>{formatMontant(total)} FCFA</Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+
+              <Divider />
+
+              <Group justify="space-between">
+                <Text fw={700} size="lg">
+                  Total: {formatMontant(editProduits.reduce((sum, p) => sum + ((editQuantites[p.idProduit] || 0) * p.prix_unitaire_ht), 0) * 1.18)} FCFA
+                </Text>
+                <Group>
+                  <Button variant="outline" onClick={() => setEditModalOpen(false)} leftSection={<IconX size={16} />}>
+                    Annuler
+                  </Button>
+                  <Button onClick={handleSaveEdit} loading={editLoading} color="green" leftSection={<IconDeviceFloppy size={16} />}>
+                    Enregistrer
+                  </Button>
+                </Group>
+              </Group>
+            </Stack>
+          )}
+        </Modal>
+
+        {/* Modal des détails (inchangé) */}
         <Modal
           opened={detailsModalOpen}
           onClose={() => {
@@ -508,8 +756,8 @@ const ListeVentes: React.FC = () => {
                           <Text size="sm" fw={500}>{detail.produit_nom || detail.designation || '-'}</Text>
                         </Table.Td>
                         <Table.Td>{detail.quantite}</Table.Td>
-                        <Table.Td>{formatMontant(detail.prix_unitaire_ht)} F</Table.Td>
-                        <Table.Td fw={600}>{formatMontant(detail.quantite * detail.prix_unitaire_ht)} F</Table.Td>
+                        <Table.Td>{formatMontant(detail.prix_unitaire_ht)} FCFA</Table.Td>
+                        <Table.Td fw={600}>{formatMontant(detail.quantite * detail.prix_unitaire_ht)} FCFA</Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
@@ -520,7 +768,7 @@ const ListeVentes: React.FC = () => {
 
               <Divider />
               <Group justify="flex-end">
-                <Text fw={800} size="lg" c="adminBlue">
+                <Text fw={800} size="lg" c="blue">
                   Total: {formatMontant(selectedVenteDetails.montant_ttc)} FCFA
                 </Text>
               </Group>
@@ -528,7 +776,7 @@ const ListeVentes: React.FC = () => {
           )}
         </Modal>
 
-        {/* Modal confirmation suppression */}
+        {/* Modal confirmation suppression (inchangé) */}
         <Modal
           opened={deleteModalOpen}
           onClose={() => setDeleteModalOpen(false)}
@@ -555,7 +803,7 @@ const ListeVentes: React.FC = () => {
           </Stack>
         </Modal>
 
-        {/* Modal Instructions */}
+        {/* Modal Instructions (inchangé) */}
         <Modal
           opened={infoModalOpen}
           onClose={() => setInfoModalOpen(false)}
@@ -570,9 +818,10 @@ const ListeVentes: React.FC = () => {
         >
           <Stack gap="md">
             <Text size="sm">1. Enregistrez les ventes au comptoir</Text>
-            <Text size="sm">2. Imprimez le reçu pour le client</Text>
-            <Text size="sm">3. Le stock est mis à jour automatiquement</Text>
-            <Text size="sm">4. Consultez les détails avec l'icône 👁️</Text>
+            <Text size="sm">2. Modifiez une vente avec le bouton ✏️</Text>
+            <Text size="sm">3. Imprimez le reçu pour le client</Text>
+            <Text size="sm">4. Le stock est mis à jour automatiquement</Text>
+            <Text size="sm">5. Consultez les détails avec l'icône 👁️</Text>
             <Divider />
             <Text size="xs" c="dimmed" ta="center">Version 1.0.0 - Gestion Commerciale Pro</Text>
           </Stack>

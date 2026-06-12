@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getDb } from '../database/db';
 import { notifications } from '@mantine/notifications';
+import { getNextReglementCode } from '../services/codeGeneratorService';
 
 export interface Reglement {
   idReglement: number;
@@ -17,6 +18,16 @@ export interface Reglement {
   numero_cheque: string | null;
   observation: string | null;
   client_nom?: string;
+}
+
+export interface CreateReglementInput {
+  idClient: number | null;
+  idFacture: number | null;
+  idDecompte?: number | null;
+  montant: number;
+  mode_reglement: string;
+  reference: string | null;
+  observation: string | null;
 }
 
 export const useReglements = () => {
@@ -72,9 +83,12 @@ export const useReglements = () => {
     }
   }, []);
 
-  // Créer un règlement
-  const createReglement = useCallback(async (reglement: any) => {
+  // ✅ Créer un règlement avec génération automatique du code
+  const createReglement = useCallback(async (reglement: CreateReglementInput) => {
     try {
+      // ✅ Générer le code règlement
+      const codeReglement = await getNextReglementCode();
+      
       const db = await getDb();
       const result = await db.execute(`
         INSERT INTO reglements (
@@ -91,21 +105,21 @@ export const useReglements = () => {
           observation
         ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)
       `, [
-        reglement.code_reglement,
-        reglement.idClient,
+        codeReglement,
+        reglement.idClient || null,
         reglement.idFacture || null,
-        reglement.idVente || null,
+        reglement.idDecompte || null,  // idVente peut être utilisé pour les décomptes
         reglement.montant,
         reglement.mode_reglement,
         reglement.reference || null,
-        reglement.banque || null,
-        reglement.numero_cheque || null,
+        null, // banque
+        null, // numero_cheque
         reglement.observation || null
       ]);
       
       notifications.show({
         title: 'Succès',
-        message: 'Règlement enregistré avec succès',
+        message: `Règlement ${codeReglement} enregistré avec succès`,
         color: 'green',
       });
       
@@ -115,7 +129,7 @@ export const useReglements = () => {
       console.error('Erreur création règlement:', err);
       notifications.show({
         title: 'Erreur',
-        message: 'Erreur lors de l\'enregistrement',
+        message: err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement',
         color: 'red',
       });
       throw err;
@@ -146,6 +160,42 @@ export const useReglements = () => {
     }
   }, [loadReglements]);
 
+  // Récupérer les règlements d'une facture
+  const getReglementsByFacture = useCallback(async (idFacture: number) => {
+    try {
+      const db = await getDb();
+      const result = await db.select<any[]>(`
+        SELECT 
+          r.*,
+          cl.NomComplet as client_nom
+        FROM reglements r
+        LEFT JOIN clients cl ON r.idClient = cl.idClient
+        WHERE r.idFacture = ?
+        ORDER BY r.date_reglement ASC
+      `, [idFacture]);
+      return result;
+    } catch (err) {
+      console.error('Erreur récupération règlements facture:', err);
+      return [];
+    }
+  }, []);
+
+  // Récupérer le montant total réglé pour une facture
+  const getTotalRegleByFacture = useCallback(async (idFacture: number) => {
+    try {
+      const db = await getDb();
+      const result = await db.select<any[]>(`
+        SELECT COALESCE(SUM(montant), 0) as total
+        FROM reglements
+        WHERE idFacture = ?
+      `, [idFacture]);
+      return result[0]?.total || 0;
+    } catch (err) {
+      console.error('Erreur calcul total réglé:', err);
+      return 0;
+    }
+  }, []);
+
   useEffect(() => {
     loadReglements();
   }, [loadReglements]);
@@ -158,5 +208,7 @@ export const useReglements = () => {
     getReglementById,
     createReglement,
     deleteReglement,
+    getReglementsByFacture,
+    getTotalRegleByFacture,
   };
 };

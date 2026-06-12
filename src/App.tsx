@@ -10,6 +10,10 @@ import { initDatabase, getDb, isDatabaseConnected } from './database/db';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
+// ==================== FACTURES DÉTAILS (imports directs car utilisés dans les routes) ====================
+import DetailFacture from './components/factures/DetailFacture';
+import DetailFactureRevendeur from './components/factures/DetailFactureRevendeur';
+
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
 
@@ -24,7 +28,7 @@ const ListeCommandes = lazy(() => import('./components/commandes/ListeCommandes'
 const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireCommande'));
 
 // ==================== REVENDEURS ====================
-const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur').then(module => ({ default: module.ListeCommandesRevendeur })));
+const ListeCommandesRevendeur = lazy(() => import('./components/decomptes/ListeDecomptes').then(module => ({ default: module.ListeCommandesRevendeur })));
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
@@ -38,7 +42,7 @@ const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
 const StockGlobal = lazy(() => import('./components/stock/StockGlobal'));
 
 // ==================== FINANCES ====================
-const ListeDecomptes = lazy(() => import('./components/decomptes/ListeDecomptes'));
+const ListeDecomptes = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
 const ListeReglements = lazy(() => import('./components/reglements/ListeReglements'));
 
 // ==================== PARAMÈTRES ====================
@@ -232,9 +236,7 @@ function AuthenticatedApp() {
             } />
             <Route path="/commandes/nouveau" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
-                <FormulaireCommande opened={false} onClose={function (): void {
-                  throw new Error('Function not implemented.');
-                } } />
+                <FormulaireCommande opened={true} onClose={() => { }} />
               </RouteGuard>
             } />
             <Route path="/factures" element={
@@ -242,6 +244,20 @@ function AuthenticatedApp() {
                 <ListeFactures />
               </RouteGuard>
             } />
+
+            {/* DÉTAILS FACTURES */}
+            <Route path="/factures/:id" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <DetailFacture />
+              </RouteGuard>
+            } />
+
+            <Route path="/factures-revendeur/:id" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <DetailFactureRevendeur />
+              </RouteGuard>
+            } />
+
             <Route path="/ventes" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeVentes />

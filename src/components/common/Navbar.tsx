@@ -10,6 +10,9 @@ import {
   Group,
   Tooltip,
   Badge,
+  Avatar,
+  Menu,
+  UnstyledButton,
 } from '@mantine/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -33,6 +36,12 @@ import {
   IconCalculator,
   IconList,
   IconTruckDelivery,
+  IconUser,
+  IconReportAnalytics,
+  IconHelp,
+  IconStar,
+  IconDatabase,
+  IconPercentage,
 } from '@tabler/icons-react';
 import { Role } from '../../types/auth';
 
@@ -45,20 +54,22 @@ interface NavItemProps {
   badge?: string;
   badgeColor?: string;
   onClick?: () => void;
+  disabled?: boolean;
 }
 
-function NavItem({ label, path, icon, roles, userRole, badge, badgeColor = 'yellow', onClick }: NavItemProps) {
+function NavItem({ label, path, icon, roles, userRole, badge, badgeColor = 'yellow', onClick, disabled }: NavItemProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useMantineTheme();
 
-  if (roles && userRole && !roles.includes(userRole)) {
+  if ((roles && userRole && !roles.includes(userRole)) || disabled) {
     return null;
   }
 
   const active = location.pathname === path;
 
   const handleClick = () => {
+    if (disabled) return;
     if (onClick) {
       onClick();
     } else {
@@ -75,33 +86,34 @@ function NavItem({ label, path, icon, roles, userRole, badge, badgeColor = 'yell
       <Box
         onClick={handleClick}
         style={{
-          cursor: 'pointer',
-          padding: '8px 12px 8px 28px',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          padding: '10px 12px 10px 28px',
           borderRadius: theme.radius.sm,
           backgroundColor: active ? lightBlue : 'transparent',
           color: active ? 'white' : yellow,
           fontWeight: active ? 600 : 400,
           display: 'flex',
           alignItems: 'center',
-          gap: '10px',
+          gap: '12px',
           transition: 'all 0.2s ease',
           marginBottom: '2px',
+          opacity: disabled ? 0.5 : 1,
         }}
         onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
-          if (!active) {
+          if (!active && !disabled) {
             e.currentTarget.style.backgroundColor = hoverBlue;
             e.currentTarget.style.paddingLeft = '32px';
           }
         }}
         onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-          if (!active) {
+          if (!active && !disabled) {
             e.currentTarget.style.backgroundColor = 'transparent';
             e.currentTarget.style.paddingLeft = '28px';
           }
         }}
       >
-        {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
-        <Text size="sm" fw={active ? 600 : 400}>
+        {icon && <span style={{ display: 'flex', alignItems: 'center', width: 20 }}>{icon}</span>}
+        <Text size="sm" fw={active ? 600 : 500}>
           {label}
         </Text>
         {badge && (
@@ -127,9 +139,10 @@ interface SectionProps {
   userRole?: Role;
   roles?: Role[];
   description?: string;
+  count?: number;
 }
 
-function NavSection({ title, icon, children, defaultOpen = false, userRole, roles, description }: SectionProps) {
+function NavSection({ title, icon, children, defaultOpen = false, userRole, roles, description, count }: SectionProps) {
   const [opened, setOpened] = useState(defaultOpen);
   const theme = useMantineTheme();
 
@@ -139,44 +152,50 @@ function NavSection({ title, icon, children, defaultOpen = false, userRole, role
 
   return (
     <Box mb="xs">
-      <Box
+      <UnstyledButton
         onClick={() => setOpened(!opened)}
         style={{
-          cursor: 'pointer',
+          width: '100%',
           padding: '10px 12px',
           borderRadius: theme.radius.sm,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
           transition: 'all 0.2s ease',
         }}
-        onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+        onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7] || '#295080';
         }}
-        onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
+        onMouseLeave={(e) => {
           e.currentTarget.style.backgroundColor = 'transparent';
         }}
       >
-        <Group gap="xs">
-          <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>
-          <div>
-            <Text size="sm" fw={600} c="gray.2" tt="uppercase" style={{ letterSpacing: '1px' }}>
-              {title}
-            </Text>
-            {description && (
-              <Text size="xs" c="gray.5" style={{ fontSize: '10px' }}>
-                {description}
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap">
+            <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>
+            <div style={{ flex: 1 }}>
+              <Text size="sm" fw={600} c="gray.2" tt="uppercase" style={{ letterSpacing: '1px' }}>
+                {title}
               </Text>
+              {description && (
+                <Text size="xs" c="gray.5" style={{ fontSize: '10px' }}>
+                  {description}
+                </Text>
+              )}
+            </div>
+          </Group>
+          <Group gap="xs">
+            {count !== undefined && count > 0 && (
+              <Badge size="xs" color="blue" variant="filled" radius="xl">
+                {count}
+              </Badge>
             )}
-          </div>
+            {opened ? (
+              <IconChevronDown size={14} color="gray.4" />
+            ) : (
+              <IconChevronRight size={14} color="gray.4" />
+            )}
+          </Group>
         </Group>
-        {opened ? (
-          <IconChevronDown size={16} color="gray.4" />
-        ) : (
-          <IconChevronRight size={16} color="gray.4" />
-        )}
-      </Box>
-      {opened && <Box ml="md">{children}</Box>}
+      </UnstyledButton>
+      {opened && <Box ml="md" mt={4}>{children}</Box>}
     </Box>
   );
 }
@@ -184,10 +203,11 @@ function NavSection({ title, icon, children, defaultOpen = false, userRole, role
 interface NavbarProps {
   userRole?: Role;
   userName?: string;
+  userAvatar?: string;
   onLogout?: () => void;
 }
 
-export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
+export default function Navbar({ userRole, userName, userAvatar, onLogout }: NavbarProps) {
   const theme = useMantineTheme();
   const darkBlue = theme.colors.adminBlue?.[8] || '#1b365d';
 
@@ -197,88 +217,146 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
   const allRoles: Role[] = ['admin', 'gestionnaire', 'commercial', 'stockiste', 'comptable'];
   const revendeurAccess: Role[] = ['admin', 'gestionnaire', 'commercial'];
 
+  // Récupérer les initiales pour l'avatar
+  const getInitials = (name: string) => {
+    if (!name) return 'U';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  };
+
+  const roleLabels: Record<string, string> = {
+    admin: 'Administrateur',
+    gestionnaire: 'Gestionnaire',
+    commercial: 'Commercial',
+    stockiste: 'Gestionnaire stock',
+    comptable: 'Comptable'
+  };
+
+  // État actif pour le footer
+
   return (
     <Stack gap={0} style={{ height: '100%', backgroundColor: darkBlue }}>
       {/* HEADER - Logo et profil utilisateur */}
-      <Box p="md" pb="xs">
+      <Box p="lg" pb="md" style={{ borderBottom: `1px solid ${theme.colors.adminBlue?.[6]}` }}>
         <Text
           fw={800}
-          size="lg"
+          size="xl"
           c="yellow"
           style={{
             fontFamily: "'Times New Roman', serif",
             textAlign: 'center',
-            letterSpacing: '3px',
+            letterSpacing: '4px',
             textShadow: '2px 2px 4px rgba(0,0,0,0.5)',
-            fontSize: '18px',
+            fontSize: '20px',
           }}
         >
           GESTION PRO
         </Text>
+        
         {userName && (
           <>
-            <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
-            <Box style={{ textAlign: 'center' }}>
-              <Text size="sm" fw={500} c="white">
-                {userName}
-              </Text>
-              <Text size="xs" c="gray.4" tt="capitalize" mt={2}>
-                {userRole === 'gestionnaire' ? 'Gestionnaire' : userRole}
-              </Text>
-            </Box>
+            <Divider color={theme.colors.adminBlue?.[6]} my="md" />
+            <Menu position="bottom-start" width={200}>
+              <Menu.Target>
+                <UnstyledButton
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: theme.radius.md,
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7];
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <Group gap="sm" wrap="nowrap">
+                    <Avatar 
+                      size="md" 
+                      radius="xl" 
+                      color="yellow" 
+                      src={userAvatar}
+                      style={{ border: '2px solid yellow' }}
+                    >
+                      {getInitials(userName)}
+                    </Avatar>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <Text size="sm" fw={600} c="white" truncate>
+                        {userName}
+                      </Text>
+                      <Text size="xs" c="gray.4" tt="capitalize">
+                        {roleLabels[userRole || ''] || userRole}
+                      </Text>
+                    </div>
+                  </Group>
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>Mon compte</Menu.Label>
+                <Menu.Item leftSection={<IconUser size={14} />}>Mon profil</Menu.Item>
+                <Menu.Item leftSection={<IconSettings size={14} />}>Paramètres</Menu.Item>
+                <Menu.Divider />
+                <Menu.Item 
+                  color="red" 
+                  leftSection={<IconLogout size={14} />}
+                  onClick={onLogout}
+                >
+                  Déconnexion
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </>
         )}
       </Box>
 
-      <Divider color={theme.colors.adminBlue?.[6]} />
-
       {/* ZONE DE NAVIGATION PRINCIPALE */}
       <ScrollArea style={{ flex: 1 }} scrollbarSize={6} offsetScrollbars>
-        <Stack gap={4} p="md" pt="sm">
+        <Stack gap={6} p="md" pt="sm">
           
           {/* 1. ACCUEIL */}
           <NavItem
             label="Tableau de bord"
             path="/"
-            icon={<IconLayoutDashboard size={18} />}
+            icon={<IconLayoutDashboard size={20} />}
             userRole={userRole}
           />
 
-          <Divider color={theme.colors.adminBlue?.[6]} my="md" />
+          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
 
           {/* 2. GESTION COMMERCIALE */}
           <NavSection
             title="VENTES & CLIENTS"
             icon={<IconShoppingBag size={20} color="white" />}
-            description="Gestion des clients, commandes et factures"
+            description="Gestion commerciale"
             userRole={userRole}
             roles={allRoles}
           >
             <NavItem
               label="Clients"
               path="/clients"
-              icon={<IconUsers size={16} color="gray.4" />}
+              icon={<IconUsers size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
             <NavItem
               label="Commandes"
               path="/commandes"
-              icon={<IconShoppingBag size={16} color="gray.4" />}
+              icon={<IconShoppingBag size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
             <NavItem
               label="Factures"
               path="/factures"
-              icon={<IconReceipt size={16} color="gray.4" />}
+              icon={<IconReceipt size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
             <NavItem
               label="Ventes comptoir"
               path="/ventes"
-              icon={<IconBuildingStore size={16} color="gray.4" />}
+              icon={<IconBuildingStore size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
@@ -288,21 +366,21 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
           <NavSection
             title="PRODUITS & STOCK"
             icon={<IconPackage size={20} color="white" />}
-            description="Gestion du catalogue et des inventaires"
+            description="Gestion des produits"
             userRole={userRole}
             roles={allRoles}
           >
             <NavItem
               label="Produits"
               path="/products"
-              icon={<IconPackage size={16} color="gray.4" />}
+              icon={<IconPackage size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
             <NavItem
               label="Stock global"
               path="/stock"
-              icon={<IconBuildingStore size={16} color="gray.4" />}
+              icon={<IconDatabase size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
@@ -312,51 +390,52 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
           <NavSection
             title="RÉSEAU DE REVENDEURS"
             icon={<IconTruck size={20} color="white" />}
-            description="Gestion des revendeurs, stocks et commissions"
+            description="Gestion des revendeurs"
             userRole={userRole}
             roles={revendeurAccess}
+            count={5}
           >
             <NavItem
               label="Dashboard revendeurs"
               path="/dashboard-revendeurs"
-              icon={<IconChartBar size={16} color="gray.4" />}
+              icon={<IconChartBar size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
-              badge="Nouveau"
+              badge="Stats"
               badgeColor="green"
             />
             <NavItem
               label="Commandes revendeurs"
               path="/commandes-revendeur"
-              icon={<IconTruckDelivery size={16} color="gray.4" />}
+              icon={<IconTruckDelivery size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
-              badge="Stock"
+              badge="Gestion"
               badgeColor="teal"
             />
             <NavItem
               label="Stocks revendeurs"
               path="/stock-revendeurs"
-              icon={<IconList size={16} color="gray.4" />}
+              icon={<IconList size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
             <NavItem
               label="Décomptes"
               path="/decomptes"
-              icon={<IconCalculator size={16} color="gray.4" />}
+              icon={<IconCalculator size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
-              badge="Ventes"
+              badge="Commission"
               badgeColor="orange"
             />
             <NavItem
               label="Factures revendeurs"
               path="/factures-revendeur"
-              icon={<IconFileInvoice size={16} color="gray.4" />}
+              icon={<IconFileInvoice size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
-              badge="Commission"
+              badge="Documents"
               badgeColor="blue"
             />
           </NavSection>
@@ -365,26 +444,46 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
           <NavSection
             title="FINANCES"
             icon={<IconMoneybag size={20} color="white" />}
-            description="Suivi des paiements"
+            description="Suivi financier"
             userRole={userRole}
             roles={adminAndManager}
           >
             <NavItem
               label="Règlements clients"
               path="/reglements"
-              icon={<IconCash size={16} color="gray.4" />}
+              icon={<IconCash size={18} color="gray.4" />}
               roles={adminAndManager}
               userRole={userRole}
             />
+            <NavItem
+              label="Rapports financiers"
+              path="/rapports"
+              icon={<IconReportAnalytics size={18} color="gray.4" />}
+              roles={adminOnly}
+              userRole={userRole}
+              badge="Bientôt"
+              badgeColor="gray"
+              disabled
+            />
+            <NavItem
+              label="Commissions"
+              path="/commissions"
+              icon={<IconPercentage size={18} color="gray.4" />}
+              roles={adminOnly}
+              userRole={userRole}
+              badge="Bientôt"
+              badgeColor="gray"
+              disabled
+            />
           </NavSection>
 
-          <Divider color={theme.colors.adminBlue?.[6]} my="md" />
+          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
 
           {/* 6. ADMINISTRATION & PARAMÈTRES */}
           <NavSection
             title="ADMINISTRATION"
             icon={<IconSettings size={20} color="white" />}
-            description="Configuration et gestion des utilisateurs"
+            description="Configuration système"
             userRole={userRole}
             roles={adminOnly}
             defaultOpen={userRole === 'admin'}
@@ -392,65 +491,83 @@ export default function Navbar({ userRole, userName, onLogout }: NavbarProps) {
             <NavItem
               label="Utilisateurs"
               path="/utilisateurs"
-              icon={<IconUserCog size={16} color="gray.4" />}
+              icon={<IconUserCog size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
             />
             <NavItem
               label="Configuration atelier"
               path="/parametres"
-              icon={<IconSettings size={16} color="gray.4" />}
+              icon={<IconSettings size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
             />
             <NavItem
               label="Configuration commerce"
               path="/config-commerce"
-              icon={<IconBusinessplan size={16} color="gray.4" />}
+              icon={<IconBusinessplan size={18} color="gray.4" />}
               roles={adminOnly}
               userRole={userRole}
               badge="Premium"
               badgeColor="cyan"
             />
           </NavSection>
+
+          {/* 7. AIDE & SUPPORT */}
+          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
+          <NavItem
+            label="Aide & Support"
+            path="/aide"
+            icon={<IconHelp size={20} />}
+            userRole={userRole}
+            disabled
+          />
         </Stack>
       </ScrollArea>
 
-      {/* FOOTER - Déconnexion et infos */}
-      <Box p="md" pt="xs">
+      {/* FOOTER - Informations et version */}
+      <Box p="md" pt="xs" style={{ borderTop: `1px solid ${theme.colors.adminBlue?.[6]}` }}>
         <Divider color={theme.colors.adminBlue?.[6]} mb="sm" />
         {onLogout && (
-          <Box
+          <UnstyledButton
             onClick={onLogout}
             style={{
-              cursor: 'pointer',
-              padding: '8px 12px',
+              width: '100%',
+              padding: '10px 12px',
               borderRadius: theme.radius.sm,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
               transition: 'all 0.2s ease',
-              marginBottom: '8px',
+              marginBottom: '12px',
             }}
-            onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+            onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7];
             }}
-            onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
+            onMouseLeave={(e) => {
               e.currentTarget.style.backgroundColor = 'transparent';
             }}
           >
-            <IconLogout size={18} color={theme.colors.yellow?.[4]} />
-            <Text size="sm" fw={500} c="yellow">
-              Déconnexion
-            </Text>
-          </Box>
+            <Group gap="sm">
+              <IconLogout size={18} color={theme.colors.yellow?.[4]} />
+              <Text size="sm" fw={500} c="yellow">
+                Déconnexion
+              </Text>
+            </Group>
+          </UnstyledButton>
         )}
-        <Text size="xs" c="dimmed" ta="center" mt={8}>
-          © 2026 Gestion Commerciale Pro
-        </Text>
-        <Text size="xs" c="dimmed" ta="center">
-          Version 3.0.0
-        </Text>
+        
+        <Box style={{ textAlign: 'center' }}>
+          <Group justify="center" gap="xs" mb={4}>
+            <IconStar size={12} color="yellow" />
+            <Text size="xs" c="dimmed">
+              Version 3.0.0
+            </Text>
+          </Group>
+          <Text size="xs" c="dimmed">
+            © 2026 Gestion Commerciale Pro
+          </Text>
+          <Text size="xs" c="dimmed" mt={2}>
+            Tous droits réservés
+          </Text>
+        </Box>
       </Box>
     </Stack>
   );

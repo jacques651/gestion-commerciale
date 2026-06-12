@@ -27,11 +27,13 @@
     "@types/xlsx": "^0.0.35",
     "bcryptjs": "^3.0.3",
     "dayjs": "^1.11.20",
+    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.14.2",
+    "react-to-print": "^3.3.0",
     "recharts": "^3.8.1",
     "xlsx": "^0.18.5",
     "zod": "^4.3.6"

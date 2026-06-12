@@ -58,7 +58,7 @@ export const getNextCommandeCode = async (): Promise<string> => {
   return `CMD-${nextNumber.toString().padStart(4, '0')}`;
 };
 
-// Format: FAC-0001, FAC-0002, ...
+// Format: FAC-0001, FAC-0002, ... (pour les factures standard)
 export const getNextFactureCode = async (): Promise<string> => {
   const db = await getDb();
   const result = await db.select<any[]>(`
@@ -75,6 +75,25 @@ export const getNextFactureCode = async (): Promise<string> => {
   const lastNumber = parseInt(lastCode.split('-')[1]);
   const nextNumber = lastNumber + 1;
   return `FAC-${nextNumber.toString().padStart(4, '0')}`;
+};
+
+// Format: FR-0001, FR-0002, ... (pour les factures revendeur)
+export const getNextFactureRevendeurCode = async (): Promise<string> => {
+  const db = await getDb();
+  const result = await db.select<any[]>(`
+    SELECT code_facture FROM factures_revendeur 
+    WHERE code_facture LIKE 'FR-%' 
+    ORDER BY idFactureRevendeur DESC LIMIT 1
+  `);
+  
+  if (result.length === 0) {
+    return 'FR-0001';
+  }
+  
+  const lastCode = result[0].code_facture;
+  const lastNumber = parseInt(lastCode.split('-')[1]);
+  const nextNumber = lastNumber + 1;
+  return `FR-${nextNumber.toString().padStart(4, '0')}`;
 };
 
 // Format: VTE-0001, VTE-0002, ...
@@ -114,7 +133,8 @@ export const getNextReglementCode = async (): Promise<string> => {
   const nextNumber = lastNumber + 1;
   return `REG-${nextNumber.toString().padStart(4, '0')}`;
 };
-// src/services/codeGeneratorService.ts (ajouter)
+
+// Format: DCP-0001, DCP-0002, ... (pour les décomptes)
 export const getNextDecompteCode = async (): Promise<string> => {
   const db = await getDb();
   const result = await db.select<any[]>(`
@@ -131,4 +151,81 @@ export const getNextDecompteCode = async (): Promise<string> => {
   const lastNumber = parseInt(lastCode.split('-')[1]);
   const nextNumber = lastNumber + 1;
   return `DCP-${nextNumber.toString().padStart(4, '0')}`;
+};
+
+// Format: RCP-0001, RCP-0002, ... (pour les reçus de vente)
+export const getNextRecuVenteCode = async (): Promise<string> => {
+  const db = await getDb();
+  // Utiliser la même séquence que les règlements ou une séquence séparée
+  const result = await db.select<any[]>(`
+    SELECT code_reglement FROM reglements 
+    WHERE code_reglement LIKE 'RCP-%' 
+    ORDER BY idReglement DESC LIMIT 1
+  `);
+  
+  if (result.length === 0) {
+    return 'RCP-0001';
+  }
+  
+  const lastCode = result[0].code_reglement;
+  const lastNumber = parseInt(lastCode.split('-')[1]);
+  const nextNumber = lastNumber + 1;
+  return `RCP-${nextNumber.toString().padStart(4, '0')}`;
+};
+
+// Format: DC-0001, DC-0002, ... (pour les décomptes - ancien format)
+export const generateDecompteCode = async (): Promise<string> => {
+  const db = await getDb();
+  const result = await db.select<any[]>(`
+    SELECT code_decompte FROM decomptes 
+    WHERE code_decompte LIKE 'DC-%' 
+    ORDER BY idDecompte DESC LIMIT 1
+  `);
+  
+  if (result.length === 0) {
+    return 'DC-1';
+  }
+  
+  const lastCode = result[0].code_decompte;
+  const lastNumber = parseInt(lastCode.split('-')[1]);
+  const nextNumber = lastNumber + 1;
+  return `DC-${nextNumber}`;
+};
+
+// Fonction générique pour générer un code avec préfixe et compteur
+export const generateCode = async (
+  table: string,
+  column: string,
+  prefix: string,
+  padLength: number = 4
+): Promise<string> => {
+  const db = await getDb();
+  const result = await db.select<any[]>(`
+    SELECT ${column} FROM ${table} 
+    WHERE ${column} LIKE '${prefix}-%' 
+    ORDER BY id DESC LIMIT 1
+  `);
+  
+  if (result.length === 0) {
+    return `${prefix}-${'0'.repeat(padLength)}1`;
+  }
+  
+  const lastCode = result[0][column];
+  const match = lastCode.match(/\d+$/);
+  if (!match) {
+    return `${prefix}-${'0'.repeat(padLength)}1`;
+  }
+  
+  const lastNumber = parseInt(match[0]);
+  const nextNumber = lastNumber + 1;
+  return `${prefix}-${nextNumber.toString().padStart(padLength, '0')}`;
+};
+
+// Exemple d'utilisation de la fonction générique
+export const getNextCode = async (
+  prefix: string,
+  table: string,
+  column: string
+): Promise<string> => {
+  return generateCode(table, column, prefix);
 };

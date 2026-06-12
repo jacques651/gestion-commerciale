@@ -1,5 +1,6 @@
 // src/components/commandes/ListeCommande.tsx
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Table,
   Badge,
@@ -19,7 +20,6 @@ import {
   ThemeIcon,
   Flex,
   Avatar,
-  Alert,
   Loader,
   Pagination,
   TextInput
@@ -29,9 +29,8 @@ import '@mantine/dates/styles.css';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { FormulaireCommande } from './FormulaireCommande';
+import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import {
-  IconEye,
-  IconX,
   IconCheck,
   IconReceipt,
   IconPackage,
@@ -41,7 +40,13 @@ import {
   IconAlertCircle,
   IconPlus,
   IconSearch,
-  IconFilter
+  IconFilter,
+  IconCash,
+  IconTrash,
+  IconFileInvoice,
+  IconEye,
+  IconTruck,
+  IconBuildingStore
 } from '@tabler/icons-react';
 import { useCommandes } from '../../hooks/useCommandes';
 import { format } from 'date-fns';
@@ -65,6 +70,9 @@ interface CommandeComplete {
   montant_ht: number;
   montant_ttc: number;
   code_facture?: string;
+  date_facture?: string;
+  idFacture?: number;
+  idFactureRevendeur?: number;
   statut: string;
   NomComplet: string;
   Societe: string;
@@ -72,12 +80,30 @@ interface CommandeComplete {
   details: CommandeDetail[];
 }
 
+// Interface pour le résultat de requête
+interface FactureRow {
+  idFacture: number;
+  code_facture: string;
+  montant_ttc: number;
+  montant_regle: number;
+  statut: string;
+}
+
 export function ListeCommande() {
+  const navigate = useNavigate();
   const [selectedCommande, setSelectedCommande] = useState<CommandeComplete | null>(null);
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false);
-  const [cancelOpened, { open: openCancel, close: closeCancel }] = useDisclosure(false);
-  const [commandeToCancel, setCommandeToCancel] = useState<number | null>(null);
   const [formulaireOpened, setFormulaireOpened] = useState(false);
+  
+  // États pour le règlement
+  const [reglementModalOpened, setReglementModalOpened] = useState(false);
+  const [reglementData, setReglementData] = useState({
+    idFacture: 0,
+    idClient: 0,
+    montantMax: 0,
+    codeFacture: '',
+    clientNom: ''
+  });
 
   // États des filtres
   const [statusFilter, setStatusFilter] = useState<string | null>('all');
@@ -92,9 +118,6 @@ export function ListeCommande() {
   const {
     commandes,
     loading,
-    updateStatus,
-    cancelCommande,
-    getCommandeById,
     refresh
   } = useCommandes();
 
@@ -102,17 +125,14 @@ export function ListeCommande() {
   const filteredCommandes = useMemo(() => {
     let filtered = [...commandes];
 
-    // Filtre par statut
     if (statusFilter && statusFilter !== 'all') {
       filtered = filtered.filter(c => c.statut === statusFilter);
     }
 
-    // Filtre par type
     if (typeFilter && typeFilter !== 'all') {
       filtered = filtered.filter(c => c.type_commande === typeFilter);
     }
 
-    // Filtre par recherche (code commande ou client)
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(c =>
@@ -122,7 +142,6 @@ export function ListeCommande() {
       );
     }
 
-    // Filtre par date
     if (dateDebut) {
       const debut = new Date(dateDebut);
       debut.setHours(0, 0, 0, 0);
@@ -138,14 +157,12 @@ export function ListeCommande() {
     return filtered;
   }, [commandes, statusFilter, typeFilter, searchTerm, dateDebut, dateFin]);
 
-  // Pagination
   const totalPages = Math.ceil(filteredCommandes.length / itemsPerPage);
   const paginatedCommandes = filteredCommandes.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  // Statistiques globales
   const stats = {
     total: commandes.length,
     montantTotal: commandes.reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
@@ -165,7 +182,8 @@ export function ListeCommande() {
   };
 
   const handleViewDetails = async (idCommande: number) => {
-    const commande = await getCommandeById(idCommande);
+    const { commandeRepository } = await import('../../database/repositories/commandeRepository');
+    const commande = await commandeRepository.getById(idCommande);
     if (commande) {
       setSelectedCommande(commande as CommandeComplete);
       openDetails();
@@ -178,38 +196,6 @@ export function ListeCommande() {
     }
   };
 
-  const handleUpdateStatus = async (idCommande: number, newStatus: string) => {
-    try {
-      await updateStatus(idCommande, newStatus);
-      await refresh();
-      notifications.show({
-        title: 'Succès',
-        message: `Commande marquée comme ${newStatus === 'LIVREE' ? 'livrée' : newStatus}`,
-        color: 'green'
-      });
-    } catch (err) {
-      console.error('Erreur mise à jour statut:', err);
-    }
-  };
-
-  const handleCancelCommande = async () => {
-    if (!commandeToCancel) return;
-
-    try {
-      await cancelCommande(commandeToCancel);
-      closeCancel();
-      setCommandeToCancel(null);
-      await refresh();
-      notifications.show({
-        title: 'Succès',
-        message: 'Commande annulée avec succès',
-        color: 'green'
-      });
-    } catch (err) {
-      console.error('Erreur annulation:', err);
-    }
-  };
-
   const handleRefresh = async () => {
     await refresh();
     resetFilters();
@@ -218,6 +204,159 @@ export function ListeCommande() {
       message: 'La liste des commandes a été actualisée',
       color: 'blue'
     });
+  };
+
+  const handleGenererFacture = async (idCommande: number, typeCommande: string) => {
+    try {
+      const { factureRepository } = await import('../../database/repositories/factureRepository');
+      const { factureRevendeurRepository } = await import('../../database/repositories/factureRevendeurRepository');
+
+      if (typeCommande === 'REVENDEUR') {
+        await factureRevendeurRepository.createFromCommande(idCommande);
+      } else {
+        await factureRepository.createFromCommande(idCommande);
+      }
+
+      notifications.show({
+        title: 'Succès',
+        message: `Facture générée avec succès`,
+        color: 'green'
+      });
+      await refresh();
+    } catch (error) {
+      console.error('Erreur génération facture:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de générer la facture',
+        color: 'red'
+      });
+    }
+  };
+
+  interface CommandeReference {
+    idCommande: number;
+    idClient: number;
+    type_commande: string;
+    NomComplet: string;
+    code_facture?: string;
+    // idFacture in some places can be a string (from DB) or a number, accept both
+    idFacture?: number | string;
+    idFactureRevendeur?: number | string;
+  }
+
+  // ✅ Correction du type de la fonction handleRegler
+  const handleRegler = async (commande: CommandeReference) => {
+    const db = await import('../../database/db').then(m => m.getDb());
+    
+    // Pour les commandes revendeur
+    if (commande.type_commande === 'REVENDEUR') {
+      notifications.show({
+        title: 'Décompte revendeur',
+        message: `Veuillez créer un décompte pour le revendeur ${commande.NomComplet}`,
+        color: 'blue'
+      });
+      return;
+    }
+    
+    // ✅ Typage correct de la variable result
+    const result = await db.select<FactureRow[]>(`
+      SELECT idFacture, code_facture, montant_ttc, COALESCE(montant_regle, 0) as montant_regle, statut
+      FROM factures 
+      WHERE idCommande = ?
+    `, [commande.idCommande]);
+    
+    if (result.length > 0) {
+      const facture = result[0];
+      const montantRestant = (facture.montant_ttc || 0) - (facture.montant_regle || 0);
+      
+      if (montantRestant <= 0) {
+        notifications.show({
+          title: 'Information',
+          message: 'Cette facture est déjà entièrement réglée',
+          color: 'blue'
+        });
+        return;
+      }
+      
+      setReglementData({
+        idFacture: facture.idFacture,
+        idClient: commande.idClient,
+        montantMax: montantRestant,
+        codeFacture: facture.code_facture,
+        clientNom: commande.NomComplet
+      });
+      setReglementModalOpened(true);
+    } else {
+      notifications.show({
+        title: 'Information',
+        message: 'Aucune facture trouvée pour cette commande. Veuillez générer la facture d\'abord.',
+        color: 'orange'
+      });
+    }
+  };
+
+  const handleDelete = async (idCommande: number) => {
+    if (!window.confirm('Supprimer cette commande ?')) return;
+    try {
+      const { getDb } = await import('../../database/db');
+      const db = await getDb();
+      await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [idCommande]);
+      notifications.show({
+        title: 'Succès',
+        message: 'Commande supprimée',
+        color: 'green'
+      });
+      await refresh();
+    } catch (error) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Suppression impossible',
+        color: 'red'
+      });
+    }
+  };
+
+  const handleVoirFacture = async (commande: CommandeReference) => {
+    try {
+      const { getDb } = await import('../../database/db');
+      const db = await getDb();
+      
+      let facture = await db.select<any[]>(`
+        SELECT idFacture, code_facture, 'standard' as type
+        FROM factures 
+        WHERE idCommande = ?
+      `, [commande.idCommande]);
+      
+      if (facture.length === 0) {
+        facture = await db.select<any[]>(`
+          SELECT idFactureRevendeur as idFacture, code_facture, 'revendeur' as type
+          FROM factures_revendeur 
+          WHERE idCommande = ?
+        `, [commande.idCommande]);
+      }
+      
+      if (facture.length > 0) {
+        const f = facture[0];
+        if (f.type === 'revendeur') {
+          navigate(`/factures-revendeur/${f.idFacture}`);
+        } else {
+          navigate(`/factures/${f.idFacture}`);
+        }
+      } else {
+        notifications.show({
+          title: 'Facture introuvable',
+          message: 'Cette commande ne possède aucune facture',
+          color: 'red'
+        });
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de trouver la facture',
+        color: 'red'
+      });
+    }
   };
 
   const getStatusBadge = (statut: string) => {
@@ -359,7 +498,7 @@ export function ListeCommande() {
             </Button>
           </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} spacing="md">
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
             <TextInput
               placeholder="Rechercher..."
               leftSection={<IconSearch size={16} />}
@@ -369,7 +508,6 @@ export function ListeCommande() {
                 setCurrentPage(1);
               }}
             />
-
             <Select
               placeholder="Statut"
               label="Statut"
@@ -387,7 +525,6 @@ export function ListeCommande() {
               ]}
               clearable
             />
-
             <Select
               placeholder="Type"
               label="Type"
@@ -403,7 +540,6 @@ export function ListeCommande() {
               ]}
               clearable
             />
-
             <DateInput
               placeholder="Date début"
               label="Date début"
@@ -411,7 +547,6 @@ export function ListeCommande() {
               onChange={setDateDebut}
               clearable
             />
-
             <DateInput
               placeholder="Date fin"
               label="Date fin"
@@ -427,25 +562,64 @@ export function ListeCommande() {
         </Stack>
       </Card>
 
+      {/* Boutons d'accès aux autres pages */}
+      <Card withBorder radius="lg" shadow="sm" p="md">
+        <Group justify="center" gap="md">
+          <Button
+            variant="light"
+            color="blue"
+            leftSection={<IconBuildingStore size={18} />}
+            onClick={() => navigate('/commandes')}
+          >
+            Commandes Standard
+          </Button>
+          <Button
+            variant="light"
+            color="green"
+            leftSection={<IconTruck size={18} />}
+            onClick={() => navigate('/commandes-revendeur')}
+          >
+            Commandes Revendeurs
+          </Button>
+          <Button
+            variant="light"
+            color="orange"
+            leftSection={<IconFileInvoice size={18} />}
+            onClick={() => navigate('/factures')}
+          >
+            Factures Standard
+          </Button>
+          <Button
+            variant="light"
+            color="grape"
+            leftSection={<IconReceipt size={18} />}
+            onClick={() => navigate('/factures-revendeur')}
+          >
+            Factures Revendeurs
+          </Button>
+        </Group>
+      </Card>
+
       {/* Tableau des commandes */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
         <ScrollArea h="calc(100vh - 500px)">
           <Table striped highlightOnHover>
             <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
               <Table.Tr>
-                <Table.Th c="white">N° Commande</Table.Th>
-                <Table.Th c="white">Client</Table.Th>
-                <Table.Th c="white">Date</Table.Th>
+                <Table.Th c="white" w={60}>N°</Table.Th>
+                <Table.Th c="white">Nom du client</Table.Th>
+                <Table.Th c="white">Date de commande</Table.Th>
                 <Table.Th c="white">Type</Table.Th>
-                <Table.Th c="white" ta="right">Montant TTC</Table.Th>
-                <Table.Th c="white">Statut</Table.Th>
+                <Table.Th c="white" ta="right">Montant HT</Table.Th>
+                <Table.Th c="white">Code Facture</Table.Th>
+                <Table.Th c="white">Date Facture</Table.Th>
                 <Table.Th c="white" ta="center">Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {paginatedCommandes.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={7} align="center">
+                  <Table.Td colSpan={8} align="center">
                     <Stack align="center" py={50}>
                       <IconShoppingBag size={50} color="gray" />
                       <Text c="dimmed">Aucune commande trouvée</Text>
@@ -456,10 +630,10 @@ export function ListeCommande() {
                   </Table.Td>
                 </Table.Tr>
               ) : (
-                paginatedCommandes.map((commande) => (
+                paginatedCommandes.map((commande, index) => (
                   <Table.Tr key={commande.idCommande}>
                     <Table.Td>
-                      <Text fw={600} size="sm">{commande.code_commande}</Text>
+                      <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
                     </Table.Td>
                     <Table.Td>
                       <Group gap="sm">
@@ -478,7 +652,7 @@ export function ListeCommande() {
                       <Group gap={4}>
                         <IconCalendar size={12} color="#adb5bd" />
                         <Text size="sm">
-                          {format(new Date(commande.date_commande), 'dd/MM/yyyy HH:mm', { locale: fr })}
+                          {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
                         </Text>
                       </Group>
                     </Table.Td>
@@ -493,12 +667,21 @@ export function ListeCommande() {
                       </Badge>
                     </Table.Td>
                     <Table.Td ta="right">
-                      <Text fw={700} size="sm" c="blue">
-                        {commande.montant_ttc.toLocaleString('fr-FR')} FCFA
+                      <Text fw={600} size="sm" c="blue">
+                        {commande.montant_ht.toLocaleString('fr-FR')} FCFA
                       </Text>
                     </Table.Td>
                     <Table.Td>
-                      {getStatusBadge(commande.statut)}
+                      <Text size="sm" fw={500}>
+                        {commande.code_facture || '-'}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">
+                        {commande.date_facture
+                          ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
+                          : '-'}
+                      </Text>
                     </Table.Td>
                     <Table.Td ta="center">
                       <Group gap={4} justify="center">
@@ -513,48 +696,48 @@ export function ListeCommande() {
                           </ActionIcon>
                         </Tooltip>
 
-                        {commande.statut !== 'ANNULEE' && commande.statut !== 'LIVREE' && (
-                          <>
-                            <Tooltip label="Marquer comme livrée">
-                              <ActionIcon
-                                variant="light"
-                                color="green"
-                                size="md"
-                                onClick={() => handleUpdateStatus(commande.idCommande, 'LIVREE')}
-                              >
-                                <IconCheck size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-
-                            <Tooltip label="Annuler la commande">
-                              <ActionIcon
-                                variant="light"
-                                color="red"
-                                size="md"
-                                onClick={() => {
-                                  setCommandeToCancel(commande.idCommande);
-                                  openCancel();
-                                }}
-                              >
-                                <IconX size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </>
-                        )}
-
-                        {commande.type_commande === 'REVENDEUR' && commande.statut === 'LIVREE' && (
-                          <Tooltip label="Facture revendeur">
+                        {(commande.code_facture || commande.idFacture || commande.idFactureRevendeur) && (
+                          <Tooltip label="Voir facture">
                             <ActionIcon
                               variant="light"
                               color="grape"
                               size="md"
-                              onClick={() => {
-                                notifications.show({
-                                  title: 'Facture revendeur',
-                                  message: `Génération de la facture pour la commande ${commande.code_commande}`,
-                                  color: 'grape'
-                                });
-                              }}
+                              onClick={() => handleVoirFacture(commande)}
+                            >
+                              <IconFileInvoice size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
+
+                        <Tooltip label="Régler">
+                          <ActionIcon
+                            variant="light"
+                            color="green"
+                            size="md"
+                            onClick={() => handleRegler(commande)}
+                          >
+                            <IconCash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+
+                        <Tooltip label="Supprimer">
+                          <ActionIcon
+                            variant="light"
+                            color="red"
+                            size="md"
+                            onClick={() => handleDelete(commande.idCommande)}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+
+                        {!commande.code_facture && !commande.idFacture && !commande.idFactureRevendeur && (
+                          <Tooltip label="Générer facture">
+                            <ActionIcon
+                              variant="light"
+                              color="grape"
+                              size="md"
+                              onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
                             >
                               <IconReceipt size={16} />
                             </ActionIcon>
@@ -621,6 +804,22 @@ export function ListeCommande() {
                 <Text size="sm" c="dimmed">Statut</Text>
                 {getStatusBadge(selectedCommande.statut)}
               </div>
+              {selectedCommande.code_facture && (
+                <>
+                  <div>
+                    <Text size="sm" c="dimmed">Code Facture</Text>
+                    <Text fw={500}>{selectedCommande.code_facture}</Text>
+                  </div>
+                  <div>
+                    <Text size="sm" c="dimmed">Date Facture</Text>
+                    <Text fw={500}>
+                      {selectedCommande.date_facture
+                        ? format(new Date(selectedCommande.date_facture), 'dd/MM/yyyy', { locale: fr })
+                        : '-'}
+                    </Text>
+                  </div>
+                </>
+              )}
             </SimpleGrid>
 
             <div>
@@ -679,41 +878,21 @@ export function ListeCommande() {
                 </div>
               </Group>
             </div>
-
-            {selectedCommande.code_facture && (
-              <Button variant="light" fullWidth mt="md">
-                Voir la facture
-              </Button>
-            )}
           </Stack>
         )}
       </Modal>
 
-      {/* Modal Confirmation Annulation */}
-      <Modal
-        opened={cancelOpened}
-        onClose={closeCancel}
-        title="Confirmation d'annulation"
-        size="md"
-        centered
-      >
-        <Stack gap="md">
-          <Alert icon={<IconAlertCircle size={16} />} color="red">
-            Êtes-vous sûr de vouloir annuler cette commande ?
-          </Alert>
-          <Text size="sm" c="red">
-            ⚠️ Attention : Cette action est irréversible. Le stock sera automatiquement réajusté.
-          </Text>
-          <Group justify="flex-end" mt="md">
-            <Button variant="outline" onClick={closeCancel}>
-              Non, retour
-            </Button>
-            <Button color="red" onClick={handleCancelCommande}>
-              Oui, annuler la commande
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      {/* Modal de règlement pour facture standard */}
+      <FormulaireReglement
+        opened={reglementModalOpened}
+        onClose={() => {
+          setReglementModalOpened(false);
+          refresh();
+        }}
+        idFacture={reglementData.idFacture}
+        idClient={reglementData.idClient}
+        montantMax={reglementData.montantMax}
+      />
 
       {/* Formulaire de création de commande */}
       <FormulaireCommande
