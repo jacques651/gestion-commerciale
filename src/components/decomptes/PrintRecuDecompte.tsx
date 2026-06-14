@@ -7,33 +7,10 @@ import { useReactToPrint } from 'react-to-print';
 import { getDb } from '../../database/db';
 import RecuDecompte, { RecuDecompteDetail } from './RecuDecompte';
 
-interface DecompteRow {
-  idDecompte: number;
-  code_decompte: string;
-  date_decompte: string;
-  montant_vente: number;
-  montant_commission: number;
-  montant_net: number;
-  observation: string;
-  NomComplet: string;
-  Societe: string;
-  Tel: string;
-}
-
-interface DetailRow {
-  idDetailRevendeur: number;
-  idProduit: number;
-  qte_decompte: number;
-  prix_achat: number;
-  prix_vente: number;
-  commission_pourcentage: number;
-  designation: string;
-  code_produit: string;
-}
-
+// ✅ Supprimer l'interface des props et utiliser useParams
 export default function PrintRecuDecompte() {
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams<{ id: string }>(); // ✅ Utiliser useParams directement
   const [decompte, setDecompte] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const printRef = useRef<HTMLDivElement>(null);
@@ -45,8 +22,8 @@ export default function PrintRecuDecompte() {
       try {
         const db = await getDb();
         
-        // Récupérer le décompte avec typage explicite
-        const decompteData = await db.select<DecompteRow[]>(`
+        // Récupérer le décompte
+        const decompteData = await db.select<any[]>(`
           SELECT 
             d.idDecompte,
             d.code_decompte,
@@ -55,24 +32,20 @@ export default function PrintRecuDecompte() {
             d.montant_commission,
             d.montant_net,
             d.observation,
-            c.NomComplet,
-            c.Societe,
-            c.Tel
+            c.NomComplet
           FROM decomptes d
           LEFT JOIN clients c ON c.idClient = d.idClient
           WHERE d.idDecompte = ?
         `, [parseInt(id)]);
         
-        if (!decompteData || decompteData.length === 0) {
+        if (decompteData.length === 0) {
           console.error('Décompte non trouvé');
           setLoading(false);
           return;
         }
         
-        const decompteRow = decompteData[0];
-        
-        // Récupérer les détails du décompte avec typage explicite
-        const detailsData = await db.select<DetailRow[]>(`
+        // Récupérer les détails
+        const detailsData = await db.select<any[]>(`
           SELECT 
             dd.idDetailRevendeur,
             dd.idProduit,
@@ -87,8 +60,7 @@ export default function PrintRecuDecompte() {
           WHERE dd.idDecompte = ?
         `, [parseInt(id)]);
         
-        // Transformer les données pour RecuDecompte
-        const recuDetails: RecuDecompteDetail[] = (detailsData || []).map((detail: DetailRow) => ({
+        const recuDetails: RecuDecompteDetail[] = (detailsData || []).map((detail: any) => ({
           idProduit: detail.idProduit,
           codeFacture: `FACT-${detail.idProduit}`,
           designation: detail.designation || 'Produit',
@@ -101,10 +73,10 @@ export default function PrintRecuDecompte() {
         }));
         
         setDecompte({
-          id: decompteRow.idDecompte,
-          code_decompte: decompteRow.code_decompte || `DC-${decompteRow.idDecompte}`,
-          date_decompte: decompteRow.date_decompte,
-          NomComplet: decompteRow.NomComplet || 'Client',
+          id: decompteData[0].idDecompte,
+          code_decompte: decompteData[0].code_decompte || `DC-${decompteData[0].idDecompte}`,
+          date_decompte: decompteData[0].date_decompte,
+          NomComplet: decompteData[0].NomComplet || 'Client',
           details: recuDetails
         });
         

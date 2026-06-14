@@ -1,17 +1,15 @@
 // src/components/factures/FactureStandard.tsx
 import React, { useMemo, useRef } from 'react';
 import { 
-  Paper, Text, Table, Group, Stack, Box, Divider, 
-  Title, Badge, Flex, Card, LoadingOverlay, Button, 
-  Tooltip, ThemeIcon, Grid 
+  Paper, Text, Table, Group, Box, Divider, 
+  Title, Button, Image,
+  SimpleGrid
 } from '@mantine/core';
 import { 
-  IconBuildingStore, IconPrinter, IconDownload, 
-  IconFileInvoice, IconCalendar, IconUser, IconPhone, 
-  IconMapPin, IconCurrencyFrank, IconReceipt,
-  IconCheck, IconShoppingCart
-} from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+  IconPrinter, IconDownload, 
+  IconFileInvoice, IconCalendar, IconUser, 
+  IconBuildingStore} from '@tabler/icons-react';
+import { useReactToPrint } from 'react-to-print';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
 
 interface FactureStandardProps {
@@ -20,31 +18,28 @@ interface FactureStandardProps {
   onDownload?: () => void;
 }
 
-interface DetailCalcul {
+interface DetailsWithCalculs {
   numero: number;
+  designation: string;
   qte: number;
   prix_unitaire: number;
   total_ligne: number;
-  unite: string;
-  designation: string;
-  code: string;
 }
 
-export const FactureStandard: React.FC<FactureStandardProps> = ({ 
-  facture, 
-  onPrint, 
-  onDownload 
+export const FactureStandard: React.FC<FactureStandardProps> = ({
+  facture,
+  onDownload
 }) => {
-  // ============================================================
-  // TOUS LES HOOKS ICI - NIVEAU SUPÉRIEUR
-  // ============================================================
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
 
-  // useMemo pour les calculs des détails
-  const { detailsWithCalculs, totalHT, tva, totalTTC } = useMemo(() => {
+  const { detailsWithCalculs, totalHT, totalTTC } = useMemo<{
+    detailsWithCalculs: DetailsWithCalculs[];
+    totalHT: number;
+    totalTTC: number;
+  }>(() => {
     let totalHTValue = 0;
-    const details = (facture?.details || []).map((detail: any, idx: number) => {
+    const details = (facture?.details || []).map((detail: any, idx: number): DetailsWithCalculs => {
       const qte = detail.qte_commande || detail.quantite || 0;
       const prix = detail.prix_unitaire_vente || detail.prix_vente || 0;
       const totalLigne = prix * qte;
@@ -55,494 +50,157 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
         qte,
         prix_unitaire: prix,
         total_ligne: totalLigne,
-        unite: detail.unite || detail.unite_mesure || 'pièce',
-        designation: detail.produit_designation || detail.designation || detail.nom_produit || '-',
-        code: detail.code_produit || detail.codeProduit || ''
+        designation: detail.designation || detail.produit_nom || '-'
       };
     });
-
-    const tvaValue = totalHTValue * 0.18;
-    const totalTTCValue = totalHTValue + tvaValue;
 
     return {
       detailsWithCalculs: details,
       totalHT: totalHTValue,
-      tva: tvaValue,
-      totalTTC: totalTTCValue
+      totalTTC: totalHTValue * 1.18
     };
   }, [facture]);
 
-  // ============================================================
-  // CONDITIONS DE RETOUR APRÈS TOUS LES HOOKS
-  // ============================================================
-  if (!facture) {
-    return (
-      <Paper p="xl" ta="center">
-        <Text c="red">Données de facture manquantes</Text>
-      </Paper>
-    );
-  }
-
-  if (atelierLoading) {
-    return (
-      <Card withBorder p="xl" ta="center">
-        <LoadingOverlay visible={true} />
-        <Text>Chargement des paramètres...</Text>
-      </Card>
-    );
-  }
-
-  // ============================================================
-  // FONCTIONS UTILITAIRES
-  // ============================================================
-  const formatMontant = (value: number | undefined | null): string => {
-    if (value === undefined || value === null) return '0';
-    const num = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(num)) return '0';
-    return num.toLocaleString('fr-FR');
-  };
-
-  const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return '-';
-    try {
-      return new Date(dateStr).toLocaleDateString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      });
-    } catch {
-      return '-';
-    }
-  };
-
-  const factureData = {
-    code_facture: facture.code_facture || facture.CodeFacture || '-',
-    date_facture: facture.date_facture || facture.DateFacture || new Date().toISOString(),
-    date_echeance: facture.date_echeance || facture.DateEcheance || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    client_nom: facture.client_nom || facture.NomComplet || facture.nom_client || 'Client',
-    client_societe: facture.client_societe || facture.Societe || '',
-    client_tel: facture.client_tel || facture.Tel || '-',
-    client_email: facture.client_email || facture.Email || '',
-    client_adresse: facture.client_adresse || facture.Adresse || '',
-    client_ville: facture.client_ville || facture.Ville || '',
-    code_commande: facture.code_commande || facture.CodeCommande || '-',
-    notes: facture.notes || '',
-    statut: facture.statut || 'EN_ATTENTE'
-  };
-
-  const atelier = atelierConfig || {
-    nom_atelier: 'SAID TELECOM',
-    telephone: '5130 61 16',
-    adresse: 'Saaba à Kossodo',
-    email: 'contact@saidtelecom.ci',
-    message_facture: 'Merci de votre confiance',
-    logo_base64: '',
-    nif: ''
-  };
-
-  const handlePrint = () => {
-    if (onPrint) {
-      onPrint();
-    } else {
-      const printContent = printRef.current;
-      if (printContent) {
-        const originalContent = document.body.innerHTML;
-        document.body.innerHTML = printContent.innerHTML;
-        window.print();
-        document.body.innerHTML = originalContent;
-        window.location.reload();
-      }
-    }
-  };
+  const handlePrint = useReactToPrint({
+    contentRef: printRef,
+    documentTitle: `Facture_${facture?.code_facture || 'facture'}`,
+  });
 
   const handleDownload = () => {
     if (onDownload) {
       onDownload();
     } else {
-      notifications.show({
-        title: 'Information',
-        message: 'Fonctionnalité de téléchargement en développement',
-        color: 'blue'
-      });
+      handlePrint();
     }
   };
 
-  const getStatutColor = (statut: string) => {
-    switch (statut) {
-      case 'PAYE':
-      case 'PAYEE':
-      case 'REGLEE':
-        return { color: '#2e7d32', bg: '#e8f5e9', label: 'Payée', icon: <IconCheck size={14} /> };
-      case 'EN_ATTENTE':
-        return { color: '#ed6c02', bg: '#fff3e0', label: 'En attente', icon: null };
-      case 'ANNULEE':
-        return { color: '#d32f2f', bg: '#ffebee', label: 'Annulée', icon: null };
-      default:
-        return { color: '#757575', bg: '#f5f5f5', label: statut, icon: null };
+  const formatMontant = (value: number | undefined | null): string => {
+    if (!value) return '0';
+    return value.toLocaleString('fr-FR');
+  };
+
+  const formatDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return '-';
+    try {
+      return new Date(dateStr).toLocaleDateString('fr-FR');
+    } catch {
+      return '-';
     }
   };
 
-  const statutInfo = getStatutColor(factureData.statut);
+  const atelier = atelierConfig || {
+    nom_atelier: 'MON ATELIER',
+    telephone: '',
+    adresse: '',
+    message_facture: 'Merci de votre confiance',
+    logo_base64: ''
+  };
+
+  if (atelierLoading || !facture) {
+    return (
+      <Paper p="xl" ta="center">
+        <Text>Chargement...</Text>
+      </Paper>
+    );
+  }
 
   return (
     <Box>
-      {/* Barre d'outils */}
-      <Group justify="flex-end" mb="md" style={{ position: 'sticky', top: 0, zIndex: 100, backgroundColor: 'white', padding: '12px 0' }}>
-        <Tooltip label="Imprimer la facture">
-          <Button 
-            variant="light" 
-            color="gray" 
-            leftSection={<IconPrinter size={18} />}
-            onClick={handlePrint}
-            radius="md"
-          >
-            Imprimer
-          </Button>
-        </Tooltip>
-        <Tooltip label="Télécharger en PDF">
-          <Button 
-            variant="light" 
-            color="teal" 
-            leftSection={<IconDownload size={18} />}
-            onClick={handleDownload}
-            radius="md"
-          >
-            PDF
-          </Button>
-        </Tooltip>
+      {/* Boutons d'action */}
+      <Group justify="flex-end" mb="md" className="no-print">
+        <Button size="sm" variant="light" onClick={handlePrint} leftSection={<IconPrinter size={16} />}>
+          Imprimer
+        </Button>
+        <Button size="sm" variant="light" color="teal" onClick={handleDownload} leftSection={<IconDownload size={16} />}>
+          PDF
+        </Button>
       </Group>
 
-      {/* Contenu de la facture */}
+      {/* Facture */}
       <div ref={printRef}>
-        <Paper 
-          shadow="xl" 
-          radius="lg" 
-          withBorder 
-          style={{ 
-            maxWidth: '1200px', 
-            margin: '0 auto',
-            fontFamily: "'Inter', system-ui, sans-serif",
-            overflow: 'hidden',
-            border: '1px solid #e9ecef'
-          }}
-        >
-          {/* Header avec dégradé */}
-          <Box 
-            style={{ 
-              background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
-              padding: '32px 40px',
-              color: 'white',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <Box style={{ position: 'absolute', top: -50, right: -50, opacity: 0.1 }}>
-              <IconBuildingStore size={200} />
-            </Box>
-            
-            <Flex justify="space-between" align="flex-start" wrap="wrap" gap="md">
-              <Stack gap={8}>
-                <Group gap="md">
-                  {atelier.logo_base64 ? (
-                    <Box 
-                      style={{ 
-                        backgroundColor: 'white', 
-                        borderRadius: '16px', 
-                        padding: '8px',
-                        display: 'inline-flex'
-                      }}
-                    >
-                      <img 
-                        src={atelier.logo_base64} 
-                        alt="Logo"
-                        style={{ width: 60, height: 60, objectFit: 'contain' }}
-                      />
-                    </Box>
-                  ) : (
-                    <ThemeIcon size={60} radius="lg" color="white" variant="light" style={{ backgroundColor: 'rgba(255,255,255,0.2)' }}>
-                      <IconBuildingStore size={32} />
-                    </ThemeIcon>
-                  )}
-                  <div>
-                    <Title order={1} style={{ color: 'white', margin: 0, fontSize: '28px', fontWeight: 700 }}>
-                      {atelier.nom_atelier}
-                    </Title>
-                    <Text size="sm" opacity={0.85} mt={4}>
-                      Facture Standard - Document commercial
-                    </Text>
-                  </div>
-                </Group>
-              </Stack>
-              <Stack gap={4} align="flex-end">
-                <Title order={2} style={{ color: 'white', margin: 0, fontSize: '22px', fontWeight: 600 }}>
-                  FACTURE STANDARD
-                </Title>
-                <Divider style={{ backgroundColor: 'rgba(255,255,255,0.3)', width: '100%' }} />
-                <Text size="xs" opacity={0.8}>{atelier.adresse}</Text>
-                <Text size="xs" opacity={0.8}>📞 {atelier.telephone}</Text>
-                <Text size="xs" opacity={0.8}>✉️ {atelier.email}</Text>
-                {atelier.nif && <Text size="xs" opacity={0.8}>🏷️ NIF: {atelier.nif}</Text>}
-              </Stack>
-            </Flex>
-          </Box>
-
-          <Box p="xl" style={{ backgroundColor: '#ffffff' }}>
-            {/* En-tête de la facture */}
-            <Grid mb="xl">
-              <Grid.Col span={8}>
-                <Card 
-                  withBorder 
-                  radius="md" 
-                  p="md" 
-                  style={{ 
-                    backgroundColor: '#f8f9fa',
-                    borderLeft: `4px solid ${statutInfo.color}`
-                  }}
-                >
-                  <Group gap="xl" wrap="wrap">
-                    <div>
-                      <Text size="xs" c="dimmed" mb={4}>N° FACTURE</Text>
-                      <Group gap="xs" align="center">
-                        <IconFileInvoice size={18} color="#1b365d" />
-                        <Text fw={800} size="xl" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>
-                          {factureData.code_facture}
-                        </Text>
-                      </Group>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed" mb={4}>N° COMMANDE</Text>
-                      <Badge color="blue" variant="light" size="lg" leftSection={<IconShoppingCart size={14} />}>
-                        {factureData.code_commande}
-                      </Badge>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed" mb={4}>STATUT</Text>
-                      <Badge 
-                        color={statutInfo.color} 
-                        style={{ backgroundColor: statutInfo.bg, color: statutInfo.color }}
-                        size="lg"
-                        leftSection={statutInfo.icon}
-                      >
-                        {statutInfo.label}
-                      </Badge>
-                    </div>
-                  </Group>
-                </Card>
-              </Grid.Col>
-              <Grid.Col span={4}>
-                <Card withBorder radius="md" p="md" style={{ backgroundColor: '#f8f9fa' }}>
-                  <Stack gap={6}>
-                    <Group gap="xs">
-                      <IconCalendar size={16} color="#1b365d" />
-                      <Text size="sm" c="dimmed">Date d'émission</Text>
-                      <Text fw={600} size="sm" ml="auto">{formatDate(factureData.date_facture)}</Text>
-                    </Group>
-                    <Group gap="xs">
-                      <IconCalendar size={16} color="#d32f2f" />
-                      <Text size="sm" c="dimmed">Date d'échéance</Text>
-                      <Text fw={600} size="sm" ml="auto">{formatDate(factureData.date_echeance)}</Text>
-                    </Group>
-                  </Stack>
-                </Card>
-              </Grid.Col>
-            </Grid>
-
-            {/* Informations client */}
-            <Card 
-              withBorder 
-              radius="md" 
-              p="lg" 
-              mb="xl"
-              style={{ 
-                backgroundColor: '#f8f9fa',
-                border: '1px solid #e9ecef'
-              }}
-            >
-              <Flex justify="space-between" align="center" mb="md">
-                <Group gap="xs">
-                  <ThemeIcon color="blue" size="md" variant="light" radius="xl">
-                    <IconUser size={16} />
-                  </ThemeIcon>
-                  <Text fw={700} size="lg" c="blue.8">INFORMATIONS CLIENT</Text>
-                </Group>
-                <Badge color="blue" variant="light" size="sm" radius="xl">Client</Badge>
-              </Flex>
-              
-              <Grid>
-                <Grid.Col span={4}>
-                  <Group gap="xs" align="flex-start">
-                    <IconUser size={18} color="#1b365d" />
-                    <Stack gap={2}>
-                      <Text size="xs" c="dimmed">Nom / Société</Text>
-                      <Text fw={700} size="md" c="blue.8">{factureData.client_nom}</Text>
-                      {factureData.client_societe && (
-                        <Text size="sm" c="dimmed">{factureData.client_societe}</Text>
-                      )}
-                    </Stack>
-                  </Group>
-                </Grid.Col>
-                <Grid.Col span={4}>
-                  <Group gap="xs" align="flex-start">
-                    <IconPhone size={18} color="#1b365d" />
-                    <Stack gap={2}>
-                      <Text size="xs" c="dimmed">Téléphone</Text>
-                      <Text fw={500} size="md">{factureData.client_tel || 'Non renseigné'}</Text>
-                      <Text size="xs" c="dimmed" mt={4}>Email</Text>
-                      <Text size="sm">{factureData.client_email || 'Non renseigné'}</Text>
-                    </Stack>
-                  </Group>
-                </Grid.Col>
-                <Grid.Col span={4}>
-                  <Group gap="xs" align="flex-start">
-                    <IconMapPin size={18} color="#1b365d" />
-                    <Stack gap={2}>
-                      <Text size="xs" c="dimmed">Adresse</Text>
-                      <Text fw={500}>{factureData.client_adresse || 'Non renseignée'}</Text>
-                      {factureData.client_ville && (
-                        <Text size="xs" c="dimmed">{factureData.client_ville}</Text>
-                      )}
-                    </Stack>
-                  </Group>
-                </Grid.Col>
-              </Grid>
-            </Card>
-
-            {/* Tableau des produits */}
-            <Box style={{ overflowX: 'auto', marginBottom: '32px' }}>
-              <Table 
-                striped 
-                highlightOnHover 
-                withColumnBorders
-                style={{ 
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                }}
-              >
-                <Table.Thead>
-                  <Table.Tr style={{ backgroundColor: '#17b408ee' }}>
-                    <Table.Th ta="center" w={50} style={{ fontSize: 13, fontWeight: 700 }}>#</Table.Th>
-                    <Table.Th style={{ fontSize: 13, fontWeight: 700 }}>Désignation</Table.Th>
-                    <Table.Th ta="center" w={80} style={{ fontSize: 13, fontWeight: 700 }}>Unité</Table.Th>
-                    <Table.Th ta="center" w={80} style={{ fontSize: 13, fontWeight: 700 }}>Qté</Table.Th>
-                    <Table.Th ta="right" w={120} style={{ fontSize: 13, fontWeight: 700 }}>P.U HT</Table.Th>
-                    <Table.Th ta="right" w={140} style={{ fontSize: 13, fontWeight: 700 }}>Total HT</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {detailsWithCalculs.length > 0 ? (
-                    detailsWithCalculs.map((detail: DetailCalcul) => (
-                      <Table.Tr key={detail.numero} style={{ transition: 'background 0.2s' }}>
-                        <Table.Td ta="center" fw={600}>{detail.numero}</Table.Td>
-                        <Table.Td>
-                          <Text fw={600} size="sm">{detail.designation}</Text>
-                          {detail.code && (
-                            <Text size="xs" c="dimmed" mt={2}>
-                              Réf: {detail.code}
-                            </Text>
-                          )}
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Badge variant="light" color="gray" radius="sm" size="sm">
-                            {detail.unite}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Badge variant="light" color="blue" radius="sm" size="sm">
-                            {detail.qte}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text fw={600} size="sm">{formatMontant(detail.prix_unitaire)} F</Text>
-                        </Table.Td>
-                        <Table.Td ta="right" fw={700} c="blue.8">
-                          {formatMontant(detail.total_ligne)} F
-                        </Table.Td>
-                      </Table.Tr>
-                    ))
-                  ) : (
-                    <Table.Tr>
-                      <Table.Td colSpan={6} ta="center" py="xl">
-                        <Stack align="center" gap="xs">
-                          <IconReceipt size={48} color="#ccc" />
-                          <Text c="dimmed">Aucun produit trouvé</Text>
-                        </Stack>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                </Table.Tbody>
-              </Table>
-            </Box>
-
-            {/* Récapitulatif */}
-            <Flex justify="flex-end">
-              <Box style={{ width: '400px' }}>
-                <Card withBorder radius="md" p="md" style={{ backgroundColor: '#fafafa' }}>
-                  <Stack gap="sm">
-                    <Flex justify="space-between" p="xs" style={{ borderRadius: '8px' }}>
-                      <Group gap="xs">
-                        <IconCurrencyFrank size={18} color="#666" />
-                        <Text fw={500}>Total HT</Text>
-                      </Group>
-                      <Text fw={700} size="lg">{formatMontant(totalHT)} FCFA</Text>
-                    </Flex>
-                    
-                    <Flex justify="space-between" p="xs" style={{ backgroundColor: '#e8f5e9', borderRadius: '8px' }}>
-                      <Group gap="xs">
-                        <IconReceipt size={18} color="#2e7d32" />
-                        <Text fw={500} c="green.8">TVA (18%)</Text>
-                      </Group>
-                      <Text fw={700} size="lg" c="green.8">{formatMontant(tva)} FCFA</Text>
-                    </Flex>
-                    
-                    <Divider my={4} style={{ borderColor: '#e0e0e0' }} />
-                    
-                    <Flex justify="space-between" p="md" style={{ backgroundColor: '#e3f2fd', borderRadius: '12px' }}>
-                      <Group gap="xs">
-                        <IconCurrencyFrank size={24} color="#1565c0" />
-                        <Text fw={800} size="lg" c="blue.8">Total TTC</Text>
-                      </Group>
-                      <Text fw={800} size="xl" c="blue.8">{formatMontant(totalTTC)} FCFA</Text>
-                    </Flex>
-                  </Stack>
-                </Card>
-              </Box>
-            </Flex>
-
-            {/* Notes */}
-            {factureData.notes && (
-              <>
-                <Divider my="lg" />
-                <Card withBorder radius="md" p="md" style={{ backgroundColor: '#f8f9fa' }}>
-                  <Group gap="xs" mb={4}>
-                    <IconFileInvoice size={16} color="#666" />
-                    <Text size="xs" c="dimmed" fw={600}>NOTES</Text>
-                  </Group>
-                  <Text size="sm" c="dimmed">{factureData.notes}</Text>
-                </Card>
-              </>
+        <Paper p="md" style={{ maxWidth: '800px', margin: '0 auto', backgroundColor: 'white' }}>
+          
+          {/* En-tête */}
+          <Box style={{ textAlign: 'center', borderBottom: '2px solid #1b365d', paddingBottom: 12, marginBottom: 16 }}>
+            {atelier.logo_base64 && (
+              <Image src={atelier.logo_base64} alt="Logo" style={{ height: '50px', margin: '0 auto 8px', objectFit: 'contain' }} />
             )}
-
-            {/* Footer */}
-            <Divider my="xl" />
-            <Box style={{ textAlign: 'center' }}>
-              <Stack gap={6}>
-                <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>
-                  {atelier.message_facture || 'Merci de votre confiance'} - {atelier.nom_atelier}
-                </Text>
-                <Group justify="center" gap="xl" style={{ fontSize: 11, color: '#888' }}>
-                  <Text>📞 {atelier.telephone}</Text>
-                  <Text>✉️ {atelier.email}</Text>
-                  <Text>📍 {atelier.adresse}</Text>
-                </Group>
-                <Text size="xs" c="dimmed" mt={4}>
-                  Document généré automatiquement - Fait foi
-                </Text>
-              </Stack>
-            </Box>
+            <Title order={2} style={{ fontSize: '18px', margin: 0 }}>{atelier.nom_atelier}</Title>
+            <Text size="xs" c="dimmed">{atelier.adresse}</Text>
+            <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text>
           </Box>
+
+          {/* Titre */}
+          <Title order={3} ta="center" mb="md" style={{ fontSize: '14px', backgroundColor: '#f2d2bc', padding: '4px', borderRadius: '4px' }}>
+            FACTURE STANDARD
+          </Title>
+
+          {/* Infos facture */}
+          <SimpleGrid cols={2} spacing="xs" mb="md" style={{ fontSize: '12px' }}>
+            <Group gap={4}><IconFileInvoice size={14} /><Text size="xs" fw={600}>N°:</Text><Text size="xs">{facture.code_facture}</Text></Group>
+            <Group gap={4}><IconCalendar size={14} /><Text size="xs" fw={600}>Date:</Text><Text size="xs">{formatDate(facture.date_facture)}</Text></Group>
+            <Group gap={4}><IconUser size={14} /><Text size="xs" fw={600}>Client:</Text><Text size="xs">{facture.NomComplet || facture.client_nom}</Text></Group>
+            <Group gap={4}><IconBuildingStore size={14} /><Text size="xs" fw={600}>Commande:</Text><Text size="xs">{facture.code_commande || '-'}</Text></Group>
+          </SimpleGrid>
+
+          <Divider my="xs" />
+
+          {/* Tableau des produits */}
+          <Table withColumnBorders style={{ fontSize: '12px', marginBottom: 16 }}>
+            <Table.Thead>
+              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                <Table.Th c="white" ta="center" w={40}>#</Table.Th>
+                <Table.Th c="white">Désignation</Table.Th>
+                <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Prix HT</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Total HT</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {detailsWithCalculs.map((detail) => (
+                <Table.Tr key={detail.numero}>
+                  <Table.Td ta="center">{detail.numero}</Table.Td>
+                  <Table.Td>{detail.designation}</Table.Td>
+                  <Table.Td ta="center">{detail.qte}</Table.Td>
+                  <Table.Td ta="right">{formatMontant(detail.prix_unitaire)}</Table.Td>
+                  <Table.Td ta="right">{formatMontant(detail.total_ligne)}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+
+          {/* Totaux */}
+          <Box style={{ textAlign: 'right', marginBottom: 16 }}>
+            <Group justify="flex-end" gap="md" style={{ fontSize: '12px' }}>
+              <Text fw={600}>Total HT:</Text>
+              <Text>{formatMontant(totalHT)} FCFA</Text>
+            </Group>
+            <Group justify="flex-end" gap="md" style={{ fontSize: '12px' }}>
+              <Text fw={600} c="orange">TVA (18%):</Text>
+              <Text c="orange">{formatMontant(totalTTC - totalHT)} FCFA</Text>
+            </Group>
+            <Group justify="flex-end" gap="md" style={{ fontSize: '14px', marginTop: 8, backgroundColor: '#e8f5e9', padding: '8px', borderRadius: '4px' }}>
+              <Text fw={800}>Total TTC:</Text>
+              <Text fw={800} c="green">{formatMontant(totalTTC)} FCFA</Text>
+            </Group>
+          </Box>
+
+          <Divider my="xs" />
+
+          {/* Message */}
+          <Text size="xs" ta="center" fs="italic" c="dimmed">
+            {atelier.message_facture}
+          </Text>
         </Paper>
       </div>
+
+      <style>{`
+        @media print {
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
     </Box>
   );
 };

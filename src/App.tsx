@@ -1,6 +1,6 @@
 // src/App.tsx
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Routes, Route, BrowserRouter, useNavigate, useParams } from 'react-router-dom';
+import { Routes, Route, BrowserRouter, useNavigate } from 'react-router-dom';
 import { AppShell, Loader, Center, Button, Notification, MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
@@ -28,7 +28,8 @@ const ListeCommandes = lazy(() => import('./components/commandes/ListeCommandes'
 const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireCommande'));
 
 // ==================== REVENDEURS ====================
-const ListeCommandesRevendeur = lazy(() => import('./components/decomptes/ListeDecomptes').then(module => ({ default: module.ListeCommandesRevendeur })));
+// Some commande-related components are exported from the main ListeCommandes file
+const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandes').then(module => ({ default: (module as any).ListeCommandesRevendeur || (module as any).ListeCommande })));
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
@@ -39,10 +40,9 @@ const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompt
 
 // ==================== PRODUITS & STOCK ====================
 const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
-const StockGlobal = lazy(() => import('./components/stock/StockGlobal'));
 
 // ==================== FINANCES ====================
-const ListeDecomptes = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
+const ListeDecomptes = lazy(() => import('./components/decomptes/ListeDecomptes'));
 const ListeReglements = lazy(() => import('./components/reglements/ListeReglements'));
 
 // ==================== PARAMÈTRES ====================
@@ -159,13 +159,7 @@ function NouveauDecompteWrapper() {
   );
 }
 
-// Wrapper pour PrintRecuDecompte avec useParams
-function PrintRecuDecompteWrapper() {
-  const { id } = useParams<{ id: string }>();
-  const idDecompte = id ? parseInt(id, 10) : 0;
-
-  return <PrintRecuDecompte idDecompte={idDecompte} />;
-}
+// Wrapper pour PrintRecuDecompte avec useParams (handled inside Routes)
 
 // ==================== APP AUTHENTIFIÉE ====================
 function AuthenticatedApp() {
@@ -297,12 +291,6 @@ function AuthenticatedApp() {
                 <ListeProduits />
               </RouteGuard>
             } />
-            <Route path="/stock" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
-                <StockGlobal />
-              </RouteGuard>
-            } />
-
             {/* FINANCES */}
             <Route path="/decomptes" element={
               <RouteGuard roles={['admin']}>
@@ -321,7 +309,7 @@ function AuthenticatedApp() {
             } />
             <Route path="/decomptes/:id/print" element={
               <RouteGuard roles={['admin']}>
-                <PrintRecuDecompteWrapper />
+                <PrintRecuDecompte />
               </RouteGuard>
             } />
             <Route path="/reglements" element={

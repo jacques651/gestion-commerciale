@@ -1,12 +1,13 @@
 // src/components/factures/ListeFacturesRevendeur.tsx
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
-  Pagination, Modal, Divider, TextInput, Paper, Box, SimpleGrid,
+  Pagination, TextInput, Paper, Box, SimpleGrid,
   Loader, ThemeIcon, Flex
 } from '@mantine/core';
 import {
-  IconEye, IconPrinter, IconDownload, IconSearch, IconRefresh, IconFileInvoice,
+  IconPrinter, IconDownload, IconSearch, IconRefresh, IconFileInvoice,
   IconTruck, IconCurrencyFrank, IconReceipt
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
@@ -26,12 +27,11 @@ interface FactureRevendeur {
 }
 
 export const ListeFacturesRevendeur: React.FC = () => {
+  const navigate = useNavigate();
   const [factures, setFactures] = useState<FactureRevendeur[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-  const [selectedFacture, setSelectedFacture] = useState<FactureRevendeur | null>(null);
   const itemsPerPage = 10;
 
   const chargerFactures = async () => {
@@ -73,47 +73,15 @@ export const ListeFacturesRevendeur: React.FC = () => {
     }
   };
 
+  // ✅ Fonction pour ouvrir la facture complète
+  const handleVoirFacture = (facture: FactureRevendeur) => {
+    navigate(`/factures-revendeur/${facture.idFactureRevendeur}`);
+  };
+
   const facturesFiltrees = factures.filter(f =>
     f.code_facture?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     f.client_nom?.toLowerCase().includes(searchTerm.toLowerCase())
   );
-const reinitialiserFactures = async () => {
-  try {
-    const db = await getDb();
-
-    // Factures revendeurs
-    await db.execute(`
-      DELETE FROM factures_revendeur
-    `);
-
-    // Décomptes
-    await db.execute(`
-      DELETE FROM decompte_details
-    `);
-
-    await db.execute(`
-      DELETE FROM decomptes
-    `);
-
-    await chargerFactures();
-   
-
-    notifications.show({
-      title: 'Succès',
-      message: 'Factures et décomptes réinitialisés',
-      color: 'green'
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    notifications.show({
-      title: 'Erreur',
-      message: 'Impossible de réinitialiser les données',
-      color: 'red'
-    });
-  }
-};
 
   const totalPages = Math.ceil(facturesFiltrees.length / itemsPerPage);
   const paginatedFactures = facturesFiltrees.slice(
@@ -181,7 +149,7 @@ const reinitialiserFactures = async () => {
               </ThemeIcon>
               <div>
                 <Text c="white" size="xs">Montant total</Text>
-                <Text c="white" fw={700} size="xl">{formatMontant(stats.totalMontant)} F</Text>
+                <Text c="white" fw={700} size="xl">{formatMontant(stats.totalMontant)} FCFA</Text>
               </div>
             </Group>
           </Card>
@@ -192,7 +160,7 @@ const reinitialiserFactures = async () => {
               </ThemeIcon>
               <div>
                 <Text c="white" size="xs">Commission totale</Text>
-                <Text c="white" fw={700} size="xl">{formatMontant(stats.totalCommission)} F</Text>
+                <Text c="white" fw={700} size="xl">{formatMontant(stats.totalCommission)} FCFA</Text>
               </div>
             </Group>
           </Card>
@@ -228,9 +196,7 @@ const reinitialiserFactures = async () => {
             onClick={async () => {
               setSearchTerm('');
               setCurrentPage(1);
-
               await chargerFactures();
-
               notifications.show({
                 title: 'Réinitialisation',
                 message: 'Liste des factures rechargée',
@@ -240,14 +206,6 @@ const reinitialiserFactures = async () => {
           >
             Réinitialiser
           </Button>
-
-          <Button
-            color="red"
-            leftSection={<IconRefresh size={16} />}
-            onClick={reinitialiserFactures}
-          >
-            Vider les factures
-          </Button>
         </Group>
       </Card>
 
@@ -256,7 +214,7 @@ const reinitialiserFactures = async () => {
         <Box style={{ overflowX: 'auto' }}>
           <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)', }}>
+              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
                 <Table.Th>Code facture</Table.Th>
                 <Table.Th>Revendeur</Table.Th>
                 <Table.Th>Date</Table.Th>
@@ -272,14 +230,20 @@ const reinitialiserFactures = async () => {
                   <Table.Td><Text fw={600} size="sm">{f.code_facture}</Text></Table.Td>
                   <Table.Td fw={500}>{f.client_nom || f.client_societe || '-'}</Table.Td>
                   <Table.Td>{new Date(f.date_facture).toLocaleDateString('fr-FR')}</Table.Td>
-                  <Table.Td ta="right"><Text fw={700} c="green">{formatMontant(f.montant_ttc)} F</Text></Table.Td>
-                  <Table.Td ta="right"><Text c="orange">{formatMontant(f.commission)} F</Text></Table.Td>
+                  <Table.Td ta="right"><Text fw={700} c="green">{formatMontant(f.montant_ttc)} FCFA</Text></Table.Td>
+                  <Table.Td ta="right"><Text c="orange">{formatMontant(f.commission)} FCFA</Text></Table.Td>
                   <Table.Td ta="center">{getStatutBadge(f.statut)}</Table.Td>
                   <Table.Td ta="center">
                     <Group gap={4} justify="center">
-                      <Tooltip label="Voir détails">
-                        <ActionIcon variant="light" color="adminBlue" size="md" onClick={() => { setSelectedFacture(f); setDetailsModalOpen(true); }}>
-                          <IconEye size={16} />
+                      {/* ✅ Bouton Voir facture - remplace le bouton Voir détails */}
+                      <Tooltip label="Voir facture">
+                        <ActionIcon 
+                          variant="light" 
+                          color="blue" 
+                          size="md" 
+                          onClick={() => handleVoirFacture(f)}
+                        >
+                          <IconFileInvoice size={16} />
                         </ActionIcon>
                       </Tooltip>
                       <Tooltip label="Imprimer">
@@ -288,7 +252,7 @@ const reinitialiserFactures = async () => {
                         </ActionIcon>
                       </Tooltip>
                       <Tooltip label="Télécharger">
-                        <ActionIcon variant="light" color="blue" size="md">
+                        <ActionIcon variant="light" color="grape" size="md">
                           <IconDownload size={16} />
                         </ActionIcon>
                       </Tooltip>
@@ -313,56 +277,6 @@ const reinitialiserFactures = async () => {
           </Group>
         )}
       </Card>
-
-      {/* MODAL DÉTAILS */}
-      <Modal
-        opened={detailsModalOpen}
-        onClose={() => { setDetailsModalOpen(false); setSelectedFacture(null); }}
-        title={`Détails facture ${selectedFacture?.code_facture || ''}`}
-        size="md"
-        centered
-        styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 600 },
-          body: { padding: '20px' }
-        }}
-      >
-        {selectedFacture && (
-          <Stack gap="md">
-            <SimpleGrid cols={2} spacing="md">
-              <Card withBorder p="sm" bg="gray.0">
-                <Text size="xs" c="dimmed">Code facture</Text>
-                <Text fw={600}>{selectedFacture.code_facture}</Text>
-              </Card>
-              <Card withBorder p="sm" bg="gray.0">
-                <Text size="xs" c="dimmed">Date</Text>
-                <Text>{new Date(selectedFacture.date_facture).toLocaleDateString('fr-FR')}</Text>
-              </Card>
-              <Card withBorder p="sm" bg="gray.0">
-                <Text size="xs" c="dimmed">Revendeur</Text>
-                <Text fw={500}>{selectedFacture.client_nom || selectedFacture.client_societe}</Text>
-              </Card>
-              <Card withBorder p="sm" bg="gray.0">
-                <Text size="xs" c="dimmed">Statut</Text>
-                {getStatutBadge(selectedFacture.statut)}
-              </Card>
-              <Card withBorder p="sm" bg="green.0">
-                <Text size="xs" c="dimmed">Montant TTC</Text>
-                <Text fw={700} c="green" size="lg">{formatMontant(selectedFacture.montant_ttc)} F</Text>
-              </Card>
-              <Card withBorder p="sm" bg="orange.0">
-                <Text size="xs" c="dimmed">Commission</Text>
-                <Text fw={600} c="orange" size="lg">{formatMontant(selectedFacture.commission)} F</Text>
-              </Card>
-            </SimpleGrid>
-            <Divider />
-            <Group justify="flex-end">
-              <Button variant="outline" onClick={() => setDetailsModalOpen(false)}>Fermer</Button>
-              <Button color="adminBlue" leftSection={<IconPrinter size={16} />}>Imprimer</Button>
-            </Group>
-          </Stack>
-        )}
-      </Modal>
     </Stack>
   );
 };

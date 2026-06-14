@@ -1,6 +1,13 @@
 // src/components/clients/FormulaireClient.tsx
 import React, { useState, useEffect } from 'react';
-import { Modal, TextInput, Select, Button, Group, Stack } from '@mantine/core';
+import { 
+  Modal, TextInput, Select, Button, Group, Stack, 
+  Paper, Text, ThemeIcon, Divider, SimpleGrid} from '@mantine/core';
+import { 
+  IconUser, IconBuildingStore, IconMapPin, 
+  IconPhone, IconMail, IconBuilding, IconUserPlus, 
+  IconEdit, IconDeviceFloppy, IconX 
+} from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { Client } from '../../database/repositories/clientRepository';
 
@@ -13,8 +20,6 @@ interface FormulaireClientProps {
 export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onClose, editClient }) => {
   const { createClient, updateClient } = useClients();
   const [loading, setLoading] = useState(false);
-
-  // Ces champs correspondent EXACTEMENT à la nouvelle table
   const [formData, setFormData] = useState({
     NomComplet: '',
     Societe: '',
@@ -25,7 +30,6 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
     TypeClient: 'client' as 'client' | 'revendeur',
   });
 
-  // Remplir le formulaire si édition
   useEffect(() => {
     if (editClient) {
       setFormData({
@@ -38,7 +42,6 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
         TypeClient: editClient.TypeClient || 'client',
       });
     } else if (opened) {
-      // Réinitialiser pour un nouveau client
       setFormData({
         NomComplet: '',
         Societe: '',
@@ -80,78 +83,148 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
   };
 
   const typeOptions = [
-    { value: 'client', label: 'Client' },
-    { value: 'revendeur', label: 'Revendeur' },
+    { value: 'client', label: 'Client', icon: <IconUser size={14} /> },
+    { value: 'revendeur', label: 'Revendeur', icon: <IconBuildingStore size={14} /> },
   ];
 
   return (
     <Modal
       opened={opened}
       onClose={onClose}
-      title={editClient ? 'Modifier le client' : 'Nouveau client'}
-      size="md"
+      size="lg"
+      padding={0}
+      radius="lg"
+      centered
+      styles={{
+        header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+        title: { color: 'white', fontWeight: 700, fontSize: '1.2rem' },
+        body: { padding: 0 }
+      }}
+      title={
+        <Group gap="md">
+          <ThemeIcon size="lg" radius="md" color="white" variant="light">
+            {editClient ? <IconEdit size={20} /> : <IconUserPlus size={20} />}
+          </ThemeIcon>
+          <div>
+            <Text size="lg" fw={700} c="white">
+              {editClient ? 'Modifier le client' : 'Nouveau client'}
+            </Text>
+            <Text size="xs" opacity={0.7} c="white">
+              {editClient ? 'Modifiez les informations du client' : 'Ajoutez un nouveau client à votre carnet d\'adresses'}
+            </Text>
+          </div>
+        </Group>
+      }
     >
       <form onSubmit={handleSubmit}>
-        <Stack gap="md">
-          <TextInput
-            label="Nom complet"
-            placeholder="Nom complet du client"
-            value={formData.NomComplet}
-            onChange={(e) => setFormData({ ...formData, NomComplet: e.target.value })}
-            required
-          />
+        <Stack gap="lg" p="xl">
+          {/* Type de client - Carte en haut */}
+          <Paper p="md" withBorder radius="md" style={{ backgroundColor: '#f8f9fa' }}>
+            <Group gap="xs" mb="sm">
+              <IconBuildingStore size={16} color="#1b365d" />
+              <Text fw={600} size="sm" c="#1b365d">Type de client</Text>
+            </Group>
+            <Select
+              data={typeOptions}
+              value={formData.TypeClient}
+              onChange={(value) => setFormData({ ...formData, TypeClient: value as 'client' | 'revendeur' })}
+              required
+              size="md"
+              styles={{
+                input: { backgroundColor: 'white' }
+              }}
+            />
+          </Paper>
 
-          <TextInput
-            label="Société"
-            placeholder="Nom de la société (optionnel)"
-            value={formData.Societe}
-            onChange={(e) => setFormData({ ...formData, Societe: e.target.value })}
-          />
+          <Divider label="Informations personnelles" labelPosition="center" />
 
-          <TextInput
-            label="Adresse"
-            placeholder="Adresse complète"
-            value={formData.Adresse}
-            onChange={(e) => setFormData({ ...formData, Adresse: e.target.value })}
-          />
+          {/* Informations personnelles */}
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            <TextInput
+              label="Nom complet"
+              placeholder="Nom complet du client"
+              value={formData.NomComplet}
+              onChange={(e) => setFormData({ ...formData, NomComplet: e.target.value })}
+              leftSection={<IconUser size={16} />}
+              required
+              size="md"
+            />
 
-          <TextInput
-            label="Téléphone"
-            placeholder="Numéro de téléphone"
-            value={formData.Tel}
-            onChange={(e) => setFormData({ ...formData, Tel: e.target.value })}
-          />
+            <TextInput
+              label="Société"
+              placeholder="Nom de la société (optionnel)"
+              value={formData.Societe}
+              onChange={(e) => setFormData({ ...formData, Societe: e.target.value })}
+              leftSection={<IconBuilding size={16} />}
+              size="md"
+            />
+          </SimpleGrid>
 
-          <TextInput
-            label="Email"
-            placeholder="adresse@email.com"
-            value={formData.Email}
-            onChange={(e) => setFormData({ ...formData, Email: e.target.value })}
-            type="email"
-          />
+          <Divider label="Coordonnées" labelPosition="center" />
 
-          <TextInput
-            label="Ville"
-            placeholder="Ville"
-            value={formData.Ville}
-            onChange={(e) => setFormData({ ...formData, Ville: e.target.value })}
-          />
+          {/* Adresse et ville */}
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            <TextInput
+              label="Adresse"
+              placeholder="Adresse complète"
+              value={formData.Adresse}
+              onChange={(e) => setFormData({ ...formData, Adresse: e.target.value })}
+              leftSection={<IconMapPin size={16} />}
+              size="md"
+            />
 
-          <Select
-            label="Type de client"
-            placeholder="Sélectionner le type"
-            data={typeOptions}
-            value={formData.TypeClient}
-            onChange={(value) => setFormData({ ...formData, TypeClient: value as 'client' | 'revendeur' })}
-            required
-          />
+            <TextInput
+              label="Ville"
+              placeholder="Ville"
+              value={formData.Ville}
+              onChange={(e) => setFormData({ ...formData, Ville: e.target.value })}
+              leftSection={<IconBuildingStore size={16} />}
+              size="md"
+            />
+          </SimpleGrid>
 
-          <Group justify="flex-end" mt="md">
-            <Button variant="outline" onClick={onClose}>
+          {/* Contact */}
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            <TextInput
+              label="Téléphone"
+              placeholder="Numéro de téléphone"
+              value={formData.Tel}
+              onChange={(e) => setFormData({ ...formData, Tel: e.target.value })}
+              leftSection={<IconPhone size={16} />}
+              size="md"
+            />
+
+            <TextInput
+              label="Email"
+              placeholder="adresse@email.com"
+              value={formData.Email}
+              onChange={(e) => setFormData({ ...formData, Email: e.target.value })}
+              leftSection={<IconMail size={16} />}
+              type="email"
+              size="md"
+            />
+          </SimpleGrid>
+
+          <Divider />
+
+          {/* Boutons d'action */}
+          <Group justify="flex-end" gap="md">
+            <Button 
+              variant="outline" 
+              onClick={onClose}
+              leftSection={<IconX size={16} />}
+              size="md"
+            >
               Annuler
             </Button>
-            <Button type="submit" loading={loading}>
-              {editClient ? 'Modifier' : 'Créer'}
+            <Button 
+              type="submit" 
+              loading={loading}
+              color={editClient ? 'blue' : 'green'}
+              leftSection={<IconDeviceFloppy size={16} />}
+              size="md"
+            >
+              {editClient ? 'Enregistrer les modifications' : 'Créer le client'}
             </Button>
           </Group>
         </Stack>
@@ -159,3 +232,5 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
     </Modal>
   );
 };
+
+export default FormulaireClient;

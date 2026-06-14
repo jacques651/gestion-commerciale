@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS unites (
     FOREIGN KEY (unite_reference_id) REFERENCES unites(idUnite)
 );
 
--- Table products
+-- Table products (version complète avec toutes les colonnes)
 CREATE TABLE IF NOT EXISTS products (
     idProduit INTEGER PRIMARY KEY AUTOINCREMENT,
     code_produit TEXT UNIQUE NOT NULL,
@@ -156,11 +156,15 @@ CREATE TABLE IF NOT EXISTS products (
     prix_vente_gros REAL DEFAULT 0,
     commission_pourcentage REAL DEFAULT 0,
     qte_stock REAL DEFAULT 0,
-    seuil_alerte REAL DEFAULT 0,
+    seuil_alerte REAL DEFAULT 10,
+    prix_moyen_pondere REAL DEFAULT 0,
+    methode_gestion_stock TEXT DEFAULT 'FIFO',
+    idUniteStockage INTEGER,
     date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
     est_supprime INTEGER DEFAULT 0
 );
 
+-- Table conditionnements
 CREATE TABLE IF NOT EXISTS conditionnements (
     idConditionnement INTEGER PRIMARY KEY AUTOINCREMENT,
     idProduit INTEGER NOT NULL,
@@ -231,7 +235,7 @@ CREATE TABLE IF NOT EXISTS commande_details (
 );
 
 -- =====================================================
--- 5. STOCK REVENDEUR (table unique pour le stock des revendeurs)
+-- 5. STOCK REVENDEUR
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS stock_revendeur (
@@ -314,7 +318,7 @@ CREATE INDEX IF NOT EXISTS idx_vente_detail_vente ON vente_details(idVente);
 CREATE INDEX IF NOT EXISTS idx_vente_detail_produit ON vente_details(idProduit);
 
 -- =====================================================
--- 8. MOUVEMENTS STOCK
+-- 8. MOUVEMENTS STOCK (version complète)
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS mouvements_stock (
@@ -324,13 +328,66 @@ CREATE TABLE IF NOT EXISTS mouvements_stock (
     quantite REAL NOT NULL,
     stock_avant REAL NOT NULL,
     stock_apres REAL NOT NULL,
+    prix_unitaire REAL,
+    reference TEXT,
+    notes TEXT,
     date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
     idCommande INTEGER,
+    idLot INTEGER,
     FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
 -- =====================================================
--- 9. MOUVEMENTS REVENDEUR
+-- 9. LOTS DE STOCK (GESTION FIFO)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS lots_stock (
+    idLot INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    code_lot TEXT UNIQUE NOT NULL,
+    quantite_entree REAL NOT NULL,
+    quantite_restante REAL NOT NULL,
+    prix_achat_unitaire REAL NOT NULL,
+    prix_vente_unitaire REAL NOT NULL,
+    date_entree DATE NOT NULL,
+    date_expiration DATE,
+    reference_facture TEXT,
+    idFournisseur INTEGER,
+    notes TEXT,
+    est_supprime INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+    FOREIGN KEY (idFournisseur) REFERENCES fournisseurs(idFournisseur)
+);
+
+-- Table des sorties de stock par lot
+CREATE TABLE IF NOT EXISTS sorties_lots (
+    idSortieLot INTEGER PRIMARY KEY AUTOINCREMENT,
+    idLot INTEGER NOT NULL,
+    idMouvement INTEGER NOT NULL,
+    quantite_sortie REAL NOT NULL,
+    prix_vente_unitaire REAL NOT NULL,
+    FOREIGN KEY (idLot) REFERENCES lots_stock(idLot),
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_stock(idMouvement)
+);
+
+-- Table pour l'historique des prix
+CREATE TABLE IF NOT EXISTS historique_prix (
+    idHistorique INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ancien_prix_achat REAL,
+    nouveau_prix_achat REAL,
+    ancien_prix_vente REAL,
+    nouveau_prix_vente REAL,
+    idLot INTEGER,
+    motif TEXT,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+    FOREIGN KEY (idLot) REFERENCES lots_stock(idLot)
+);
+
+-- =====================================================
+-- 10. MOUVEMENTS REVENDEUR
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS mouvements_revendeur (
@@ -349,7 +406,7 @@ CREATE TABLE IF NOT EXISTS mouvements_revendeur (
 );
 
 -- =====================================================
--- 10. FACTURES
+-- 11. FACTURES
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS factures (
@@ -395,7 +452,7 @@ CREATE TABLE IF NOT EXISTS factures_revendeur (
 );
 
 -- =====================================================
--- 11. RÈGLEMENTS
+-- 12. RÈGLEMENTS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS reglements (
@@ -420,7 +477,7 @@ CREATE TABLE IF NOT EXISTS reglements (
 );
 
 -- =====================================================
--- 12. UTILISATEURS
+-- 13. UTILISATEURS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS utilisateurs (
@@ -437,7 +494,7 @@ CREATE TABLE IF NOT EXISTS utilisateurs (
 );
 
 -- =====================================================
--- 13. CONFIGURATION ATELIER
+-- 14. CONFIGURATION ATELIER
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS configuration_atelier (
@@ -453,7 +510,7 @@ CREATE TABLE IF NOT EXISTS configuration_atelier (
 );
 
 -- =====================================================
--- 14. CONFIGURATION COMMERCE
+-- 15. CONFIGURATION COMMERCE
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS config_commerce (
@@ -466,7 +523,69 @@ CREATE TABLE IF NOT EXISTS config_commerce (
 );
 
 -- =====================================================
--- 15. DONNÉES PAR DÉFAUT
+-- 16. VUES
+-- =====================================================
+
+-- Vue pour le calcul du PMP et stock actuel
+CREATE VIEW IF NOT EXISTS vue_stock_actuel AS
+SELECT 
+    p.idProduit,
+    p.code_produit,
+    p.designation,
+    p.categorie,
+    p.unite_base,
+    COALESCE(SUM(l.quantite_restante), 0) AS stock_actuel,
+    CASE 
+        WHEN COALESCE(SUM(l.quantite_restante), 0) > 0 
+        THEN ROUND(SUM(l.quantite_restante * l.prix_achat_unitaire) / SUM(l.quantite_restante), 2)
+        ELSE p.prix_moyen_pondere
+    END AS prix_moyen_pondere,
+    COALESCE(MAX(l.date_entree), p.date_entree) AS derniere_entree
+FROM products p
+LEFT JOIN lots_stock l ON p.idProduit = l.idProduit AND l.quantite_restante > 0 AND l.est_supprime = 0
+WHERE p.est_supprime = 0
+GROUP BY p.idProduit;
+
+-- Vue pour l'historique des mouvements détaillés
+CREATE VIEW IF NOT EXISTS vue_mouvements_detail AS
+SELECT 
+    m.idMouvement,
+    m.idProduit,
+    p.code_produit,
+    p.designation,
+    m.type_mouvement,
+    m.quantite,
+    m.stock_avant,
+    m.stock_apres,
+    m.prix_unitaire,
+    m.reference,
+    m.notes,
+    m.date_mouvement,
+    CASE 
+        WHEN m.idLot IS NOT NULL THEN l.code_lot
+        ELSE NULL
+    END AS code_lot
+FROM mouvements_stock m
+LEFT JOIN products p ON m.idProduit = p.idProduit
+LEFT JOIN lots_stock l ON m.idLot = l.idLot
+ORDER BY m.date_mouvement DESC;
+
+-- =====================================================
+-- 17. INDEX
+-- =====================================================
+
+CREATE INDEX IF NOT EXISTS idx_products_code ON products(code_produit);
+CREATE INDEX IF NOT EXISTS idx_products_categorie ON products(categorie);
+CREATE INDEX IF NOT EXISTS idx_lots_produit ON lots_stock(idProduit);
+CREATE INDEX IF NOT EXISTS idx_lots_date ON lots_stock(date_entree);
+CREATE INDEX IF NOT EXISTS idx_lots_code ON lots_stock(code_lot);
+CREATE INDEX IF NOT EXISTS idx_sorties_lot ON sorties_lots(idLot);
+CREATE INDEX IF NOT EXISTS idx_historique_produit ON historique_prix(idProduit);
+CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements_stock(idProduit);
+CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements_stock(date_mouvement);
+
+-- =====================================================
+-- 18. DONNÉES PAR DÉFAUT
 -- =====================================================
 
 INSERT OR IGNORE INTO config_generale (id_config, nom_application, devise, taux_tva_default) 
@@ -528,18 +647,27 @@ export const initDatabase = async (): Promise<void> => {
   try {
     const db = await getDb();
     
+    console.log('🚀 Initialisation de la base de données...');
+    
     // Exécuter le schéma complet
     await db.execute(SCHEMA_SQL);
-    console.log('✅ Base de données initialisée avec succès');
+    console.log('✅ Schéma SQL exécuté avec succès');
     
     // Vérification des tables principales
     const tables = await db.select<any[]>(`
       SELECT name FROM sqlite_master 
       WHERE type='table' 
-      AND name IN ('products', 'clients', 'commandes', 'factures', 'ventes', 'stock_revendeur')
+      ORDER BY name
     `);
     
-    console.log('📊 Tables vérifiées:', tables.map(t => t.name).join(', '));
+    console.log('📊 Tables créées:', tables.map(t => t.name).join(', '));
+    
+    // Vérifier que la table products a bien toutes les colonnes
+    const columns = await db.select<any[]>(`
+      PRAGMA table_info(products)
+    `);
+    
+    console.log('📋 Colonnes de products:', columns.map(c => c.name).join(', '));
     
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';

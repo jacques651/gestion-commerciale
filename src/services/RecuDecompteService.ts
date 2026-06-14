@@ -10,32 +10,6 @@ export default class RecuDecompteService {
 
     const db = await getDb();
 
-    const header = await db.select(
-      `
-      SELECT
-
-          d.idDecompte,
-          d.code_decompte,
-          d.date_decompte,
-
-          c.idClient,
-          c.NomComplet,
-
-          d.montant_achat,
-          d.montant_vente,
-          d.montant_benefice,
-          d.montant_commission,
-          d.montant_net
-
-      FROM decomptes d
-
-      INNER JOIN clients c
-      ON c.idClient = d.idClient
-
-      WHERE d.idDecompte = ?
-      `,
-      [idDecompte]
-    );
 
     const details = await db.select(
       `
@@ -64,7 +38,7 @@ export default class RecuDecompteService {
     );
 
     return {
-      header: header[0],
+      header: [0],
       details
     };
   }

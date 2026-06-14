@@ -1,110 +1,108 @@
-// src/components/commandes/ListeCommandesRevendeur.tsx
+// src/components/decomptes/ListeDecomptes.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Button, Group, Stack, Title, Card, Text,
-  Modal, TextInput, Grid, Paper,
+  Modal, TextInput, Paper,
   Loader, ThemeIcon, Flex, ActionIcon,
-  ScrollArea, Pagination, Tooltip, Select, Badge, Table, Center, SimpleGrid
+  ScrollArea, Pagination, Tooltip, Select, Badge, Table, SimpleGrid
 } from '@mantine/core';
 import {
-  IconSearch, IconRefresh, IconPlus, IconReceipt,
-  IconX, IconPackage, IconTruck, IconFileInvoice,
-  IconCalculator, IconCurrencyFrank, IconTrash, IconUser,
-  IconEye, IconList, IconArchive
-} from '@tabler/icons-react';
+  IconSearch, IconRefresh, IconReceipt,
+  IconX, IconEye,
+  IconPrinter, IconFilter, IconList, IconPlus} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import FormulaireCommande from '../commandes/FormulaireCommande';
+import NouveauDecompte from './NouveauDecompte';
+import ListeCommandesRevendeur from '../commandes/ListeCommandesRevendeur';
 
-interface StockRevendeur {
-  idStockRevendeur: number;
-  idProduit: number;
-  idRevendeur: number;
-  qte_stock: number;
-  prix_achat: number;
-  prix_vente: number;
-  commission_pourcentage: number;
-  produit_designation: string;
-  produit_code: string;
-  produit_categorie: string;
+interface DetailDecompte {
+  idDecompte: number;
+  code_decompte: string;
+  date_decompte: string;
   client_nom: string;
   client_societe: string;
   client_tel: string;
-  quantite_vendue: number;
+  produit_designation: string;
+  produit_categorie: string;
   code_facture: string;
-  date_commande: string;
+  quantite_decompte: number;
+  quantite_vendue: number;
+  quantite_restante: number;
+  prix_achat: number;
+  prix_vente: number;
+  total_achat: number;
+  total_vente: number;
+  benefice: number;
+  commission: number;
 }
 
-export const ListeCommandesRevendeur: React.FC = () => {
+export const ListeDecomptes: React.FC = () => {
   const navigate = useNavigate();
-  const [stocks, setStocks] = useState<StockRevendeur[]>([]);
+  const [details, setDetails] = useState<DetailDecompte[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [selectedCodeFacture, setSelectedCodeFacture] = useState<string | null>(null);
-  const [dateDebut, setDateDebut] = useState<Date | null>(null);
-  const [dateFin, setDateFin] = useState<Date | null>(null);
   const [clientsList, setClientsList] = useState<{ value: string; label: string }[]>([]);
   const [codeFacturesList, setCodeFacturesList] = useState<{ value: string; label: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [commandeModalOpened, setCommandeModalOpened] = useState(false);
-  const [showNonVendus, setShowNonVendus] = useState(false);
-  const [decomptesList, setDecomptesList] = useState<any[]>([]);
-  const [showDecomptesModal, setShowDecomptesModal] = useState(false);
-  const [selectedClientForDecomptes, setSelectedClientForDecomptes] = useState<any>(null);
-  const [decompteLoading, setDecompteLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [nouveauDecompteModalOpen, setNouveauDecompteModalOpen] = useState(false);
+  const [stocksRevendeurModalOpen, setStocksRevendeurModalOpen] = useState(false);
 
-  const itemsPerPage = 10;
+  const itemsPerPage = 15;
 
-  // Charger les stocks revendeurs
-  const chargerStocks = async () => {
+  // Charger les détails des décomptes
+  const chargerDetailsDecomptes = async () => {
     setLoading(true);
     try {
       const db = await getDb();
 
       const result = await db.select<any[]>(`
         SELECT 
-          sr.idStockRevendeur,
-          sr.idProduit,
-          sr.idRevendeur,
-          sr.qte_stock,
-          sr.prix_achat,
-          sr.prix_vente,
-          sr.commission_pourcentage,
-          p.designation as produit_designation,
-          p.code_produit as produit_code,
-          p.categorie as produit_categorie,
+          d.idDecompte,
+          d.code_decompte,
+          d.date_decompte,
           c.NomComplet as client_nom,
           c.Societe as client_societe,
           c.Tel as client_tel,
-          c.idClient,
-          COALESCE((
-            SELECT SUM(dd.qte_decompte) 
-            FROM decompte_details dd 
-            INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
-            WHERE dd.idProduit = sr.idProduit 
-            AND d.idClient = sr.idRevendeur
-          ), 0) as quantite_vendue,
+          p.designation as produit_designation,
+          p.categorie as produit_categorie,
+          p.code_produit,
           cmd.code_facture,
-          cmd.date_commande
-        FROM stock_revendeur sr
-        INNER JOIN products p ON p.idProduit = sr.idProduit
-        INNER JOIN clients c ON c.idClient = sr.idRevendeur
-        LEFT JOIN commandes cmd ON cmd.idClient = sr.idRevendeur AND cmd.type_commande = 'REVENDEUR'
-        ORDER BY c.NomComplet, p.designation
+          dd.qte_decompte as quantite_decompte,
+          dd.prix_achat,
+          dd.prix_vente,
+          dd.commission_pourcentage,
+          COALESCE((
+            SELECT SUM(cd.qte_commande)
+            FROM commande_details cd
+            INNER JOIN commandes cmd2 ON cmd2.idCommande = cd.idCommande
+            WHERE cd.idProduit = dd.idProduit AND cmd2.idClient = d.idClient
+          ), 0) as quantite_vendue,
+          COALESCE(sr.qte_stock, 0) as quantite_restante,
+          (dd.qte_decompte * dd.prix_achat) as total_achat,
+          (dd.qte_decompte * dd.prix_vente) as total_vente,
+          ((dd.qte_decompte * dd.prix_vente) - (dd.qte_decompte * dd.prix_achat)) as benefice,
+          ((dd.qte_decompte * dd.prix_vente) - (dd.qte_decompte * dd.prix_achat)) * (dd.commission_pourcentage / 100) as commission
+        FROM decomptes d
+        INNER JOIN decompte_details dd ON dd.idDecompte = d.idDecompte
+        INNER JOIN clients c ON c.idClient = d.idClient
+        INNER JOIN products p ON p.idProduit = dd.idProduit
+        LEFT JOIN commandes cmd ON cmd.idClient = d.idClient AND cmd.type_commande = 'REVENDEUR'
+        LEFT JOIN stock_revendeur sr ON sr.idProduit = dd.idProduit AND sr.idRevendeur = d.idClient
+        ORDER BY d.date_decompte DESC, p.designation
       `);
 
-      setStocks(result || []);
+      setDetails(result || []);
 
-      // Extraire la liste unique des clients
-      const uniqueClients = [...new Map(result.map((item: any) => [item.idRevendeur, {
-        value: item.idRevendeur.toString(),
-        label: item.client_nom || item.client_societe || 'Revendeur'
+      const uniqueClients = [...new Map(result.map((item: any) => [item.idDecompte, {
+        value: item.client_nom || item.client_societe || 'Client',
+        label: item.client_nom || item.client_societe || 'Client'
       }])).values()];
       setClientsList(uniqueClients);
 
-      // Extraire la liste unique des codes facture (non null)
       const uniqueCodeFactures = [...new Map(result
         .filter((item: any) => item.code_facture)
         .map((item: any) => [item.code_facture, {
@@ -114,7 +112,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
       setCodeFacturesList(uniqueCodeFactures);
 
     } catch (error) {
-      console.error('Erreur chargement stocks:', error);
+      console.error('Erreur chargement détails décomptes:', error);
       notifications.show({ title: 'Erreur', message: 'Erreur de chargement', color: 'red' });
     } finally {
       setLoading(false);
@@ -122,96 +120,42 @@ export const ListeCommandesRevendeur: React.FC = () => {
   };
 
   useEffect(() => {
-    chargerStocks();
+    chargerDetailsDecomptes();
   }, []);
 
-  // Voir les produits non vendus
-  const handleVoirProduitsNonVendus = () => {
-    setShowNonVendus(true);
-  };
-
-  // Voir les décomptes d'un revendeur
-  const handleVoirDecomptes = async (clientId: number, clientNom: string) => {
-    setDecompteLoading(true);
-    try {
-      const db = await getDb();
-      const decomptes = await db.select<any[]>(`
-        SELECT 
-          d.idDecompte,
-          d.code_decompte,
-          d.date_decompte,
-          d.montant_vente,
-          d.montant_commission,
-          d.montant_net,
-          d.statut
-        FROM decomptes d
-        WHERE d.idClient = ?
-        ORDER BY d.date_decompte DESC
-      `, [clientId]);
-
-      setDecomptesList(decomptes);
-      setSelectedClientForDecomptes({ id: clientId, nom: clientNom });
-      setShowDecomptesModal(true);
-    } catch (error) {
-      console.error('Erreur chargement décomptes:', error);
-      notifications.show({ title: 'Erreur', message: 'Erreur de chargement', color: 'red' });
-    } finally {
-      setDecompteLoading(false);
-    }
-  };
-
-  // Ouvrir le reçu de décompte
-  const handleOuvrirReçu = (idDecompte: number) => {
-    navigate(`/decomptes/${idDecompte}/print`);
-  };
-
-  // Filtrer les stocks
-  const stocksFiltres = useMemo(() => {
-    let filtered = [...stocks];
-
-    if (showNonVendus) {
-      filtered = filtered.filter(s => s.qte_stock > 0);
-    }
+  // Filtrer les détails
+  const detailsFiltres = useMemo(() => {
+    let filtered = [...details];
 
     if (selectedClient) {
-      filtered = filtered.filter(s => s.idRevendeur.toString() === selectedClient);
+      filtered = filtered.filter(d => d.client_nom === selectedClient || d.client_societe === selectedClient);
     }
 
     if (selectedCodeFacture) {
-      filtered = filtered.filter(s => s.code_facture === selectedCodeFacture);
-    }
-
-    if (dateDebut) {
-      const debut = new Date(dateDebut);
-      debut.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(s => s.date_commande && new Date(s.date_commande) >= debut);
-    }
-
-    if (dateFin) {
-      const fin = new Date(dateFin);
-      fin.setHours(23, 59, 59, 999);
-      filtered = filtered.filter(s => s.date_commande && new Date(s.date_commande) <= fin);
+      filtered = filtered.filter(d => d.code_facture === selectedCodeFacture);
     }
 
     if (searchTerm) {
-      filtered = filtered.filter(s =>
-        s.produit_designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.produit_code?.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter(d =>
+        d.produit_designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        d.client_nom?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        d.client_societe?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        d.code_facture?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     return filtered;
-  }, [stocks, selectedClient, selectedCodeFacture, dateDebut, dateFin, searchTerm, showNonVendus]);
+  }, [details, selectedClient, selectedCodeFacture, searchTerm]);
 
   const stats = {
-    totalProduits: stocksFiltres.length,
-    totalValeur: stocksFiltres.reduce((sum, s) => sum + (s.qte_stock * s.prix_vente), 0),
-    totalBenefice: stocksFiltres.reduce((sum, s) => sum + (s.qte_stock * (s.prix_vente - s.prix_achat)), 0),
-    totalCommission: stocksFiltres.reduce((sum, s) => sum + (s.qte_stock * (s.prix_vente - s.prix_achat) * (s.commission_pourcentage / 100)), 0)
+    totalProduits: detailsFiltres.length,
+    totalVente: detailsFiltres.reduce((sum, d) => sum + (d.total_vente || 0), 0),
+    totalCommission: detailsFiltres.reduce((sum, d) => sum + (d.commission || 0), 0),
+    totalBenefice: detailsFiltres.reduce((sum, d) => sum + (d.benefice || 0), 0)
   };
 
-  const totalPages = Math.ceil(stocksFiltres.length / itemsPerPage);
-  const paginatedStocks = stocksFiltres.slice(
+  const totalPages = Math.ceil(detailsFiltres.length / itemsPerPage);
+  const paginatedDetails = detailsFiltres.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
@@ -219,10 +163,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
   const resetFilters = () => {
     setSelectedClient(null);
     setSelectedCodeFacture(null);
-    setDateDebut(null);
-    setDateFin(null);
     setSearchTerm('');
-    setShowNonVendus(false);
     setCurrentPage(1);
   };
 
@@ -230,11 +171,25 @@ export const ListeCommandesRevendeur: React.FC = () => {
     return (value || 0).toLocaleString('fr-FR');
   };
 
-  if (loading && stocks.length === 0) {
+  const handleNouveauDecompteSuccess = () => {
+    setNouveauDecompteModalOpen(false);
+    chargerDetailsDecomptes();
+    notifications.show({
+      title: '✅ Succès',
+      message: 'Décompte créé avec succès',
+      color: 'green'
+    });
+  };
+
+  const handleNouveauDecompteCancel = () => {
+    setNouveauDecompteModalOpen(false);
+  };
+
+  if (loading && details.length === 0) {
     return (
       <Card withBorder p="xl" ta="center">
         <Loader size="xl" />
-        <Text mt="md">Chargement des stocks revendeurs...</Text>
+        <Text mt="md">Chargement des décomptes...</Text>
       </Card>
     );
   }
@@ -245,207 +200,229 @@ export const ListeCommandesRevendeur: React.FC = () => {
         {/* EN-TÊTE */}
         <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
           <Flex justify="space-between" align="center" wrap="wrap">
-            <Stack gap={4}>
-              <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
-                  <IconTruck size={30} />
-                </ThemeIcon>
-                <div>
-                  <Title order={1} c="white" style={{ fontSize: '2rem' }}>Gestion des décomptes des revendeurs</Title>
-                  <Text c="gray.3" size="sm">Gestion des stocks et décomptes revendeurs</Text>
-                </div>
-              </Group>
-            </Stack>
-            <Group>
-              <Button variant="light" color="white" leftSection={<IconRefresh size={18} />} onClick={chargerStocks}>
-                Actualiser
-              </Button>
+            <Group gap="md">
+              <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <IconReceipt size={30} />
+              </ThemeIcon>
+              <div>
+                <Title order={1} c="white" style={{ fontSize: '1.5rem' }}>GESTION DES DÉCOMPTES DES REVENDEURS</Title>
+                <Text c="gray.3" size="sm">Suivi des ventes et commissions par revendeur</Text>
+              </div>
             </Group>
+            <Button variant="light" color="white" leftSection={<IconRefresh size={18} />} onClick={chargerDetailsDecomptes}>
+              Actualiser
+            </Button>
           </Flex>
 
-          <SimpleGrid cols={4} spacing="md" mt="xl">
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="white" variant="light" size="lg"><IconPackage size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Produits en stock</Text><Text c="white" fw={700} size="xl">{stats.totalProduits}</Text></div>
-              </Group>
+              <Text c="white" size="xs">Total produits</Text>
+              <Text c="white" fw={700} size="xl">{stats.totalProduits}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="green" variant="light" size="lg"><IconCurrencyFrank size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Valeur stock</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.totalValeur)} FCFA</Text></div>
-              </Group>
+              <Text c="white" size="xs">Montant total ventes</Text>
+              <Text c="white" fw={700} size="xl">{formatMontant(stats.totalVente)} F</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconCalculator size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Bénéfice potentiel</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.totalBenefice)} FCFA</Text></div>
-              </Group>
+              <Text c="white" size="xs">Commission totale</Text>
+              <Text c="white" fw={700} size="xl">{formatMontant(stats.totalCommission)} F</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="orange" variant="light" size="lg"><IconReceipt size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Commission potentielle</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.totalCommission)} FCFA</Text></div>
-              </Group>
+              <Text c="white" size="xs">Bénéfice total</Text>
+              <Text c="white" fw={700} size="xl">{formatMontant(stats.totalBenefice)} F</Text>
             </Card>
           </SimpleGrid>
         </Paper>
 
-
-       <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Group justify="space-between" mb="md">
-            <Group><IconSearch size={20} color="#1b365d" /><Title order={3} size="h4">Rechercher</Title></Group>
-            <Button variant="light" color="gray" onClick={resetFilters} size="xs" leftSection={<IconX size={14} />}>Réinitialiser</Button>
-          </Group>
-          <Grid>
-            <Grid.Col span={3}>
-              <Select
-                label="Nom du client"
-                placeholder="Sélectionner un client"
-                data={clientsList}
-                value={selectedClient}
-                onChange={setSelectedClient}
-                clearable
-                searchable
-                leftSection={<IconUser size={16} />}
-                size="md"
-              />
-            </Grid.Col>
-            <Grid.Col span={3}>
-              <Select
-                label="Code facture"
-                placeholder="Sélectionner un code facture"
-                data={codeFacturesList}
-                value={selectedCodeFacture}
-                onChange={setSelectedCodeFacture}
-                clearable
-                searchable
-                leftSection={<IconFileInvoice size={16} />}
-                size="md"
-              />
-            </Grid.Col>
-            <Grid.Col span={3}>
+        {/* BARRE DE RECHERCHE ET BOUTONS */}
+        <Card withBorder radius="lg" shadow="sm" p="md">
+          <Stack gap="md">
+            <Group grow>
               <TextInput
-                label="Date début"
-                placeholder="AAAA-MM-JJ"
-                type="date"
-                value={dateDebut instanceof Date ? dateDebut.toISOString().split('T')[0] : dateDebut || ''}
-                onChange={(e) => setDateDebut(e.target.value ? new Date(e.target.value) : null)}
-                size="md"
-              />
-            </Grid.Col>
-            <Grid.Col span={3}>
-              <TextInput
-                label="Date fin"
-                placeholder="AAAA-MM-JJ"
-                type="date"
-                value={dateFin instanceof Date ? dateFin.toISOString().split('T')[0] : dateFin || ''}
-                onChange={(e) => setDateFin(e.target.value ? new Date(e.target.value) : null)}
-                size="md"
-              />
-            </Grid.Col>
-          </Grid>
-          <Grid mt="md">
-            <Grid.Col span={12}>
-              <TextInput
-                label="Recherche produit"
-                placeholder="Rechercher par produit ou code produit..."
+                placeholder="Rechercher par client, produit ou code facture..."
+                leftSection={<IconSearch size={16} />}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                leftSection={<IconSearch size={16} />}
-                size="md"
+                size="sm"
               />
-            </Grid.Col>
-          </Grid>
-        </Card>
-        {/* BOUTONS D'ACTION */}
-        <Card withBorder radius="lg" shadow="sm" p="md">
-          <Group>
-            <Button leftSection={<IconList size={18} />} variant="light" onClick={() => navigate('/decomptes')}>
-              Liste des décomptes
-            </Button>
-            <Button leftSection={<IconArchive size={18} />} variant="light" color="orange" onClick={handleVoirProduitsNonVendus}>
-              Voir les produits non vendus
-            </Button>
-            <Button leftSection={<IconPlus size={18} />} variant="filled" color="green" onClick={() => setCommandeModalOpened(true)}>
-              Nouveau décompte
-            </Button>
-          </Group>
+              <Button
+                variant={showFilters ? "filled" : "light"}
+                color={showFilters ? "blue" : "gray"}
+                leftSection={<IconFilter size={16} />}
+                onClick={() => setShowFilters(!showFilters)}
+                size="sm"
+              >
+                Filtres
+              </Button>
+              <Button variant="outline" color="gray" onClick={resetFilters} size="sm" leftSection={<IconX size={14} />}>
+                Réinitialiser
+              </Button>
+            </Group>
+
+            <Group grow>
+              <Button 
+                leftSection={<IconList size={16} />} 
+                variant="light" 
+                onClick={() => setStocksRevendeurModalOpen(true)} 
+                size="sm"
+              >
+                Stocks revendeurs
+              </Button>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                variant="filled"
+                color="green"
+                onClick={() => setNouveauDecompteModalOpen(true)}
+                size="sm"
+              >
+                Nouveau décompte
+              </Button>
+              <Button leftSection={<IconPrinter size={16} />} variant="light" color="blue" size="sm">
+                Imprimer
+              </Button>
+            </Group>
+
+            {/* PANEL DES FILTRES */}
+            {showFilters && (
+              <Paper withBorder p="md" radius="md" mt="md" bg="gray.0">
+                <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+                  <Select
+                    label="Nom du client"
+                    placeholder="Tous les clients"
+                    data={clientsList}
+                    value={selectedClient}
+                    onChange={setSelectedClient}
+                    clearable
+                    searchable
+                    size="xs"
+                  />
+                  <Select
+                    label="Code facture"
+                    placeholder="Tous les codes"
+                    data={codeFacturesList}
+                    value={selectedCodeFacture}
+                    onChange={setSelectedCodeFacture}
+                    clearable
+                    searchable
+                    size="xs"
+                  />
+                  <TextInput
+                    label="Date début"
+                    type="date"
+                    size="xs"
+                  />
+                  <TextInput
+                    label="Date fin"
+                    type="date"
+                    size="xs"
+                  />
+                </SimpleGrid>
+                <Group justify="flex-end" mt="md">
+                  <Button size="xs" variant="outline" onClick={resetFilters}>Tout effacer</Button>
+                </Group>
+              </Paper>
+            )}
+          </Stack>
         </Card>
 
         {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
-          <ScrollArea h="calc(100vh - 550px)">
+          <ScrollArea h="calc(100vh - 480px)" type="auto">
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
-              <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                  <Table.Th c="white" w={50}>N°</Table.Th>
-                  <Table.Th c="white">Nom du client</Table.Th>
-                  <Table.Th c="white">Date</Table.Th>
-                  <Table.Th c="white">CodeFacture</Table.Th>
-                  <Table.Th c="white">Catégorie</Table.Th>
-                  <Table.Th c="white">Désignation</Table.Th>
-                  <Table.Th c="white" ta="center">Qté Iniciale</Table.Th>
-                  <Table.Th c="white" ta="center">Qté vendue</Table.Th>
-                  <Table.Th c="white" ta="center">Qté restante</Table.Th>
-                  <Table.Th c="white" ta="right">Prix Achat</Table.Th>
-                  <Table.Th c="white" ta="right">Prix Vente</Table.Th>
-                  <Table.Th c="white" ta="right">Total Achat</Table.Th>
-                  <Table.Th c="white" ta="right">Total Vente</Table.Th>
-                  <Table.Th c="white" ta="right">Bénéfice</Table.Th>
-                  <Table.Th c="white" ta="right">Commission</Table.Th>
-                  <Table.Th c="white" ta="center">Actions</Table.Th>
+              <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                <Table.Tr>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'center' }}>N°</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px' }}>Nom du client</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px' }}>Date</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px' }}>CodeFacture</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px' }}>Catégorie</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px' }}>Désignation</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'center' }}>Qté ini</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'center' }}>Qté vendue</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'center' }}>Qté rest</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>PA</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>PV</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>Total Achat</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>Total Vente</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>Bénéfice</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'right' }}>Commission</Table.Th>
+                  <Table.Th style={{ color: 'white', fontSize: '10px', textAlign: 'center' }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedStocks.map((stock, index) => {
+                {paginatedDetails.map((detail, index) => {
                   const num = (currentPage - 1) * itemsPerPage + index + 1;
-                  const totalAchat = stock.qte_stock * stock.prix_achat;
-                  const totalVente = stock.qte_stock * stock.prix_vente;
-                  const benefice = totalVente - totalAchat;
-                  const commission = benefice * (stock.commission_pourcentage / 100);
-                  const qteRestante = stock.qte_stock;
-
                   return (
-                    <Table.Tr key={stock.idStockRevendeur}>
-                      <Table.Td>{num}</Table.Td>
-                      <Table.Td fw={500}>{stock.client_nom || stock.client_societe || '-'}</Table.Td>
-                      <Table.Td>{stock.date_commande ? new Date(stock.date_commande).toLocaleDateString('fr-FR') : '-'}</Table.Td>
-                      <Table.Td>{stock.code_facture || '-'}</Table.Td>
-                      <Table.Td>{stock.produit_categorie || '-'}</Table.Td>
-                      <Table.Td>
-                        <Text fw={500} size="sm">{stock.produit_designation}</Text>
-                        <Text size="xs" c="dimmed">{stock.produit_code}</Text>
-                      </Table.Td>
-                      <Table.Td ta="center">{stock.qte_stock + stock.quantite_vendue}</Table.Td>
-                      <Table.Td ta="center">{stock.quantite_vendue || 0}</Table.Td>
+                    <Table.Tr key={`${detail.idDecompte}-${index}`}>
                       <Table.Td ta="center">
-                        <Badge color={qteRestante <= 0 ? 'red' : qteRestante <= 5 ? 'orange' : 'green'} variant="light">
-                          {qteRestante}
+                        <Text size="xs" fw={600}>{num}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Tooltip label={detail.client_tel}>
+                          <Text size="xs" fw={500} lineClamp={1}>{detail.client_nom || detail.client_societe || '-'}</Text>
+                        </Tooltip>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{new Date(detail.date_decompte).toLocaleDateString('fr-FR')}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">{detail.code_facture || '-'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge size="xs" variant="light" color="gray">{detail.produit_categorie || '-'}</Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" fw={500} lineClamp={1}>{detail.produit_designation}</Text>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge size="xs" variant="light" color="gray">{detail.quantite_decompte}</Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge size="xs" variant="light" color="blue">{detail.quantite_vendue || 0}</Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge size="xs" color={detail.quantite_restante <= 0 ? 'red' : detail.quantite_restante <= 5 ? 'orange' : 'green'} variant="light">
+                          {detail.quantite_restante || 0}
                         </Badge>
                       </Table.Td>
-                      <Table.Td ta="right">{formatMontant(stock.prix_achat)}</Table.Td>
-                      <Table.Td ta="right">{formatMontant(stock.prix_vente)}</Table.Td>
-                      <Table.Td ta="right">{formatMontant(totalAchat)}</Table.Td>
-                      <Table.Td ta="right">{formatMontant(totalVente)}</Table.Td>
-                      <Table.Td ta="right" c="green.7">{formatMontant(benefice)}</Table.Td>
-                      <Table.Td ta="right" c="orange">{formatMontant(commission)}</Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs">{formatMontant(detail.prix_achat)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs" fw={600}>{formatMontant(detail.prix_vente)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs">{formatMontant(detail.total_achat)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs">{formatMontant(detail.total_vente)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs" c="green">{formatMontant(detail.benefice)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs" c="orange">{formatMontant(detail.commission)}</Text>
+                      </Table.Td>
                       <Table.Td ta="center">
-                        <Group gap={4} justify="center">
-                          <Tooltip label="Voir décomptes">
+                        <Group gap={4} justify="center" wrap="nowrap">
+                          <Tooltip label="Voir détails">
                             <ActionIcon
                               variant="light"
                               color="blue"
-                              size="md"
-                              onClick={() => handleVoirDecomptes(stock.idRevendeur, stock.client_nom || stock.client_societe)}
+                              size="sm"
+                              onClick={() => navigate(`/decomptes/${detail.idDecompte}`)}
                             >
-                              <IconReceipt size={16} />
+                              <IconEye size={14} />
                             </ActionIcon>
                           </Tooltip>
-                          <Tooltip label="Modifier">
-                            <ActionIcon variant="light" color="yellow" size="md" disabled>
-                              <IconEye size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                          <Tooltip label="Supprimer">
-                            <ActionIcon variant="light" color="red" size="md" disabled>
-                              <IconTrash size={16} />
+                          <Tooltip label="Imprimer reçu">
+                            <ActionIcon
+                              variant="light"
+                              color="green"
+                              size="sm"
+                              onClick={() => navigate(`/decomptes/${detail.idDecompte}/print`)}
+                            >
+                              <IconPrinter size={14} />
                             </ActionIcon>
                           </Tooltip>
                         </Group>
@@ -457,71 +434,53 @@ export const ListeCommandesRevendeur: React.FC = () => {
             </Table>
           </ScrollArea>
 
-          {totalPages > 1 && (
-            <Group justify="center" p="md">
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="md" />
-            </Group>
+          {detailsFiltres.length === 0 && (
+            <Text ta="center" c="dimmed" py={40}>Aucun décompte trouvé</Text>
           )}
 
-          {stocksFiltres.length === 0 && (
-            <Text ta="center" c="dimmed" py={50}>Aucun produit trouvé</Text>
+          {totalPages > 1 && (
+            <Group justify="center" p="md">
+              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="sm" />
+            </Group>
           )}
         </Card>
       </Stack>
 
-      {/* MODAL DÉCOMPTES D'UN REVENDEUR */}
+      {/* MODAL NOUVEAU DÉCOMPTE */}
       <Modal
-        opened={showDecomptesModal}
-        onClose={() => setShowDecomptesModal(false)}
-        size="xl"
-        title={`Décomptes de ${selectedClientForDecomptes?.nom || ''}`}
+        opened={nouveauDecompteModalOpen}
+        onClose={() => setNouveauDecompteModalOpen(false)}
+        size="1000px"
+        centered
+        padding="md"
+        radius="lg"
+        styles={{
+          body: { padding: 0 },
+          content: { backgroundColor: '#f5f7fa' }
+        }}
       >
-        {decompteLoading ? (
-          <Center py={50}><Loader /></Center>
-        ) : (
-          <ScrollArea h={400}>
-            <Table striped>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Code</Table.Th>
-                  <Table.Th>Date</Table.Th>
-                  <Table.Th ta="right">Montant vente</Table.Th>
-                  <Table.Th ta="right">Commission</Table.Th>
-                  <Table.Th ta="right">Net</Table.Th>
-                  <Table.Th>Statut</Table.Th>
-                  <Table.Th></Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {decomptesList.map((d) => (
-                  <Table.Tr key={d.idDecompte}>
-                    <Table.Td>{d.code_decompte}</Table.Td>
-                    <Table.Td>{new Date(d.date_decompte).toLocaleDateString('fr-FR')}</Table.Td>
-                    <Table.Td ta="right">{formatMontant(d.montant_vente)}</Table.Td>
-                    <Table.Td ta="right">{formatMontant(d.montant_commission)}</Table.Td>
-                    <Table.Td ta="right">{formatMontant(d.montant_net)}</Table.Td>
-                    <Table.Td>
-                      <Badge color={d.statut === 'PAYE' ? 'green' : 'orange'} variant="light">
-                        {d.statut === 'PAYE' ? 'Payé' : 'En attente'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Button size="xs" variant="light" onClick={() => handleOuvrirReçu(d.idDecompte)}>
-                        Reçu
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
-        )}
+        <NouveauDecompte
+          onSuccess={handleNouveauDecompteSuccess}
+          onCancel={handleNouveauDecompteCancel}
+        />
       </Modal>
 
-      {/* MODAL NOUVELLE COMMANDE REVENDEUR */}
-      <FormulaireCommande opened={commandeModalOpened} onClose={() => { setCommandeModalOpened(false); chargerStocks(); }} />
+      {/* MODAL STOCKS REVENDEURS */}
+      <Modal
+        opened={stocksRevendeurModalOpen}
+        onClose={() => setStocksRevendeurModalOpen(false)}
+        size="95%"
+        fullScreen
+        padding={0}
+        styles={{
+          body: { padding: 0 },
+          content: { backgroundColor: '#f5f7fa' }
+        }}
+      >
+        <ListeCommandesRevendeur />
+      </Modal>
     </>
   );
 };
 
-export default ListeCommandesRevendeur;
+export default ListeDecomptes;

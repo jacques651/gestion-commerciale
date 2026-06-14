@@ -1,7 +1,7 @@
 // src/components/reglements/ReçuReglement.tsx
 import React, { useRef, useEffect, useState } from 'react';
-import { Paper, Text, Title, Group, Stack, Divider, Box, Flex, Button, Image, Loader, Center, Table, SimpleGrid } from '@mantine/core';
-import { IconPrinter, IconCash, IconUser, IconFileInvoice, IconBuildingStore, IconPhone, IconMapPin, IconMail } from '@tabler/icons-react';
+import { Paper, Text, Title, Group, Divider, Box, SimpleGrid, Button, Image, Loader, Center, Table } from '@mantine/core';
+import { IconPrinter } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
 import { getDb } from '../../database/db';

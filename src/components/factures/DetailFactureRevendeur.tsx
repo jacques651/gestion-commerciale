@@ -1,13 +1,12 @@
 // src/components/factures/DetailFactureRevendeur.tsx
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Loader, Center, Text, Box } from '@mantine/core';
+import { useParams } from 'react-router-dom';
+import { Loader, Center, Text } from '@mantine/core';
 import { FactureRevendeur } from './FactureRevendeur';
 import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 
 export default function DetailFactureRevendeur() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [facture, setFacture] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 

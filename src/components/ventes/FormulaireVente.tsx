@@ -13,6 +13,8 @@ import { useProducts } from '../../hooks/useProducts';
 import { useSales } from '../../hooks/useSales';
 import { getNextVenteCode } from '../../services/codeGeneratorService';
 import { FormulaireClient } from '../clients/FormulaireClient';
+import { stockService } from '../../database/repositories/stockService';
+
 
 interface FormulaireVenteProps {
   onSuccess: () => void;
@@ -25,6 +27,7 @@ interface CartItem {
   code_produit: string;
   quantite_stock: number;
   prix_vente: number;
+  prix_achat_base?: number;
   quantite: number;
   total: number;
 }
@@ -41,7 +44,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
   const [ajouterClient, setAjouterClient] = useState<boolean>(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [codeVente, setCodeVente] = useState<string>('');
   const [clientModalOpened, setClientModalOpened] = useState(false);
@@ -76,11 +79,13 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
   // Filtrer les produits
   const filteredProducts = products.filter(product => {
-    const matchesSearch = product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = searchTerm === '' || 
+      product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
 
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
   const paginatedProducts = filteredProducts.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
@@ -120,10 +125,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       setCart(cart.map(item =>
         item.idProduit === product.idProduit
           ? {
-            ...item,
-            quantite: newQuantite,
-            total: newQuantite * item.prix_vente
-          }
+              ...item,
+              quantite: newQuantite,
+              total: newQuantite * item.prix_vente
+            }
           : item
       ));
     } else {
@@ -143,6 +148,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
           code_produit: product.code_produit,
           quantite_stock: stock,
           prix_vente: prix,
+          prix_achat_base: product.prix_achat_base || 0,
           quantite: qte,
           total: qte * prix,
         }
@@ -170,59 +176,99 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     setCart(cart.filter((_, i) => i !== index));
   };
 
+  const handleSubmit = async () => {
+    if (cart.length === 0) {
+      notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
+      return;
+    }
 
-const handleSubmit = async () => {
-  if (cart.length === 0) {
-    notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
-    return;
-  }
+    // Vérifier le stock pour chaque produit avant de continuer
+    for (const item of cart) {
+      if (item.quantite > item.quantite_stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock insuffisant pour ${item.designation}. Disponible: ${item.quantite_stock}`,
+          color: 'red'
+        });
+        return;
+      }
+    }
 
-  setSubmitting(true);
+    setSubmitting(true);
 
-  try {
-    const sale = {
-      code_vente: codeVente,
-      idClient: selectedClientId ? parseInt(selectedClientId) : null,
-      nom_prenom: ajouterClient ? clientNom : 'Client anonyme',
-      contact: ajouterClient ? (clientContact || null) : null,
-      montant_ht: totalHT,
-      montant_tva: tva,
-      montant_ttc: totalTTC,
-      type_vente: 'COMPTOIR',
-      observation: ajouterClient ? `Client: ${clientNom} ${clientContact ? `(${clientContact})` : ''}` : null
-    };
+    try {
+      // 1. Enregistrer la vente dans la base
+      const sale = {
+        code_vente: codeVente,
+        idClient: selectedClientId ? parseInt(selectedClientId) : null,
+        nom_prenom: ajouterClient ? clientNom : 'Client anonyme',
+        contact: ajouterClient ? (clientContact || null) : null,
+        montant_ht: totalHT,
+        montant_tva: tva,
+        montant_ttc: totalTTC,
+        type_vente: 'COMPTOIR',
+        observation: ajouterClient ? `Client: ${clientNom} ${clientContact ? `(${clientContact})` : ''}` : null
+      };
 
-    const details = cart.map(item => ({
-      idProduit: item.idProduit,
-      quantite: item.quantite,
-      prix_unitaire_ht: item.prix_vente,
-      prix_unitaire_ttc: item.prix_vente * 1.18,
-      tva_taux: 18,
-      remise_percent: 0
-    }));
+      const details = cart.map(item => ({
+        idProduit: item.idProduit,
+        quantite: item.quantite,
+        prix_unitaire_ht: item.prix_vente,
+        prix_unitaire_ttc: item.prix_vente * 1.18,
+        tva_taux: 18,
+        remise_percent: 0
+      }));
 
-    // Appel à createSale (sans la mise à jour manuelle du stock car le repository s'en occupe)
-    await createSale(sale, details);
+      // Créer la vente
+      await createSale(sale, details);
 
-    notifications.show({
-      title: 'Succès',
-      message: `Vente ${codeVente} enregistrée`,
-      color: 'green',
-    });
+      // 2. Pour chaque produit, enregistrer la sortie de stock avec logique FIFO
+      const results = [];
+      for (const item of cart) {
+        const result = await stockService.sortieStock({
+          idProduit: item.idProduit,
+          quantite: item.quantite,
+          prix_vente: item.prix_vente,
+          reference: `VENTE-${codeVente}`,
+          notes: `Vente au comptoir - ${codeVente} - Client: ${sale.nom_prenom}`
+        });
+        
+        if (!result.success) {
+          throw new Error(`Erreur pour ${item.designation}: ${result.message}`);
+        }
+        
+        results.push(result);
+      }
 
-    onSuccess();
+      // 3. Calculer le bénéfice total
+      const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
+      const coutTotalAchat = results.reduce((sum, r) => sum + (r.coutAchatTotal || 0), 0);
 
-  } catch (error) {
-    console.error(error);
-    notifications.show({
-      title: 'Erreur',
-      message: 'Erreur lors de l\'enregistrement',
-      color: 'red',
-    });
-  } finally {
-    setSubmitting(false);
-  }
-};
+      // 4. Afficher le récapitulatif
+      notifications.show({
+        title: '✅ Vente enregistrée avec succès',
+        message: `${cart.length} produit(s) vendu(s) - Chiffre d'affaires: ${totalTTC.toLocaleString()} F - Bénéfice: ${beneficeTotal.toLocaleString()} F`,
+        color: 'green',
+        autoClose: 5000
+      });
+
+      // 5. Rafraîchir la liste des produits
+      await refreshProducts();
+      
+      // 6. Fermer le modal
+      onSuccess();
+
+    } catch (error: any) {
+      console.error('Erreur lors de la vente:', error);
+      notifications.show({
+        title: '❌ Erreur',
+        message: error?.message || 'Erreur lors de l\'enregistrement de la vente',
+        color: 'red',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';
@@ -354,7 +400,8 @@ const handleSubmit = async () => {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>Désignation</Table.Th>
-                      <Table.Th>Prix</Table.Th>
+                      <Table.Th>Prix vente</Table.Th>
+                      <Table.Th>Prix achat (PMP)</Table.Th>
                       <Table.Th>Stock</Table.Th>
                       <Table.Th></Table.Th>
                     </Table.Tr>
@@ -366,10 +413,19 @@ const handleSubmit = async () => {
                           <Text size="sm" fw={500}>{product.designation}</Text>
                           <Text size="xs" c="dimmed">{product.code_produit}</Text>
                         </Table.Td>
-                        <Table.Td>{formatMontant(product.prix_vente_detail)} F</Table.Td>
                         <Table.Td>
-                          <Badge color={(product.qte_stock || 0) < 10 ? 'red' : 'green'} variant="light" size="sm">
-                            {product.qte_stock || 0}
+                          <Text fw={600} c="blue">{formatMontant(product.prix_vente_detail)} F</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">{formatMontant(product.prix_achat_base)} F</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge 
+                            color={product.qte_stock <= 0 ? 'red' : (product.qte_stock < (product.seuil_alerte || 10) ? 'orange' : 'green')} 
+                            variant="light" 
+                            size="sm"
+                          >
+                            {product.qte_stock || 0} unités
                           </Badge>
                         </Table.Td>
                         <Table.Td>
@@ -379,6 +435,7 @@ const handleSubmit = async () => {
                             onClick={() => addToCart(product)}
                             disabled={(product.qte_stock || 0) === 0}
                             variant="light"
+                            color="blue"
                           >
                             Ajouter
                           </Button>
@@ -388,11 +445,37 @@ const handleSubmit = async () => {
                   </Table.Tbody>
                 </Table>
               </ScrollArea>
+
+              {totalPages > 1 && (
+                <Group justify="center" mt="md">
+                  <Button.Group>
+                    <Button
+                      variant="light"
+                      size="xs"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(p => p - 1)}
+                    >
+                      Précédent
+                    </Button>
+                    <Button variant="light" size="xs">
+                      Page {currentPage} / {totalPages}
+                    </Button>
+                    <Button
+                      variant="light"
+                      size="xs"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(p => p + 1)}
+                    >
+                      Suivant
+                    </Button>
+                  </Button.Group>
+                </Group>
+              )}
             </Card>
 
             {/* Panier */}
             {cart.length > 0 && (
-              <Card withBorder p="sm" radius="md">
+              <Card withBorder p="sm" radius="md" style={{ backgroundColor: '#fafafa' }}>
                 <Title order={5} mb="sm">Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
 
                 <ScrollArea h={200}>
@@ -410,7 +493,8 @@ const handleSubmit = async () => {
                       {cart.map((item, index) => (
                         <Table.Tr key={index}>
                           <Table.Td>
-                            <Text size="sm">{item.designation}</Text>
+                            <Text size="sm" fw={500}>{item.designation}</Text>
+                            <Text size="xs" c="dimmed">{item.code_produit}</Text>
                           </Table.Td>
                           <Table.Td style={{ width: 100 }}>
                             <NumberInput
@@ -422,7 +506,9 @@ const handleSubmit = async () => {
                             />
                           </Table.Td>
                           <Table.Td>{formatMontant(item.prix_vente)} F</Table.Td>
-                          <Table.Td>{formatMontant(item.total)} F</Table.Td>
+                          <Table.Td>
+                            <Text fw={600} c="blue">{formatMontant(item.total)} F</Text>
+                          </Table.Td>
                           <Table.Td>
                             <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
                               <IconTrash size={14} />
@@ -436,10 +522,10 @@ const handleSubmit = async () => {
 
                 <Divider my="sm" />
                 <Group justify="flex-end">
-                  <div>
+                  <div style={{ textAlign: 'right' }}>
                     <Text size="sm">Total HT: <strong>{formatMontant(totalHT)} F</strong></Text>
                     <Text size="xs" c="dimmed">TVA (18%): {formatMontant(tva)} F</Text>
-                    <Text size="lg" fw={700} c="blue">Total TTC: {formatMontant(totalTTC)} F</Text>
+                    <Text size="xl" fw={700} c="blue">Total TTC: {formatMontant(totalTTC)} F</Text>
                   </div>
                 </Group>
               </Card>

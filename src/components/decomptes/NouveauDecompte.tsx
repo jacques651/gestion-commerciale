@@ -4,17 +4,18 @@ import { useNavigate } from "react-router-dom";
 import {
   Stack, Card, Title, Text, Group, Button, Select, Table, NumberInput,
   LoadingOverlay, Box, Divider, Alert, Badge, ScrollArea, ActionIcon,
-  TextInput, Paper, Flex, ThemeIcon, SimpleGrid
+  TextInput, Flex, ThemeIcon, SimpleGrid, Center, Loader
 } from "@mantine/core";
 import {
-  IconArrowLeft, IconDeviceFloppy, IconTrash, IconUser, IconPhone,
-  IconBuildingStore, IconPackage, IconSearch, IconRefresh,
-  IconCash, IconFileText
+  IconArrowLeft, IconTrash, IconPhone,
+  IconPackage, IconSearch, IconRefresh,
+  IconFileText, IconShoppingCart, 
+  IconTruck,
+  IconAlertCircle
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { notifications } from "@mantine/notifications";
 import { stockRevendeurRepository } from "../../database/repositories/stockRevendeurRepository";
-import { decompteRepository } from "../../database/repositories/decompteRepository";
 
 interface Client {
   idClient: number;
@@ -55,6 +56,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   const [produits, setProduits] = useState<ProduitRevendeur[]>([]);
   const [panier, setPanier] = useState<PanierItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingProduits, setLoadingProduits] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [recherche, setRecherche] = useState("");
@@ -67,12 +69,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
       try {
         const db = await getDb();
         const result = await db.select<Client[]>(`
-          SELECT 
-            idClient, 
-            NomComplet, 
-            Societe, 
-            Tel, 
-            TypeClient
+          SELECT idClient, NomComplet, Societe, Tel, TypeClient
           FROM clients 
           WHERE TypeClient = 'revendeur'
           ORDER BY NomComplet
@@ -80,6 +77,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
         setClients(result);
       } catch (error) {
         console.error('Erreur chargement clients:', error);
+        notifications.show({ title: 'Erreur', message: 'Impossible de charger les clients', color: 'red' });
       } finally {
         setLoading(false);
       }
@@ -87,15 +85,19 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
     loadClients();
   }, []);
 
-  // Charger les produits disponibles
+  // Charger les produits disponibles pour un revendeur
   const loadStockRevendeur = async (idRevendeur: number) => {
+    setLoadingProduits(true);
     try {
       const result = await stockRevendeurRepository.getByRevendeur(idRevendeur);
       setProduits(result);
       setPanier([]);
       setQuantiteInput({});
     } catch (error) {
-      console.error(error);
+      console.error('Erreur chargement produits:', error);
+      notifications.show({ title: 'Erreur', message: 'Impossible de charger les produits', color: 'red' });
+    } finally {
+      setLoadingProduits(false);
     }
   };
 
@@ -121,12 +123,12 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
         return;
       }
       const updated = [...panier];
-      const benefice = (produit.prix_vente_gros - produit.prix_achat_base) * newQuantite;
+      const newBenefice = (produit.prix_vente_gros - produit.prix_achat_base) * newQuantite;
       updated[existingIndex] = {
         ...updated[existingIndex],
         quantite: newQuantite,
         total: newQuantite * produit.prix_vente_gros,
-        commission: benefice * (produit.commission_pourcentage / 100)
+        commission: newBenefice * (produit.commission_pourcentage / 100)
       };
       setPanier(updated);
     } else {
@@ -156,50 +158,82 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
 
   const handleSubmit = async () => {
     if (!selectedClient) {
-      notifications.show({
-        title: "Erreur",
-        message: "Sélectionnez un revendeur",
-        color: "red"
-      });
+      notifications.show({ title: "Erreur", message: "Sélectionnez un revendeur", color: "red" });
       return;
     }
-
     if (panier.length === 0) {
-      notifications.show({
-        title: "Erreur",
-        message: "Ajoutez au moins un produit",
-        color: "red"
-      });
+      notifications.show({ title: "Erreur", message: "Ajoutez au moins un produit", color: "red" });
       return;
     }
 
+    setSaving(true);
+    const db = await getDb();
+    
     try {
-      setSaving(true);
+      // Démarrer une transaction
+      await db.execute("BEGIN TRANSACTION");
 
-      const idDecompte = await decompteRepository.create(
-        {
-          idClient: selectedClient.idClient,
-          observation: objet
-        },
-        panier.map(item => ({
-          idProduit: item.idProduit,
-          qte_decompte: item.quantite
-        }))
-      );
+      // 1. Créer le décompte
+      const codeDecompte = `DC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const dateDecompte = new Date().toISOString().split('T')[0];
+      
+      const insertResult = await db.execute(`
+        INSERT INTO decomptes (idClient, code_decompte, date_decompte, montant_vente, montant_commission, montant_net, statut, observation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        selectedClient.idClient,
+        codeDecompte,
+        dateDecompte,
+        totalVente,
+        totalCommission,
+        netAPayer,
+        'EN_ATTENTE',
+        objet || null
+      ]);
+
+      const idDecompte = Number(insertResult.lastInsertId);
+
+      // 2. Insérer les détails du décompte
+      for (const item of panier) {
+        await db.execute(`
+          INSERT INTO decompte_details (idDecompte, idProduit, qte_decompte, prix_achat, prix_vente, commission_pourcentage)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          idDecompte,
+          item.idProduit,
+          item.quantite,
+          item.prix_achat,
+          item.prix_vente,
+          (item.commission / ((item.prix_vente - item.prix_achat) * item.quantite)) * 100 || 0
+        ]);
+
+        // 3. Mettre à jour le stock revendeur
+        await db.execute(`
+          UPDATE stock_revendeur 
+          SET qte_stock = qte_stock - ? 
+          WHERE idProduit = ? AND idRevendeur = ?
+        `, [item.quantite, item.idProduit, selectedClient.idClient]);
+      }
+
+      // Valider la transaction
+      await db.execute("COMMIT");
 
       notifications.show({
-        title: "Succès",
-        message: `Décompte créé (#${idDecompte})`,
+        title: "✅ Succès",
+        message: `Décompte ${codeDecompte} créé avec succès`,
         color: "green"
       });
 
-      // ✅ Rediriger vers la page d'impression du reçu
+      onSuccess();
       navigate(`/decomptes/${idDecompte}/print`);
 
     } catch (error: any) {
+      // Annuler la transaction en cas d'erreur
+      await db.execute("ROLLBACK");
+      console.error("Erreur création décompte:", error);
       notifications.show({
-        title: "Erreur",
-        message: error.message,
+        title: "❌ Erreur",
+        message: error.message || "Erreur lors de la création du décompte",
         color: "red"
       });
     } finally {
@@ -209,9 +243,9 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
 
   if (loading) {
     return (
-      <Card withBorder radius="md" p="lg" ta="center">
+      <Card withBorder radius="md" p="xl" ta="center">
         <LoadingOverlay visible={true} />
-        <Text>Chargement...</Text>
+        <Text mt="md">Chargement des clients...</Text>
       </Card>
     );
   }
@@ -226,42 +260,26 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
   );
 
   return (
-    <Box p="md">
-      <Stack gap="lg">
-        {/* En-tête */}
-        <Paper
-          p="xl"
-          radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1b5e1f 0%, #2e7d32 100%)',
-          }}
-        >
-          <Flex justify="space-between" align="center">
-            <Group gap="md">
-              <ThemeIcon size={50} radius="md" color="white" variant="light">
-                <IconFileText size={30} />
-              </ThemeIcon>
-              <div>
-                <Title order={1} c="white" style={{ fontSize: '1.5rem' }}>Nouveau décompte</Title>
-                <Text c="gray.3" size="sm">Créez un décompte pour un revendeur</Text>
-              </div>
-            </Group>
-            <Button variant="light" color="white" leftSection={<IconArrowLeft size={16} />} onClick={onCancel}>
-              Retour
-            </Button>
-          </Flex>
-        </Paper>
-
-        {/* Partie client */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Group gap="xs" mb="md">
-            <ThemeIcon color="green" variant="light" size="sm">
-              <IconUser size={14} />
+    <Box p="sm">
+      <Stack gap="sm">
+        {/* En-tête compact */}
+        <Group justify="space-between" align="center">
+          <Group gap="sm">
+            <ThemeIcon size={35} radius="md" color="blue" variant="light">
+              <IconFileText size={20} />
             </ThemeIcon>
-            <Title order={4}>Informations client</Title>
+            <div>
+              <Title order={3} c="#1b365d" style={{ fontSize: '1.1rem' }}>Nouveau décompte</Title>
+              <Text size="xs" c="dimmed">Créez un décompte pour un revendeur</Text>
+            </div>
           </Group>
-          <Divider mb="md" />
+          <Button variant="subtle" color="gray" size="sm" leftSection={<IconArrowLeft size={14} />} onClick={onCancel}>
+            Retour
+          </Button>
+        </Group>
 
+        {/* Client */}
+        <Card withBorder radius="md" shadow="sm" p="sm">
           <Select
             label="Client revendeur"
             placeholder="Sélectionner un client"
@@ -269,227 +287,205 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel }
             onChange={async (val) => {
               const client = clients.find(c => c.idClient.toString() === val);
               setSelectedClient(client || null);
-              if (!client) {
+              if (client) {
+                await loadStockRevendeur(client.idClient);
+              } else {
                 setProduits([]);
                 setPanier([]);
-                return;
               }
-              if (client.TypeClient !== "revendeur") {
-                notifications.show({
-                  title: "Erreur",
-                  message: "Le client doit être un revendeur",
-                  color: "red"
-                });
-                setProduits([]);
-                setPanier([]);
-                return;
-              }
-              await loadStockRevendeur(client.idClient);
             }}
-            leftSection={<IconUser size={16} />}
-            required
             searchable
-            size="md"
-            mb="md"
+            size="sm"
           />
 
           {selectedClient && (
-            <SimpleGrid cols={2} spacing="md">
+            <SimpleGrid cols={2} spacing="xs" mt="xs">
               <Group gap="xs">
-                <IconPhone size={14} color="#2e7d32" />
-                <Text size="sm">{selectedClient.Tel || "Pas de téléphone"}</Text>
+                <IconPhone size={12} color="#1b365d" />
+                <Text size="xs">{selectedClient.Tel || "Pas de téléphone"}</Text>
               </Group>
               <Group gap="xs">
-                <IconBuildingStore size={14} color="#2e7d32" />
-                <Text size="sm" tt="capitalize">{selectedClient.TypeClient === 'revendeur' ? 'Revendeur' : 'Client'}</Text>
+                <IconTruck size={12} color="#1b365d" />
+                <Text size="xs" tt="capitalize">Revendeur</Text>
               </Group>
             </SimpleGrid>
           )}
         </Card>
 
         {/* Produits disponibles */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Group justify="space-between" mb="md">
+        <Card withBorder radius="md" shadow="sm" p="sm">
+          <Group justify="space-between" mb="xs">
             <Group gap="xs">
-              <ThemeIcon color="blue" variant="light" size="sm">
-                <IconPackage size={14} />
-              </ThemeIcon>
-              <Title order={4}>Produits disponibles</Title>
+              <IconPackage size={14} />
+              <Text fw={600} size="sm">Produits disponibles</Text>
             </Group>
-            <Group>
+            <Group gap="xs">
               <TextInput
                 placeholder="Rechercher..."
-                leftSection={<IconSearch size={16} />}
+                size="xs"
                 value={recherche}
                 onChange={(e) => setRecherche(e.target.value)}
-                size="sm"
-                style={{ width: 250 }}
+                style={{ width: 180 }}
+                leftSection={<IconSearch size={12} />}
               />
-              <Button
-                variant="light"
-                leftSection={<IconRefresh size={16} />}
-                onClick={() => {
-                  if (selectedClient) {
-                    loadStockRevendeur(selectedClient.idClient);
-                  }
-                }}
+              <ActionIcon
                 size="sm"
+                variant="light"
+                onClick={() => selectedClient && loadStockRevendeur(selectedClient.idClient)}
               >
-                Actualiser
-              </Button>
+                <IconRefresh size={14} />
+              </ActionIcon>
             </Group>
           </Group>
-          <Divider mb="md" />
 
-          <ScrollArea h={300}>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Désignation</Table.Th>
-                  <Table.Th ta="right">Prix vente</Table.Th>
-                  <Table.Th ta="center">Stock</Table.Th>
-                  <Table.Th ta="center">Qté</Table.Th>
-                  <Table.Th></Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {produitsFiltres.map((p) => (
-                  <Table.Tr key={p.idProduit}>
-                    <Table.Td fw={500}>{p.designation}</Table.Td>
-                    <Table.Td ta="right">{p.prix_vente_gros.toLocaleString()} FCFA</Table.Td>
-                    <Table.Td ta="center">
-                      <Badge color={p.qte_stock <= 5 ? "orange" : "green"} variant="light">
-                        {p.qte_stock}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td ta="center" style={{ width: 100 }}>
-                      <NumberInput
-                        size="xs"
-                        min={0}
-                        max={p.qte_stock}
-                        value={quantiteInput[p.idProduit] || 0}
-                        onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) || 0 })}
-                        style={{ width: 80 }}
-                      />
-                    </Table.Td>
-                    <Table.Td>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        color="green"
-                        onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)}
-                      >
-                        Ajouter
-                      </Button>
-                    </Table.Td>
+          {loadingProduits ? (
+            <Center py={30}>
+              <Loader size="sm" />
+              <Text size="xs" ml="sm">Chargement...</Text>
+            </Center>
+          ) : produitsFiltres.length === 0 ? (
+            <Text ta="center" c="dimmed" py={30} size="sm">
+              {selectedClient ? "Aucun produit disponible" : "Sélectionnez d'abord un client"}
+            </Text>
+          ) : (
+            <ScrollArea h={200}>
+              <Table striped highlightOnHover verticalSpacing="xs">
+                <Table.Thead>
+                  <Table.Tr style={{ backgroundColor: "#1b365d" }}>
+                    <Table.Th style={{ fontSize: '11px' }}>Produit</Table.Th>
+                    <Table.Th style={{ fontSize: '11px' }} ta="right">Prix</Table.Th>
+                    <Table.Th style={{ fontSize: '11px' }} ta="center">Stock</Table.Th>
+                    <Table.Th style={{ fontSize: '11px' }} ta="center">Qté</Table.Th>
+                    <Table.Th style={{ fontSize: '11px' }} ta="center"></Table.Th>
                   </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
-
-          {produitsFiltres.length === 0 && (
-            <Text ta="center" c="dimmed" py={40}>Aucun produit disponible</Text>
+                </Table.Thead>
+                <Table.Tbody>
+                  {produitsFiltres.slice(0, 8).map((p) => (
+                    <Table.Tr key={p.idProduit}>
+                      <Table.Td>
+                        <Text size="xs" fw={500} lineClamp={1}>{p.designation}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs" fw={600} c="blue">{p.prix_vente_gros.toLocaleString()} F</Text>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge size="xs" color={p.qte_stock <= 0 ? "red" : p.qte_stock <= 5 ? "orange" : "green"} variant="light">
+                          {p.qte_stock}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td ta="center" style={{ width: 70 }}>
+                        <NumberInput
+                          size="xs"
+                          min={0}
+                          max={p.qte_stock}
+                          value={quantiteInput[p.idProduit] || 0}
+                          onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) || 0 })}
+                          w={60}
+                          hideControls={false}
+                        />
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="green"
+                          onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)}
+                          disabled={!quantiteInput[p.idProduit] || quantiteInput[p.idProduit] <= 0}
+                        >
+                          Ajouter
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
           )}
         </Card>
 
         {/* Panier */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Group gap="xs" mb="md">
-            <ThemeIcon color="orange" variant="light" size="sm">
-              <IconCash size={14} />
-            </ThemeIcon>
-            <Title order={4}>Panier</Title>
-          </Group>
-          <Divider mb="md" />
-
-          {panier.length === 0 ? (
-            <Text ta="center" c="dimmed" py={40}>Aucun produit sélectionné</Text>
-          ) : (
-            <>
-              <Table striped highlightOnHover>
+        {panier.length > 0 && (
+          <Card withBorder radius="md" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
+            <Group gap="xs" mb="xs">
+              <IconShoppingCart size={14} />
+              <Text fw={600} size="sm">Panier ({panier.length})</Text>
+            </Group>
+            <ScrollArea h={120}>
+              <Table verticalSpacing="xs">
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Produit</Table.Th>
-                    <Table.Th ta="center">Qté</Table.Th>
-                    <Table.Th ta="right">Prix unitaire</Table.Th>
-                    <Table.Th ta="right">Commission</Table.Th>
-                    <Table.Th ta="right">Total</Table.Th>
-                    <Table.Th></Table.Th>
+                    <Table.Th style={{ fontSize: '10px' }}>Produit</Table.Th>
+                    <Table.Th style={{ fontSize: '10px' }} ta="center">Qté</Table.Th>
+                    <Table.Th style={{ fontSize: '10px' }} ta="right">Total</Table.Th>
+                    <Table.Th style={{ fontSize: '10px' }} ta="center"></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {panier.map((item, idx) => (
                     <Table.Tr key={idx}>
-                      <Table.Td fw={500}>{item.designation}</Table.Td>
-                      <Table.Td ta="center">{item.quantite}</Table.Td>
-                      <Table.Td ta="right">{item.prix_vente.toLocaleString()} FCFA</Table.Td>
-                      <Table.Td ta="right">{item.commission.toLocaleString()} FCFA</Table.Td>
-                      <Table.Td ta="right" fw={600}>{item.total.toLocaleString()} FCFA</Table.Td>
-                      <Table.Td>
-                        <ActionIcon color="red" onClick={() => retirerDuPanier(idx)} variant="light">
-                          <IconTrash size={16} />
+                      <Table.Td><Text size="xs" lineClamp={1}>{item.designation}</Text></Table.Td>
+                      <Table.Td ta="center"><Badge size="xs" color="blue">{item.quantite}</Badge></Table.Td>
+                      <Table.Td ta="right"><Text size="xs" fw={600}>{item.total.toLocaleString()} F</Text></Table.Td>
+                      <Table.Td ta="center">
+                        <ActionIcon color="red" size="xs" onClick={() => retirerDuPanier(idx)}>
+                          <IconTrash size={12} />
                         </ActionIcon>
                       </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
               </Table>
+            </ScrollArea>
+            <Divider my="xs" />
+            <Flex justify="flex-end">
+              <Stack gap={2} align="flex-end">
+                <Group gap="md">
+                  <Text size="xs">Total ventes :</Text>
+                  <Text size="xs" fw={600}>{totalVente.toLocaleString()} F</Text>
+                </Group>
+                <Group gap="md">
+                  <Text size="xs" c="orange">Commission :</Text>
+                  <Text size="xs" c="orange">- {totalCommission.toLocaleString()} F</Text>
+                </Group>
+                <Group gap="md">
+                  <Text fw={600} size="sm">Net à payer :</Text>
+                  <Text fw={700} size="md" c="green">{netAPayer.toLocaleString()} F</Text>
+                </Group>
+              </Stack>
+            </Flex>
+          </Card>
+        )}
 
-              <Divider my="md" />
+        {/* Objet */}
+        <TextInput
+          label="Objet"
+          placeholder="Motif du décompte (optionnel)"
+          value={objet}
+          onChange={(e) => setObjet(e.target.value)}
+          size="sm"
+        />
 
-              <Flex justify="flex-end">
-                <Stack gap={4} align="flex-end">
-                  <Group>
-                    <Text size="sm">Total ventes :</Text>
-                    <Text fw={600}>{totalVente.toLocaleString()} FCFA</Text>
-                  </Group>
-                  <Group>
-                    <Text size="sm" c="orange">Commission :</Text>
-                    <Text fw={600} c="orange">- {totalCommission.toLocaleString()} FCFA</Text>
-                  </Group>
-                  <Divider />
-                  <Group>
-                    <Text fw={700} size="lg">Net à payer :</Text>
-                    <Text fw={800} size="xl" c="green">{netAPayer.toLocaleString()} FCFA</Text>
-                  </Group>
-                </Stack>
-              </Flex>
-            </>
-          )}
+        {/* Actions */}
+        <Group justify="flex-end" gap="sm">
+          <Button variant="outline" color="gray" size="sm" onClick={onCancel}>
+            Annuler
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            loading={saving}
+            size="sm"
+            color="green"
+            disabled={!selectedClient || panier.length === 0}
+          >
+            Enregistrer
+          </Button>
+        </Group>
 
-          <Divider my="md" />
-
-          <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-            <TextInput
-              label="Objet"
-              placeholder="Motif du décompte..."
-              value={objet}
-              onChange={(e) => setObjet(e.target.value)}
-              size="md"
-            />
-          </SimpleGrid>
-
-          <Divider my="md" />
-
-          <Group justify="flex-end">
-            <Button variant="outline" color="red" onClick={onCancel} size="md">
-              Annuler
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              loading={saving}
-              leftSection={<IconDeviceFloppy size={16} />}
-              variant="gradient"
-              gradient={{ from: "green", to: "teal" }}
-              size="md"
-            >
-              Enregistrer le décompte
-            </Button>
-          </Group>
-
-          {error && <Alert color="red" mt="md">{error}</Alert>}
-        </Card>
+        {error && (
+          <Alert color="red" variant="light" p="xs" icon={<IconAlertCircle size={12} />}>
+            {error}
+          </Alert>
+        )}
       </Stack>
     </Box>
   );

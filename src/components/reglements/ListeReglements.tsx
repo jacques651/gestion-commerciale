@@ -9,8 +9,7 @@ import {
 import {
   IconBuildingStore, IconSearch, IconRefresh,
   IconCalendar, IconCash, IconPrinter, IconEye,
-  IconReceipt, IconDownload, IconPlus, IconFileSpreadsheet
-} from '@tabler/icons-react';
+  IconReceipt, IconDownload, IconPlus} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import { format } from 'date-fns';
@@ -190,7 +189,7 @@ const ListeReglements: React.FC = () => {
     });
   };
 
-  const handleOpenReglement = async (factureId: number, clientId: number, factureCode: string, clientNom: string) => {
+  const handleOpenReglement = async (factureId: number, clientId: number, factureCode: string, _p0?: string) => {
     try {
       const db = await getDb();
       

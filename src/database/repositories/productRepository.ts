@@ -15,6 +15,7 @@ export interface Product {
   qte_stock: number;
   date_entree: string;
   est_supprime: number;
+  prix_moyen_pondere?: number; // Ajout pour PMP
 }
 
 export type CreateProductInput = Omit<Product, 'idProduit' | 'date_entree' | 'est_supprime'>;
@@ -37,7 +38,8 @@ export const productRepository = {
           commission_pourcentage,
           qte_stock,
           date_entree,
-          est_supprime
+          est_supprime,
+          0 as prix_moyen_pondere
         FROM products 
         WHERE est_supprime = 0 
         ORDER BY designation
@@ -66,7 +68,8 @@ export const productRepository = {
           commission_pourcentage,
           qte_stock,
           date_entree,
-          est_supprime
+          est_supprime,
+          0 as prix_moyen_pondere
         FROM products 
         WHERE idProduit = ? AND est_supprime = 0
       `, [id]);
