@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getDb } from '../database/db';
 import { notifications } from '@mantine/notifications';
-import { getNextReglementCode } from '../services/codeGeneratorService';
+
 
 export interface Reglement {
   idReglement: number;
@@ -212,3 +212,8 @@ export const useReglements = () => {
     getTotalRegleByFacture,
   };
 };
+
+async function getNextReglementCode(): Promise<string> {
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `REG-${randomSuffix}`;
+}

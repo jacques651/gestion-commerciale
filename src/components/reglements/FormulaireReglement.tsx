@@ -6,7 +6,7 @@ import {
   Table, ScrollArea, Card, Radio} from '@mantine/core';
 import { useReglements } from '../../hooks/useReglements';
 import { notifications } from '@mantine/notifications';
-import { getNextReglementCode } from '../../services/codeGeneratorService';
+
 import {
   IconCash, IconFileInvoice
 } from '@tabler/icons-react';
@@ -523,3 +523,15 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
 };
 
 export default FormulaireReglement;
+
+async function getNextReglementCode(): Promise<string> {
+  const db = await getDb();
+  const result = await db.select<any[]>(`
+    SELECT MAX(idReglement) AS lastId
+    FROM reglements
+  `);
+
+  const lastId = result[0]?.lastId || 0;
+  const nextId = Number(lastId) + 1;
+  return `REG-${String(nextId).padStart(5, '0')}`;
+}

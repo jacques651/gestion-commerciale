@@ -1,12 +1,15 @@
 // src/components/reglements/ReçuReglement.tsx
-import React, { useRef, useEffect, useState } from 'react';
-import { Paper, Text, Title, Group, Divider, Box, SimpleGrid, Button, Image, Loader, Center, Table } from '@mantine/core';
-import { IconPrinter } from '@tabler/icons-react';
+import React, { useRef, useState, useEffect } from 'react';
+import {
+  Paper, Text, Table, Group, Box,
+  Button, Image, Divider, SimpleGrid, Badge, Flex, Loader, Center
+} from '@mantine/core';
+import {
+  IconPrinter, IconDownload, IconCheck
+} from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
 import { getDb } from '../../database/db';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 
 interface ReçuReglementProps {
   reglement: {
@@ -46,21 +49,22 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
         
         if (facture.length > 0) {
           const idFacture = facture[0].idFacture;
-          const totalFacture = facture[0].montant_ttc;
+          const totalFacture = facture[0].montant_ttc || 0;
           
-          const reglementsTotal = await db.select<any[]>(`
+          const reglements = await db.select<any[]>(`
             SELECT COALESCE(SUM(montant), 0) as total
             FROM reglements 
             WHERE idFacture = ?
           `, [idFacture]);
           
-          const totalRegle = reglementsTotal[0].total;
-          const reste = totalFacture - totalRegle;
+          const totalRegle = reglements[0].total || 0;
+          const totalRegleAvant = totalRegle - reglement.montant;
+          const resteApres = totalFacture - totalRegle;
           
           setFactureInfo({
             montant_total: totalFacture,
-            total_regle_avant: totalRegle - reglement.montant,
-            reste_apres: reste
+            total_regle_avant: totalRegleAvant,
+            reste_apres: resteApres
           });
         } else {
           setFactureInfo({
@@ -89,27 +93,129 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
     documentTitle: `Reçu_Reglement_${reglement.code_reglement}`,
   });
 
-  const atelier = atelierConfig || {
-    nom_atelier: 'MON ATELIER',
-    telephone: '',
-    adresse: '',
-    email: '',
-    nif: '',
-    message_facture: 'Merci de votre confiance',
-    logo_base64: ''
+  const formatMontant = (value: number | string | undefined | null): string => {
+    if (!value) return '0';
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('fr-FR');
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr: string | undefined): string => {
     if (!dateStr) return '-';
     try {
-      return format(new Date(dateStr), 'dd/MM/yyyy à HH:mm', { locale: fr });
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '-';
+      return d.toLocaleDateString('fr-FR');
     } catch {
       return '-';
     }
   };
 
-  const formatMontant = (value: number) => {
-    return (value || 0).toLocaleString('fr-FR');
+  // 🔥 Fonction pour convertir un nombre en lettres (corrigée)
+  const nombreEnLettres = (nombre: number): string => {
+    if (nombre === 0) return 'zéro';
+    if (nombre < 0) return 'moins ' + nombreEnLettres(Math.abs(nombre));
+    
+    const unites = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
+    const dizaines = ['', 'dix', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante-dix', 'quatre-vingt', 'quatre-vingt-dix'];
+    
+    const convertirMoinsDeCent = (n: number): string => {
+      if (n < 20) return unites[n];
+      if (n < 100) {
+        const d = Math.floor(n / 10);
+        const u = n % 10;
+        let dizaine = dizaines[d];
+        
+        if (u === 0) {
+          if (d === 8) return 'quatre-vingts';
+          return dizaine;
+        }
+        
+        if (d === 7 || d === 9) {
+          return `${dizaine}-${unites[u + 10]}`;
+        }
+        
+        if (d === 8) {
+          return `quatre-vingt-${unites[u]}`;
+        }
+        
+        return `${dizaine}-${unites[u]}`;
+      }
+      return '';
+    };
+    
+    const convertir = (n: number): string => {
+      if (n < 100) return convertirMoinsDeCent(n);
+      
+      if (n < 1000) {
+        const centaines = Math.floor(n / 100);
+        const reste = n % 100;
+        let result = '';
+        
+        if (centaines === 1) {
+          result = 'cent';
+        } else {
+          result = unites[centaines] + ' cents';
+        }
+        
+        if (reste > 0) {
+          result += ' ' + convertirMoinsDeCent(reste);
+        }
+        
+        return result;
+      }
+      
+      if (n < 1000000) {
+        const milliers = Math.floor(n / 1000);
+        const reste = n % 1000;
+        let result = '';
+        
+        if (milliers === 1) {
+          result = 'mille';
+        } else {
+          result = convertir(milliers) + ' mille';
+        }
+        
+        if (reste > 0) {
+          result += ' ' + convertir(reste);
+        }
+        
+        return result;
+      }
+      
+      if (n < 1000000000) {
+        const millions = Math.floor(n / 1000000);
+        const reste = n % 1000000;
+        let result = '';
+        
+        if (millions === 1) {
+          result = 'un million';
+        } else {
+          result = convertir(millions) + ' millions';
+        }
+        
+        if (reste > 0) {
+          result += ' ' + convertir(reste);
+        }
+        
+        return result;
+      }
+      
+      // Pour les nombres plus grands, retourner le nombre formaté
+      return formatMontant(n);
+    };
+    
+    return convertir(nombre);
+  };
+
+  const atelier = atelierConfig || {
+    nom_atelier: 'KOSOFT',
+    telephone: '72101081/07537979',
+    adresse: 'Saaba route de l\'Université USTA',
+    email: '',
+    message_facture: 'Merci de votre confiance',
+    logo_base64: '',
+    nif: ''
   };
 
   if (atelierLoading || loading) {
@@ -120,109 +226,163 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
     );
   }
 
-  const montantActuel = reglement.montant;
+  const montantActuel = reglement.montant || 0;
   const montantTotal = factureInfo?.montant_total || montantActuel;
   const totalRegleAvant = factureInfo?.total_regle_avant || 0;
   const nouveauCumul = totalRegleAvant + montantActuel;
   const resteApres = factureInfo?.reste_apres || (montantTotal - nouveauCumul);
 
+  // 🔥 Montant en lettres
+  const montantEnLettres = nombreEnLettres(montantActuel);
+  const montantEnLettresMaj = montantEnLettres.charAt(0).toUpperCase() + montantEnLettres.slice(1);
+
   return (
     <Box>
-      {/* Barre d'outils */}
-      <Group justify="flex-end" mb="md" p="md" className="no-print" style={{ borderBottom: '1px solid #e9ecef' }}>
-        <Button variant="outline" onClick={onClose}>
+      {/* Boutons d'action */}
+      <Group justify="flex-end" mb="xs" className="no-print">
+        <Button size="xs" variant="subtle" onClick={onClose}>
           Fermer
         </Button>
-        <Button onClick={handlePrint} leftSection={<IconPrinter size={16} />} color="blue">
+        <Button size="xs" variant="subtle" onClick={handlePrint} leftSection={<IconPrinter size={12} />}>
           Imprimer
+        </Button>
+        <Button size="xs" variant="subtle" color="teal" onClick={handlePrint} leftSection={<IconDownload size={12} />}>
+          PDF
         </Button>
       </Group>
 
-      {/* Contenu à imprimer */}
       <div ref={printRef}>
-        <Paper p="lg" style={{ maxWidth: '650px', margin: '0 auto', backgroundColor: 'white' }}>
+        <Paper p="xs" style={{ maxWidth: '1300px', margin: '0 auto', backgroundColor: 'white' }}>
           
-          {/* En-tête atelier */}
-          <Box style={{ textAlign: 'center', borderBottom: '2px solid #1b365d', paddingBottom: 12, marginBottom: 16 }}>
-            {atelier.logo_base64 && (
-              <Image 
-                src={atelier.logo_base64} 
-                alt="Logo" 
-                style={{ height: '50px', marginBottom: '8px', objectFit: 'contain', margin: '0 auto' }}
-              />
-            )}
-            <Title order={2} style={{ fontSize: '18px', margin: 0, fontWeight: 700 }}>
-              {atelier.nom_atelier}
-            </Title>
-            <Text size="xs" c="dimmed">{atelier.adresse}</Text>
-            <Text size="xs" c="dimmed">📞 {atelier.telephone}</Text>
-            {atelier.email && <Text size="xs" c="dimmed">✉️ {atelier.email}</Text>}
-            {atelier.nif && <Text size="xs" c="dimmed">🏷️ NIF: {atelier.nif}</Text>}
-          </Box>
+          {/* En-tête */}
+          <Flex justify="space-between" align="center" wrap="wrap" gap="xs" style={{ borderBottom: '1px solid #1b365d', paddingBottom: 6, marginBottom: 8 }}>
+            <Flex align="center" gap="xs">
+              {atelier.logo_base64 && (
+                <Image src={atelier.logo_base64} alt="Logo" style={{ height: '30px', objectFit: 'contain' }} />
+              )}
+              <Box>
+                <Text fw={700} size="md" c="#1b365d">{atelier.nom_atelier}</Text>
+                <Text size="xs" c="dimmed">{atelier.telephone}</Text>
+              </Box>
+            </Flex>
+            <Box style={{ textAlign: 'right' }}>
+              <Text size="xs" fw={600}>N°{reglement.code_reglement}</Text>
+              <Text size="xs" c="dimmed">{formatDate(reglement.date_reglement)}</Text>
+            </Box>
+          </Flex>
 
           {/* Titre */}
-          <Title order={3} ta="center" mb="md" style={{ fontSize: '14px', backgroundColor: '#f2d2bc', display: 'inline-block', padding: '4px 16px', borderRadius: '4px', width: '100%' }}>
-            REÇU DE RÈGLEMENT N° {reglement.code_reglement}
-          </Title>
+          <Text ta="center" fw={700} size="sm" style={{ backgroundColor: '#f2d2bc', padding: '4px', borderRadius: '4px', marginBottom: 12 }}>
+            REÇU DE RÈGLEMENT DE FACTURES
+          </Text>
 
-          {/* Infos générales en grille compacte */}
-          <SimpleGrid cols={2} spacing="xs" mb="md" style={{ fontSize: '12px' }}>
-            <Group gap={4}><Text size="xs" fw={600}>Date :</Text><Text size="xs">{formatDate(reglement.date_reglement)}</Text></Group>
-            <Group gap={4}><Text size="xs" fw={600}>Mode :</Text><Text size="xs">{reglement.mode_reglement}</Text></Group>
-            <Group gap={4}><Text size="xs" fw={600}>Client :</Text><Text size="xs">{reglement.client_nom}</Text></Group>
-            <Group gap={4}><Text size="xs" fw={600}>Facture :</Text><Text size="xs">{reglement.code_facture}</Text></Group>
-            {reglement.reference && (
-              <Group gap={4}><Text size="xs" fw={600}>Réf :</Text><Text size="xs">{reglement.reference}</Text></Group>
-            )}
+          {/* Infos client */}
+          <SimpleGrid cols={2} spacing="xs" mb="xs" style={{ fontSize: '13px' }}>
+            <Text><Text span fw={600}>Reçu N°:</Text> {reglement.code_reglement}</Text>
+            <Text><Text span fw={600}>Date:</Text> {formatDate(reglement.date_reglement)}</Text>
+            <Text><Text span fw={600}>Nom du client:</Text> {reglement.client_nom}</Text>
+            <Text><Text span fw={600}>Facture:</Text> {reglement.code_facture}</Text>
           </SimpleGrid>
 
-          {/* Tableau des montants */}
-          <Table withColumnBorders style={{ fontSize: '12px', marginBottom: 16 }}>
+          <Divider my={4} />
+
+          {/* Tableau */}
+          <Table withColumnBorders style={{ fontSize: '12px', marginBottom: 12 }}>
+            <Table.Thead>
+              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                <Table.Th c="white" w={120}>Références</Table.Th>
+                <Table.Th c="white" w={100}>Date</Table.Th>
+                <Table.Th c="white" w={120}>Mode Règlement</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Montant</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Versement</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Cumul</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Reste à payer</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
             <Table.Tbody>
               <Table.Tr>
-                <Table.Td style={{ width: '65%', padding: '6px 8px' }}>Montant total de la facture</Table.Td>
-                <Table.Td ta="right" style={{ padding: '6px 8px' }}>{formatMontant(montantTotal)} FCFA</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td style={{ padding: '6px 8px' }}>Déjà réglé avant ce paiement</Table.Td>
-                <Table.Td ta="right" style={{ padding: '6px 8px' }}>{formatMontant(totalRegleAvant)} FCFA</Table.Td>
-              </Table.Tr>
-              <Table.Tr style={{ backgroundColor: '#e8f5e9' }}>
-                <Table.Td style={{ fontWeight: 700, padding: '8px 8px' }}>▶ Montant du présent règlement</Table.Td>
-                <Table.Td ta="right" fw={800} style={{ fontSize: '16px', padding: '8px 8px', color: '#2e7d32' }}>{formatMontant(montantActuel)} FCFA</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td style={{ padding: '6px 8px' }}>Nouveau cumul réglé</Table.Td>
-                <Table.Td ta="right" style={{ padding: '6px 8px' }}>{formatMontant(nouveauCumul)} FCFA</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td style={{ padding: '6px 8px' }}>Reste à payer</Table.Td>
-                <Table.Td ta="right" fw={700} style={{ padding: '6px 8px', color: resteApres > 0 ? '#d32f2f' : '#2e7d32' }}>
-                  {resteApres > 0 ? formatMontant(resteApres) : 'SOLDÉ'} FCFA
+                <Table.Td>
+                  <Text size="xs" fw={500}>{reglement.code_facture}</Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs">{formatDate(reglement.date_reglement)}</Text>
+                </Table.Td>
+                <Table.Td>
+                  <Badge size="xs" variant="light" color="blue">
+                    {(reglement.mode_reglement || 'ESPECES').toUpperCase()}
+                  </Badge>
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Text size="xs">{formatMontant(montantTotal)}</Text>
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Text size="xs" fw={600}>{formatMontant(montantActuel)}</Text>
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Text size="xs" fw={600}>{formatMontant(nouveauCumul)}</Text>
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Text size="xs" fw={700} c={resteApres > 0 ? 'orange' : 'green'}>
+                    {resteApres > 0 ? formatMontant(resteApres) : '0'}
+                  </Text>
                 </Table.Td>
               </Table.Tr>
             </Table.Tbody>
           </Table>
 
-          {/* Observation */}
-          {reglement.observation && (
-            <Box mb="md">
-              <Text size="xs" c="dimmed">Observation :</Text>
-              <Text size="xs">{reglement.observation}</Text>
-            </Box>
+          {/* Montant versé */}
+          <Paper p="xs" style={{ backgroundColor: '#e8f5e9', borderRadius: '4px', border: '1px solid #c8e6c9', marginBottom: 8 }}>
+            <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+              <Text fw={700} size="sm">Montant versé :</Text>
+              <Text fw={800} size="lg" c="green">{formatMontant(montantActuel)} FCFA</Text>
+            </Flex>
+          </Paper>
+
+          {/* Reste à payer */}
+          {resteApres > 0 && (
+            <Paper p="xs" style={{ backgroundColor: '#fff3e0', borderRadius: '4px', border: '1px solid #ffcc80', marginBottom: 8 }}>
+              <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+                <Text fw={700} size="sm" c="orange">Reste à payer :</Text>
+                <Text fw={800} size="lg" c="orange">{formatMontant(resteApres)} FCFA</Text>
+              </Flex>
+            </Paper>
           )}
 
-          {/* Montant en lettres */}
-          <Divider my="sm" />
-          <Text size="xs" ta="center" fs="italic" style={{ marginTop: 12 }}>
-            Arrêté le présent reçu à la somme de : {formatMontant(montantActuel)} Francs CFA
+          {resteApres <= 0 && (
+            <Paper p="xs" style={{ backgroundColor: '#c8e6c9', borderRadius: '4px', border: '1px solid #4caf50', marginBottom: 8 }}>
+              <Flex justify="center" align="center" wrap="wrap" gap="xs">
+                <IconCheck size={16} color="#2e7d32" />
+                <Text fw={700} size="sm" c="green">✅ Facture entièrement soldée</Text>
+              </Flex>
+            </Paper>
+          )}
+
+          {/* 🔥 Montant en lettres */}
+          <Paper p="xs" withBorder style={{ backgroundColor: '#f8f9fa', marginTop: 8 }}>
+            <Text size="xs" fw={500} ta="center">
+              Arrêté le présent reçu à la somme de : {montantEnLettresMaj} ({formatMontant(montantActuel)}) Francs CFA
+            </Text>
+          </Paper>
+
+          {/* Date et signature */}
+          <Flex justify="space-between" mt={16}>
+            <Box>
+              <Text size="xs" fw={600}>Fait à.................................................................. le {new Date().toLocaleDateString('fr-FR')}</Text>
+            </Box>
+            <Box>
+              <Text fw={600} size="xs" ta="center">Signature et cachet</Text>
+            </Box>
+          </Flex>
+
+          {/* Message */}
+          <Text size="xs" ta="center" fs="italic" c="dimmed" mt={12}>
+            {atelier.message_facture}
           </Text>
 
-          {/* Footer */}
-          <Box style={{ textAlign: 'center', marginTop: 20, paddingTop: 12, borderTop: '1px solid #e9ecef' }}>
-            <Text size="xs" c="dimmed" fs="italic">{atelier.message_facture || 'Merci de votre confiance'}</Text>
-            <Text size="xs" c="dimmed" mt={4}>{atelier.nom_atelier} - {atelier.telephone}</Text>
-          </Box>
+          {/* Numéro de page */}
+          <Flex justify="flex-end" mt={8}>
+            <Text size="xs" c="dimmed">Page 1 sur 1</Text>
+          </Flex>
         </Paper>
       </div>
 
@@ -230,10 +390,6 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
         @media print {
           .no-print {
             display: none !important;
-          }
-          body {
-            padding: 0;
-            margin: 0;
           }
         }
       `}</style>

@@ -1,5 +1,4 @@
-// src/contexts/AuthContext.tsx - Version corrigée
-
+// src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getDb } from '../database/db';
 import { Utilisateur, AuthContextType, Role } from '../types/auth';
@@ -24,39 +23,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const db = await getDb();
       
+      // Vérifier si la table users existe
+      const tables = await db.select<any[]>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+      `);
+      
+      if (tables.length === 0) {
+        console.log("🔧 Création de la table users...");
+        await db.execute(`
+          CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            mot_de_passe TEXT NOT NULL,
+            role TEXT DEFAULT 'utilisateur',
+            telephone TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        console.log("✅ Table users créée");
+      }
+      
       // Vérifier s'il y a des utilisateurs
-      const users = await db.select<any[]>('SELECT COUNT(*) as count FROM utilisateurs');
+      const users = await db.select<any[]>('SELECT COUNT(*) as count FROM users');
       const userCount = users[0]?.count || 0;
       
       if (userCount === 0) {
         console.log("🔧 Aucun utilisateur trouvé, création d'un administrateur par défaut...");
         
-        // Mot de passe par défaut: admin123
         const defaultPassword = 'admin123';
         const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         
         await db.execute(
-          `INSERT INTO utilisateurs (nom, login, mot_de_passe_hash, role, est_actif) 
+          `INSERT INTO users (nom, email, mot_de_passe, role, telephone) 
            VALUES (?, ?, ?, ?, ?)`,
-          ['Administrateur', 'admin', hashedPassword, 'admin', 1]
+          ['Administrateur', 'admin', hashedPassword, 'admin', '07000000']
         );
         
-        console.log("✅ Administrateur par défaut créé (login: admin, mot de passe: admin123)");
-        console.log("⚠️ IMPORTANT: Changez ce mot de passe après la première connexion !");
+        console.log("✅ Administrateur par défaut créé");
+        console.log("👤 Login: admin");
+        console.log("🔑 Mot de passe: admin123");
       }
     } catch (error) {
       console.error("❌ Erreur lors de la création de l'admin par défaut:", error);
     }
   };
 
-  // 🔐 INIT AUTH SAFE
+  // 🔐 INIT AUTH
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Créer l'admin par défaut si nécessaire
         await createDefaultAdmin();
         
-        // Restaurer l'utilisateur depuis localStorage
         const savedUser = localStorage.getItem('user');
         if (savedUser) {
           setUser(JSON.parse(savedUser));
@@ -75,16 +93,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initAuth();
   }, []);
 
-  // 🔐 LOGIN SAFE
+  // 🔐 LOGIN
   const login = async (login: string, password: string): Promise<boolean> => {
     try {
       console.log("🔐 Tentative login pour:", login);
 
       const db = await getDb();
 
+      // Rechercher par nom ou email
       const users = await db.select<any[]>(
-        'SELECT id, nom, login, role, est_actif, mot_de_passe_hash FROM utilisateurs WHERE login = ? AND est_actif = 1',
-        [login]
+        `SELECT id, nom, email as login, role, telephone, mot_de_passe 
+         FROM users 
+         WHERE nom = ? OR email = ?`,
+        [login, login]
       );
 
       if (!users || users.length === 0) {
@@ -93,23 +114,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const userData = users[0];
+      console.log("👤 Utilisateur trouvé:", userData.nom);
 
       // Vérifier le mot de passe
-      const isValid = await bcrypt.compare(password, userData.mot_de_passe_hash);
+      let isValid = false;
+      try {
+        isValid = await bcrypt.compare(password, userData.mot_de_passe);
+      } catch (e) {
+        // Si bcrypt échoue, comparer en clair
+        isValid = password === userData.mot_de_passe;
+        if (isValid) {
+          const hashed = await bcrypt.hash(password, 10);
+          await db.execute(`UPDATE users SET mot_de_passe = ? WHERE id = ?`, [hashed, userData.id]);
+          console.log("🔑 Mot de passe hashé mis à jour");
+        }
+      }
 
       if (!isValid) {
         console.log("❌ Mot de passe incorrect");
         return false;
       }
 
-      // Supprimer le hash du mot de passe avant de stocker dans le state
-      const { mot_de_passe_hash, ...userWithoutPassword } = userData;
+      // Supprimer le mot de passe avant de stocker
+      const { mot_de_passe, ...userWithoutPassword } = userData;
 
-      setUser(userWithoutPassword as Utilisateur);
+      setUser({
+        id: userWithoutPassword.id,
+        nom: userWithoutPassword.nom,
+        login: userWithoutPassword.login || userWithoutPassword.nom,
+        role: userWithoutPassword.role,
+        telephone: userWithoutPassword.telephone
+      } as unknown as Utilisateur);
+      
       localStorage.setItem('user', JSON.stringify(userWithoutPassword));
 
       console.log("✅ Login réussi pour:", userWithoutPassword.nom);
-
       return true;
 
     } catch (error) {
@@ -124,33 +163,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log("🔓 Déconnexion réussie");
   };
 
-  // 🔧 CORRECTION ICI : retourne Promise<void> au lieu de Promise<boolean>
+  // 🔐 REGISTER
   const register = async (nom: string, login: string, password: string, role: Role): Promise<void> => {
     try {
       const db = await getDb();
       
       // Vérifier si le login existe déjà
       const existing = await db.select<any[]>(
-        'SELECT id FROM utilisateurs WHERE login = ?',
-        [login]
+        'SELECT id FROM users WHERE nom = ? OR email = ?',
+        [nom, login]
       );
       
       if (existing && existing.length > 0) {
-        throw new Error('Ce login existe déjà');
+        throw new Error('Ce nom d\'utilisateur ou login existe déjà');
       }
       
       const hash = await bcrypt.hash(password, 10);
 
       await db.execute(
-        'INSERT INTO utilisateurs (nom, login, mot_de_passe_hash, role, est_actif) VALUES (?, ?, ?, ?, 1)',
-        [nom, login, hash, role]
+        `INSERT INTO users (nom, email, mot_de_passe, role, telephone) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [nom, login, hash, role, '']
       );
 
       console.log("✅ Utilisateur créé:", login);
 
     } catch (error) {
       console.error("❌ Register error:", error);
-      throw error; // Propager l'erreur pour que l'appelant puisse la gérer
+      throw error;
     }
   };
 

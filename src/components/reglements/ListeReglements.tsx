@@ -1,15 +1,14 @@
 // src/components/reglements/ListeReglements.tsx
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper, 
-  Loader, Center
-} from '@mantine/core';
+  Loader, Center} from '@mantine/core';
 import {
-  IconBuildingStore, IconSearch, IconRefresh,
+  IconSearch, IconRefresh,
   IconCalendar, IconCash, IconPrinter, IconEye,
-  IconReceipt, IconDownload, IconPlus} from '@tabler/icons-react';
+  IconPlus, IconX} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import { format } from 'date-fns';
@@ -37,6 +36,7 @@ interface ReglementWithCumul extends Reglement {
   cumul: number;
   reste: number;
   montant_total_facture: number;
+  statut_paiement: 'payee' | 'partielle' | 'non_payee';
 }
 
 const ListeReglements: React.FC = () => {
@@ -45,6 +45,9 @@ const ListeReglements: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [recherche, setRecherche] = useState("");
   const [clientFiltre, setClientFiltre] = useState<string | null>(null);
+  const [statutFiltre, setStatutFiltre] = useState<string | null>(null);
+  const [dateDebut, setDateDebut] = useState<string>("");
+  const [dateFin, setDateFin] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedReglement, setSelectedReglement] = useState<ReglementWithCumul | null>(null);
@@ -55,10 +58,14 @@ const ListeReglements: React.FC = () => {
   const [selectedMontantMax, setSelectedMontantMax] = useState<number>(0);
   const [reçuModalOpened, setReçuModalOpened] = useState(false);
   const [selectedReglementForReçu, setSelectedReglementForReçu] = useState<any>(null);
+  const [] = useState(false);
   const [stats, setStats] = useState({
     totalReglements: 0,
     totalMontant: 0,
-    totalClients: 0
+    totalClients: 0,
+    payees: 0,
+    partielles: 0,
+    nonPayees: 0
   });
 
   const itemsPerPage = 10;
@@ -107,11 +114,16 @@ const ListeReglements: React.FC = () => {
         const totalFacture = reg.montant_total_facture || cumul;
         const reste = totalFacture - cumul;
         
+        let statut: 'payee' | 'partielle' | 'non_payee' = 'non_payee';
+        if (reste <= 0) statut = 'payee';
+        else if (cumul > 0 && reste > 0) statut = 'partielle';
+        
         return {
           ...reg,
           cumul,
           reste,
-          montant_total_facture: totalFacture
+          montant_total_facture: totalFacture,
+          statut_paiement: statut
         };
       });
       
@@ -125,11 +137,17 @@ const ListeReglements: React.FC = () => {
       
       const totalMontant = reglementsWithCumul.reduce((sum, r) => sum + (r.montant || 0), 0);
       const totalClients = new Set(reglementsWithCumul.map(r => r.idClient)).size;
+      const payees = reglementsWithCumul.filter(r => r.statut_paiement === 'payee').length;
+      const partielles = reglementsWithCumul.filter(r => r.statut_paiement === 'partielle').length;
+      const nonPayees = reglementsWithCumul.filter(r => r.statut_paiement === 'non_payee').length;
       
       setStats({
         totalReglements: reglementsWithCumul.length,
         totalMontant,
-        totalClients
+        totalClients,
+        payees,
+        partielles,
+        nonPayees
       });
       
     } catch (error) {
@@ -148,17 +166,75 @@ const ListeReglements: React.FC = () => {
     chargerReglements();
   }, []);
 
+  // Filtrage
+  const reglementsFiltres = useMemo(() => {
+    let filtered = [...reglements];
+
+    // Recherche
+    if (recherche) {
+      filtered = filtered.filter(r =>
+        r.code_reglement?.toLowerCase().includes(recherche.toLowerCase()) ||
+        r.client_nom?.toLowerCase().includes(recherche.toLowerCase()) ||
+        r.client_societe?.toLowerCase().includes(recherche.toLowerCase()) ||
+        r.code_facture?.toLowerCase().includes(recherche.toLowerCase())
+      );
+    }
+
+    // Client
+    if (clientFiltre) {
+      filtered = filtered.filter(r => r.idClient?.toString() === clientFiltre);
+    }
+
+    // Statut
+    if (statutFiltre) {
+      filtered = filtered.filter(r => r.statut_paiement === statutFiltre);
+    }
+
+    // Date début
+    if (dateDebut) {
+      const debut = new Date(dateDebut);
+      debut.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(r => new Date(r.date_reglement) >= debut);
+    }
+
+    // Date fin
+    if (dateFin) {
+      const fin = new Date(dateFin);
+      fin.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(r => new Date(r.date_reglement) <= fin);
+    }
+
+    return filtered;
+  }, [reglements, recherche, clientFiltre, statutFiltre, dateDebut, dateFin]);
+
+  const totalPages = Math.ceil(reglementsFiltres.length / itemsPerPage);
+  const paginatedData = reglementsFiltres.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // Statistiques filtrées
+  const filteredStats = {
+    total: reglementsFiltres.length,
+    montant: reglementsFiltres.reduce((sum, r) => sum + (r.montant || 0), 0),
+    payees: reglementsFiltres.filter(r => r.statut_paiement === 'payee').length,
+    partielles: reglementsFiltres.filter(r => r.statut_paiement === 'partielle').length,
+    nonPayees: reglementsFiltres.filter(r => r.statut_paiement === 'non_payee').length
+  };
+
+  const resetFilters = () => {
+    setRecherche("");
+    setClientFiltre(null);
+    setStatutFiltre(null);
+    setDateDebut("");
+    setDateFin("");
+    setCurrentPage(1);
+  };
+
   // Impression de la liste
   const handlePrintList = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Liste_Reglements_${format(new Date(), 'dd-MM-yyyy')}`,
-    onAfterPrint: () => {
-      notifications.show({
-        title: 'Impression',
-        message: 'Impression de la liste lancée',
-        color: 'blue',
-      });
-    },
   });
 
   const handleViewDetails = (reglement: ReglementWithCumul) => {
@@ -181,15 +257,7 @@ const ListeReglements: React.FC = () => {
     setReçuModalOpened(true);
   };
 
-  const handleExport = (reglement: ReglementWithCumul) => {
-    notifications.show({
-      title: 'Export',
-      message: `Export du règlement ${reglement.code_reglement}`,
-      color: 'blue',
-    });
-  };
-
-  const handleOpenReglement = async (factureId: number, clientId: number, factureCode: string, _p0?: string) => {
+  const handleOpenReglement = async (factureId: number, clientId: number, factureCode: string) => {
     try {
       const db = await getDb();
       
@@ -243,27 +311,6 @@ const ListeReglements: React.FC = () => {
     }
   };
 
-  const isFactureReglee = (reste: number) => {
-    return reste <= 0;
-  };
-
-  const reglementsFiltres = reglements.filter(r => {
-    const matchRecherche = recherche === "" ||
-      r.code_reglement?.toLowerCase().includes(recherche.toLowerCase()) ||
-      r.client_nom?.toLowerCase().includes(recherche.toLowerCase()) ||
-      r.code_facture?.toLowerCase().includes(recherche.toLowerCase());
-    
-    const matchClient = clientFiltre ? r.idClient?.toString() === clientFiltre : true;
-    
-    return matchRecherche && matchClient;
-  });
-
-  const totalPages = Math.ceil(reglementsFiltres.length / itemsPerPage);
-  const paginatedData = reglementsFiltres.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';
     const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -280,6 +327,19 @@ const ListeReglements: React.FC = () => {
     }
   };
 
+  const getStatutBadge = (statut: string) => {
+    switch (statut) {
+      case 'payee':
+        return <Badge color="green" variant="filled" size="sm">Payée</Badge>;
+      case 'partielle':
+        return <Badge color="orange" variant="filled" size="sm">Partielle</Badge>;
+      case 'non_payee':
+        return <Badge color="red" variant="filled" size="sm">Non payée</Badge>;
+      default:
+        return <Badge variant="light" size="sm">{statut}</Badge>;
+    }
+  };
+
   if (loading) {
     return (
       <Center py={100}>
@@ -291,7 +351,7 @@ const ListeReglements: React.FC = () => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        {/* EN-TÊTE ATTRACTIF */}
+        {/* EN-TÊTE */}
         <Paper
           p="xl"
           radius="lg"
@@ -334,77 +394,131 @@ const ListeReglements: React.FC = () => {
           </Flex>
 
           {/* Cartes statistiques */}
-          <SimpleGrid cols={3} spacing="md" mt="xl">
+          <SimpleGrid cols={6} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconReceipt size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Total règlements</Text>
-                  <Text c="white" fw={700} size="xl">{stats.totalReglements}</Text>
-                </div>
-              </Group>
+              <Text c="white" size="xs">Total</Text>
+              <Text c="white" fw={700} size="xl">{filteredStats.total}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconCash size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Montant total</Text>
-                  <Text c="white" fw={700} size="xl">{formatMontant(stats.totalMontant)} FCFA</Text>
-                </div>
-              </Group>
+              <Text c="white" size="xs">Montant</Text>
+              <Text c="white" fw={700} size="xl">{formatMontant(filteredStats.montant)} F</Text>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(46,125,50,0.2)' }}>
+              <Text c="white" size="xs">✅ Payées</Text>
+              <Text c="white" fw={700} size="xl">{filteredStats.payees}</Text>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(237,108,2,0.2)' }}>
+              <Text c="white" size="xs">🟠 Partielles</Text>
+              <Text c="white" fw={700} size="xl">{filteredStats.partielles}</Text>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(211,47,47,0.2)' }}>
+              <Text c="white" size="xs">🔴 Non payées</Text>
+              <Text c="white" fw={700} size="xl">{filteredStats.nonPayees}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="blue" variant="light" size="lg">
-                  <IconBuildingStore size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Clients distincts</Text>
-                  <Text c="white" fw={700} size="xl">{stats.totalClients}</Text>
-                </div>
-              </Group>
+              <Text c="white" size="xs">Clients</Text>
+              <Text c="white" fw={700} size="xl">{stats.totalClients}</Text>
             </Card>
           </SimpleGrid>
         </Paper>
 
-        {/* Barre d'outils */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Flex justify="space-between" align="flex-end" wrap="wrap" gap="md">
-            <Group grow>
+        {/* Filtres + Recherche sur une seule ligne */}
+        <Card withBorder radius="lg" shadow="sm" p="xs">
+          <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
+            {/* Recherche */}
+            <Box style={{ width: 140 }}>
               <TextInput
-                placeholder="Rechercher par code, client, facture..."
-                leftSection={<IconSearch size={16} />}
+                placeholder="Rechercher..."
+                leftSection={<IconSearch size={12} />}
                 value={recherche}
                 onChange={(e) => { setRecherche(e.target.value); setCurrentPage(1); }}
-                size="md"
-                style={{ width: 300 }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
+            </Box>
+
+            {/* Client */}
+            <Box style={{ width: 130 }}>
               <Select
-                placeholder="Filtrer par client"
+                placeholder="Client"
                 data={clients}
                 value={clientFiltre}
                 onChange={setClientFiltre}
-                size="md"
-                style={{ width: 250 }}
+                size="xs"
                 clearable
                 searchable
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
-            </Group>
-            <Tooltip label="Imprimer la liste">
-              <Button
-                variant="light"
-                color="teal"
-                leftSection={<IconPrinter size={16} />}
-                onClick={handlePrintList}
+            </Box>
+
+            {/* Statut paiement */}
+            <Box style={{ width: 120 }}>
+              <Select
+                placeholder="Statut"
+                value={statutFiltre}
+                onChange={(value) => { setStatutFiltre(value); setCurrentPage(1); }}
+                data={[
+                  { value: 'payee', label: '✅ Payée' },
+                  { value: 'partielle', label: '🟠 Partielle' },
+                  { value: 'non_payee', label: '🔴 Non payée' }
+                ]}
+                size="xs"
+                clearable
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Date début */}
+            <Box style={{ width: 110 }}>
+              <TextInput
+                placeholder="Début"
+                type="date"
+                value={dateDebut}
+                onChange={(e) => { setDateDebut(e.target.value); setCurrentPage(1); }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Date fin */}
+            <Box style={{ width: 110 }}>
+              <TextInput
+                placeholder="Fin"
+                type="date"
+                value={dateFin}
+                onChange={(e) => { setDateFin(e.target.value); setCurrentPage(1); }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* BOUTONS D'ACTION */}
+            <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
+              <Button 
+                variant="light" 
+                color="teal" 
+                onClick={handlePrintList} 
+                size="xs"
+                leftSection={<IconPrinter size={12} />}
+                style={{ fontSize: '10px', padding: '4px 8px' }}
               >
-                Imprimer liste
+                Imprimer
               </Button>
-            </Tooltip>
-          </Flex>
+              <Button 
+                variant="light" 
+                color="red" 
+                onClick={resetFilters} 
+                size="xs" 
+                leftSection={<IconX size={12} />}
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Effacer
+              </Button>
+              <Text size="xs" c="dimmed">
+                {reglementsFiltres.length} règlement(s)
+              </Text>
+            </Group>
+          </Group>
         </Card>
 
         {/* Zone imprimable */}
@@ -413,7 +527,7 @@ const ListeReglements: React.FC = () => {
           <div style={{ textAlign: 'center', marginBottom: 20, display: 'none' }}>
             <Title order={2}>Liste des règlements</Title>
             <Text>Date d'impression: {format(new Date(), 'dd/MM/yyyy à HH:mm')}</Text>
-            <Text>Total: {reglementsFiltres.length} règlement(s) - Montant total: {formatMontant(stats.totalMontant)} FCFA</Text>
+            <Text>Total: {reglementsFiltres.length} règlement(s) - Montant total: {formatMontant(filteredStats.montant)} FCFA</Text>
           </div>
 
           {/* Tableau des règlements */}
@@ -422,20 +536,21 @@ const ListeReglements: React.FC = () => {
               <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
                 <Table.Thead>
                   <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                    <Table.Th c="white" w={60}>N°</Table.Th>
+                    <Table.Th c="white" w={50}>N°</Table.Th>
                     <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white">Nom du client</Table.Th>
-                    <Table.Th c="white" ta="right">Montant HT</Table.Th>
-                    <Table.Th c="white" ta="right">Montant versé</Table.Th>
+                    <Table.Th c="white">Client</Table.Th>
+                    <Table.Th c="white" ta="right">Total</Table.Th>
+                    <Table.Th c="white" ta="right">Versé</Table.Th>
                     <Table.Th c="white" ta="right">Cumul</Table.Th>
-                    <Table.Th c="white" ta="right">Reste à payer</Table.Th>
+                    <Table.Th c="white" ta="right">Reste</Table.Th>
+                    <Table.Th c="white" ta="center">Statut</Table.Th>
                     <Table.Th c="white" ta="center" className="no-print">Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {paginatedData.length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={8} align="center">
+                      <Table.Td colSpan={9} align="center">
                         <Stack align="center" py={50}>
                           <IconCash size={50} color="#ccc" />
                           <Text c="dimmed">Aucun règlement trouvé</Text>
@@ -448,7 +563,6 @@ const ListeReglements: React.FC = () => {
                   ) : (
                     paginatedData.map((reg, idx) => {
                       const num = (currentPage - 1) * itemsPerPage + idx + 1;
-                      const estReglee = isFactureReglee(reg.reste);
                       
                       return (
                         <Table.Tr key={reg.idReglement}>
@@ -465,27 +579,30 @@ const ListeReglements: React.FC = () => {
                                 {(reg.client_nom || 'C').charAt(0).toUpperCase()}
                               </Avatar>
                               <div>
-                                <Text fw={500} size="sm">{reg.client_nom || reg.client_societe || 'Client inconnu'}</Text>
+                                <Text fw={500} size="sm">{reg.client_nom || reg.client_societe || 'Client'}</Text>
                                 <Text size="xs" c="dimmed">{reg.code_facture}</Text>
                               </div>
                             </Group>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} size="sm">{formatMontant(reg.montant_total_facture)} FCFA</Text>
+                            <Text fw={600} size="sm">{formatMontant(reg.montant_total_facture)} F</Text>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} size="sm" c="green">{formatMontant(reg.montant)} FCFA</Text>
+                            <Text fw={600} size="sm" c="green">{formatMontant(reg.montant)} F</Text>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} size="sm">{formatMontant(reg.cumul)} FCFA</Text>
+                            <Text fw={600} size="sm">{formatMontant(reg.cumul)} F</Text>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Badge color={reg.reste <= 0 ? 'green' : 'orange'} variant="light" size="sm">
-                              {reg.reste <= 0 ? 'Soldé' : `${formatMontant(reg.reste)} FCFA`}
-                            </Badge>
+                            <Text fw={600} size="sm" c={reg.reste <= 0 ? 'green' : 'orange'}>
+                              {formatMontant(reg.reste)} F
+                            </Text>
+                          </Table.Td>
+                          <Table.Td ta="center">
+                            {getStatutBadge(reg.statut_paiement)}
                           </Table.Td>
                           <Table.Td ta="center" className="no-print">
-                            <Group gap={6} justify="center">
+                            <Group gap={4} justify="center">
                               <Tooltip label="Voir détails">
                                 <ActionIcon
                                   size="md"
@@ -497,8 +614,8 @@ const ListeReglements: React.FC = () => {
                                 </ActionIcon>
                               </Tooltip>
                               
-                              {!estReglee && (
-                                <Tooltip label={`Régler le solde (${formatMontant(reg.reste)} FCFA)`}>
+                              {reg.statut_paiement !== 'payee' && (
+                                <Tooltip label={`Régler`}>
                                   <ActionIcon
                                     size="md"
                                     color="green"
@@ -506,8 +623,7 @@ const ListeReglements: React.FC = () => {
                                     onClick={() => handleOpenReglement(
                                       reg.idFacture,
                                       reg.idClient,
-                                      reg.code_facture,
-                                      reg.client_nom || reg.client_societe
+                                      reg.code_facture
                                     )}
                                   >
                                     <IconCash size={16} />
@@ -523,16 +639,6 @@ const ListeReglements: React.FC = () => {
                                   onClick={() => handlePrintReçu(reg)}
                                 >
                                   <IconPrinter size={16} />
-                                </ActionIcon>
-                              </Tooltip>
-                              <Tooltip label="Exporter">
-                                <ActionIcon
-                                  size="md"
-                                  color="grape"
-                                  variant="light"
-                                  onClick={() => handleExport(reg)}
-                                >
-                                  <IconDownload size={16} />
                                 </ActionIcon>
                               </Tooltip>
                             </Group>
@@ -591,30 +697,22 @@ const ListeReglements: React.FC = () => {
                   <Text>{selectedReglement.code_facture}</Text>
                 </div>
                 <div>
-                  <Text size="xs" c="dimmed">Mode de règlement</Text>
+                  <Text size="xs" c="dimmed">Mode</Text>
                   <Badge>{selectedReglement.mode_reglement}</Badge>
                 </div>
                 <div>
-                  <Text size="xs" c="dimmed">Référence</Text>
-                  <Text>{selectedReglement.reference || '-'}</Text>
-                </div>
-                <div>
-                  <Text size="xs" c="dimmed">Montant versé</Text>
+                  <Text size="xs" c="dimmed">Montant</Text>
                   <Text fw={700} c="green">{formatMontant(selectedReglement.montant)} FCFA</Text>
                 </div>
                 <div>
-                  <Text size="xs" c="dimmed">Montant total facture</Text>
-                  <Text>{formatMontant(selectedReglement.montant_total_facture)} FCFA</Text>
+                  <Text size="xs" c="dimmed">Statut</Text>
+                  {getStatutBadge(selectedReglement.statut_paiement)}
                 </div>
                 <div>
-                  <Text size="xs" c="dimmed">Cumul versé</Text>
-                  <Text fw={600}>{formatMontant(selectedReglement.cumul)} FCFA</Text>
-                </div>
-                <div>
-                  <Text size="xs" c="dimmed">Reste à payer</Text>
-                  <Badge color={selectedReglement.reste <= 0 ? 'green' : 'orange'}>
-                    {selectedReglement.reste <= 0 ? 'Soldé' : `${Math.abs(selectedReglement.reste).toLocaleString()} FCFA`}
-                  </Badge>
+                  <Text size="xs" c="dimmed">Reste</Text>
+                  <Text fw={600} c={selectedReglement.reste <= 0 ? 'green' : 'orange'}>
+                    {formatMontant(selectedReglement.reste)} FCFA
+                  </Text>
                 </div>
               </SimpleGrid>
               {selectedReglement.observation && (

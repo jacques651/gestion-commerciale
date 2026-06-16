@@ -22,9 +22,9 @@ import {
   Avatar,
   Loader,
   Pagination,
-  TextInput
+  TextInput,
+  Box
 } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import '@mantine/dates/styles.css';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -36,17 +36,18 @@ import {
   IconPackage,
   IconRefresh,
   IconShoppingBag,
-  IconCalendar,
   IconAlertCircle,
   IconPlus,
   IconSearch,
-  IconFilter,
   IconCash,
   IconTrash,
   IconFileInvoice,
   IconEye,
   IconTruck,
-  IconBuildingStore
+  IconBuildingStore,
+  IconX,
+  IconList,
+  IconMoneybag
 } from '@tabler/icons-react';
 import { useCommandes } from '../../hooks/useCommandes';
 import { format } from 'date-fns';
@@ -80,7 +81,6 @@ interface CommandeComplete {
   details: CommandeDetail[];
 }
 
-// Interface pour le résultat de requête
 interface FactureRow {
   idFacture: number;
   code_facture: string;
@@ -94,8 +94,7 @@ export function ListeCommande() {
   const [selectedCommande, setSelectedCommande] = useState<CommandeComplete | null>(null);
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false);
   const [formulaireOpened, setFormulaireOpened] = useState(false);
-  
-  // États pour le règlement
+
   const [reglementModalOpened, setReglementModalOpened] = useState(false);
   const [reglementData, setReglementData] = useState({
     idFacture: 0,
@@ -105,12 +104,11 @@ export function ListeCommande() {
     clientNom: ''
   });
 
-  // États des filtres
   const [statusFilter, setStatusFilter] = useState<string | null>('all');
   const [typeFilter, setTypeFilter] = useState<string | null>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateDebut, setDateDebut] = useState<string | null>(null);
-  const [dateFin, setDateFin] = useState<string | null>(null);
+  const [dateDebut, setDateDebut] = useState<Date | null>(null);
+  const [dateFin, setDateFin] = useState<Date | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   const itemsPerPage = 10;
@@ -121,7 +119,6 @@ export function ListeCommande() {
     refresh
   } = useCommandes();
 
-  // Filtrer les commandes
   const filteredCommandes = useMemo(() => {
     let filtered = [...commandes];
 
@@ -168,8 +165,10 @@ export function ListeCommande() {
     montantTotal: commandes.reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
     livrees: commandes.filter(c => c.statut === 'LIVREE').length,
     revendeurs: commandes.filter(c => c.type_commande === 'REVENDEUR').length,
+    standards: commandes.filter(c => c.type_commande === 'STANDARD' || c.type_commande === null || c.type_commande === '').length,
     enCours: commandes.filter(c => c.statut === 'EN_COURS').length,
-    annulees: commandes.filter(c => c.statut === 'ANNULEE').length
+    annulees: commandes.filter(c => c.statut === 'ANNULEE').length,
+    confirmees: commandes.filter(c => c.statut === 'CONFIRMEE').length
   };
 
   const resetFilters = () => {
@@ -239,16 +238,13 @@ export function ListeCommande() {
     type_commande: string;
     NomComplet: string;
     code_facture?: string;
-    // idFacture in some places can be a string (from DB) or a number, accept both
     idFacture?: number | string;
     idFactureRevendeur?: number | string;
   }
 
-  // ✅ Correction du type de la fonction handleRegler
   const handleRegler = async (commande: CommandeReference) => {
     const db = await import('../../database/db').then(m => m.getDb());
-    
-    // Pour les commandes revendeur
+
     if (commande.type_commande === 'REVENDEUR') {
       notifications.show({
         title: 'Décompte revendeur',
@@ -257,18 +253,17 @@ export function ListeCommande() {
       });
       return;
     }
-    
-    // ✅ Typage correct de la variable result
+
     const result = await db.select<FactureRow[]>(`
       SELECT idFacture, code_facture, montant_ttc, COALESCE(montant_regle, 0) as montant_regle, statut
       FROM factures 
       WHERE idCommande = ?
     `, [commande.idCommande]);
-    
+
     if (result.length > 0) {
       const facture = result[0];
       const montantRestant = (facture.montant_ttc || 0) - (facture.montant_regle || 0);
-      
+
       if (montantRestant <= 0) {
         notifications.show({
           title: 'Information',
@@ -277,7 +272,7 @@ export function ListeCommande() {
         });
         return;
       }
-      
+
       setReglementData({
         idFacture: facture.idFacture,
         idClient: commande.idClient,
@@ -320,13 +315,13 @@ export function ListeCommande() {
     try {
       const { getDb } = await import('../../database/db');
       const db = await getDb();
-      
+
       let facture = await db.select<any[]>(`
         SELECT idFacture, code_facture, 'standard' as type
         FROM factures 
         WHERE idCommande = ?
       `, [commande.idCommande]);
-      
+
       if (facture.length === 0) {
         facture = await db.select<any[]>(`
           SELECT idFactureRevendeur as idFacture, code_facture, 'revendeur' as type
@@ -334,7 +329,7 @@ export function ListeCommande() {
           WHERE idCommande = ?
         `, [commande.idCommande]);
       }
-      
+
       if (facture.length > 0) {
         const f = facture[0];
         if (f.type === 'revendeur') {
@@ -370,7 +365,7 @@ export function ListeCommande() {
       case 'ANNULEE':
         return <Badge color="red" variant="light" size="sm">Annulée</Badge>;
       default:
-        return <Badge variant="light" size="sm">{statut}</Badge>;
+        return <Badge variant="light" size="sm">{statut || 'BROUILLON'}</Badge>;
     }
   };
 
@@ -428,192 +423,193 @@ export function ListeCommande() {
         {/* Cartes statistiques */}
         <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="white" variant="light" size="lg">
-                <IconShoppingBag size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Total commandes</Text>
-                <Text c="white" fw={700} size="xl">{stats.total}</Text>
-              </div>
+            <Group><ThemeIcon color="white" variant="light" size="lg"><IconShoppingBag size={20} /></ThemeIcon>
+              <div><Text c="white" size="xs">Total</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
             </Group>
           </Card>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="green" variant="light" size="lg">
-                <IconCheck size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Livrées</Text>
-                <Text c="white" fw={700} size="xl">{stats.livrees}</Text>
-              </div>
+            <Group><ThemeIcon color="green" variant="light" size="lg"><IconCheck size={20} /></ThemeIcon>
+              <div><Text c="white" size="xs">Confirmées</Text><Text c="white" fw={700} size="xl">{stats.confirmees}</Text></div>
             </Group>
           </Card>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="yellow" variant="light" size="lg">
-                <IconAlertCircle size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">En cours</Text>
-                <Text c="white" fw={700} size="xl">{stats.enCours}</Text>
-              </div>
+            <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconAlertCircle size={20} /></ThemeIcon>
+              <div><Text c="white" size="xs">En cours</Text><Text c="white" fw={700} size="xl">{stats.enCours}</Text></div>
             </Group>
           </Card>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="violet" variant="light" size="lg">
-                <IconPackage size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Revendeurs</Text>
-                <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
-              </div>
+            <Group><ThemeIcon color="blue" variant="light" size="lg"><IconTruck size={20} /></ThemeIcon>
+              <div><Text c="white" size="xs">Livrées</Text><Text c="white" fw={700} size="xl">{stats.livrees}</Text></div>
             </Group>
           </Card>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="yellow" variant="light" size="lg">
-                <IconReceipt size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Montant total</Text>
-                <Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text>
-              </div>
+            <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconReceipt size={20} /></ThemeIcon>
+              <div><Text c="white" size="xs">Montant total</Text><Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text></div>
             </Group>
           </Card>
         </SimpleGrid>
       </Paper>
 
-      {/* Barre de filtres */}
-      <Card withBorder radius="lg" shadow="sm" p="lg">
-        <Stack gap="md">
-          <Group justify="space-between">
-            <Group gap="xs">
-              <IconFilter size={20} color="#1b365d" />
-              <Title order={3} size="h4">Filtres</Title>
-            </Group>
-            <Button variant="light" onClick={resetFilters} size="xs" leftSection={<IconRefresh size={14} />}>
-              Réinitialiser
-            </Button>
-          </Group>
-
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+      {/* Filtres + Boutons sur une seule ligne */}
+      <Card withBorder radius="lg" shadow="sm" p="xs">
+        <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
+          {/* Recherche */}
+          <Box style={{ width: 130 }}>
             <TextInput
               placeholder="Rechercher..."
-              leftSection={<IconSearch size={16} />}
+              leftSection={<IconSearch size={12} />}
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
                 setCurrentPage(1);
               }}
+              size="xs"
+              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
             />
+          </Box>
+          
+          {/* Statut */}
+          <Box style={{ width: 100 }}>
             <Select
               placeholder="Statut"
-              label="Statut"
               value={statusFilter}
               onChange={(value) => {
                 setStatusFilter(value);
                 setCurrentPage(1);
               }}
               data={[
-                { value: 'all', label: 'Tous les statuts' },
+                { value: 'all', label: 'Tous' },
                 { value: 'CONFIRMEE', label: 'Confirmée' },
                 { value: 'EN_COURS', label: 'En cours' },
                 { value: 'LIVREE', label: 'Livrée' },
                 { value: 'ANNULEE', label: 'Annulée' }
               ]}
+              size="xs"
               clearable
+              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
             />
+          </Box>
+          
+          {/* Type */}
+          <Box style={{ width: 100 }}>
             <Select
               placeholder="Type"
-              label="Type"
               value={typeFilter}
               onChange={(value) => {
                 setTypeFilter(value);
                 setCurrentPage(1);
               }}
               data={[
-                { value: 'all', label: 'Tous les types' },
+                { value: 'all', label: 'Tous' },
                 { value: 'STANDARD', label: 'Standard' },
                 { value: 'REVENDEUR', label: 'Revendeur' }
               ]}
+              size="xs"
               clearable
+              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
             />
-            <DateInput
-              placeholder="Date début"
-              label="Date début"
-              value={dateDebut}
-              onChange={setDateDebut}
-              clearable
+          </Box>
+          
+          {/* Date début */}
+          <Box style={{ width: 110 }}>
+            <TextInput
+              placeholder="Début"
+              type="date"
+              value={dateDebut instanceof Date ? dateDebut.toISOString().split('T')[0] : ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                setDateDebut(val ? new Date(val) : null);
+              }}
+              size="xs"
+              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
             />
-            <DateInput
-              placeholder="Date fin"
-              label="Date fin"
-              value={dateFin}
-              onChange={setDateFin}
-              clearable
+          </Box>
+          
+          {/* Date fin */}
+          <Box style={{ width: 110 }}>
+            <TextInput
+              placeholder="Fin"
+              type="date"
+              value={dateFin instanceof Date ? dateFin.toISOString().split('T')[0] : ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                setDateFin(val ? new Date(val) : null);
+              }}
+              size="xs"
+              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
             />
-          </SimpleGrid>
-
-          <Text size="sm" c="dimmed" ta="right">
-            {filteredCommandes.length} commande(s) trouvée(s)
-          </Text>
-        </Stack>
-      </Card>
-
-      {/* Boutons d'accès aux autres pages */}
-      <Card withBorder radius="lg" shadow="sm" p="md">
-        <Group justify="center" gap="md">
-          <Button
-            variant="light"
-            color="blue"
-            leftSection={<IconBuildingStore size={18} />}
-            onClick={() => navigate('/commandes')}
-          >
-            Commandes Standard
-          </Button>
-          <Button
-            variant="light"
-            color="green"
-            leftSection={<IconTruck size={18} />}
-            onClick={() => navigate('/commandes-revendeur')}
-          >
-            Commandes Revendeurs
-          </Button>
-          <Button
-            variant="light"
-            color="orange"
-            leftSection={<IconFileInvoice size={18} />}
-            onClick={() => navigate('/factures')}
-          >
-            Factures Standard
-          </Button>
-          <Button
-            variant="light"
-            color="grape"
-            leftSection={<IconReceipt size={18} />}
-            onClick={() => navigate('/factures-revendeur')}
-          >
-            Factures Revendeurs
-          </Button>
+          </Box>
+          
+          {/* BOUTONS D'ACTION */}
+          <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
+            <Button 
+              leftSection={<IconList size={12} />} 
+              variant="filled" 
+              color="blue" 
+              onClick={() => navigate('/commandes')} 
+              size="xs"
+              style={{ fontSize: '10px', padding: '4px 8px' }}
+            >
+              Toutes
+            </Button>
+            <Button 
+              leftSection={<IconBuildingStore size={12} />} 
+              variant="light" 
+              color="cyan" 
+              onClick={() => navigate('/commandes/standard')} 
+              size="xs"
+              style={{ fontSize: '10px', padding: '4px 8px' }}
+            >
+              Standard
+            </Button>
+            <Button 
+              leftSection={<IconTruck size={12} />} 
+              variant="light" 
+              color="green" 
+              onClick={() => navigate('/commandes/revendeur')} 
+              size="xs"
+              style={{ fontSize: '10px', padding: '4px 8px' }}
+            >
+              Revendeurs
+            </Button>
+            <Button 
+              leftSection={<IconMoneybag size={12} />} 
+              variant="light" 
+              color="teal" 
+              onClick={() => navigate('/reglements')} 
+              size="xs"
+              style={{ fontSize: '10px', padding: '4px 8px' }}
+            >
+              Règlements
+            </Button>
+            <Button 
+              variant="light" 
+              color="red" 
+              onClick={resetFilters} 
+              size="xs" 
+              leftSection={<IconX size={12} />}
+              style={{ fontSize: '10px', padding: '4px 8px' }}
+            >
+              Effacer
+            </Button>
+          </Group>
         </Group>
       </Card>
 
       {/* Tableau des commandes */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
-        <ScrollArea h="calc(100vh - 500px)">
-          <Table striped highlightOnHover>
+        <ScrollArea h="calc(100vh - 480px)">
+          <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
             <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
               <Table.Tr>
-                <Table.Th c="white" w={60}>N°</Table.Th>
-                <Table.Th c="white">Nom du client</Table.Th>
-                <Table.Th c="white">Date de commande</Table.Th>
-                <Table.Th c="white">Type</Table.Th>
-                <Table.Th c="white" ta="right">Montant HT</Table.Th>
-                <Table.Th c="white">Code Facture</Table.Th>
-                <Table.Th c="white">Date Facture</Table.Th>
-                <Table.Th c="white" ta="center">Actions</Table.Th>
+                <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>N°</Table.Th>
+                <Table.Th c="white" style={{ width: 220, fontSize: '13px', fontWeight: 600 }}>Client</Table.Th>
+                <Table.Th c="white" style={{ width: 110, fontSize: '13px', fontWeight: 600 }}>Date</Table.Th>
+                <Table.Th c="white" style={{ width: 90, fontSize: '13px', fontWeight: 600 }}>Type</Table.Th>
+                <Table.Th c="white" style={{ width: 130, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>Montant HT</Table.Th>
+                <Table.Th c="white" style={{ width: 140, fontSize: '13px', fontWeight: 600 }}>Code Facture</Table.Th>
+                <Table.Th c="white" style={{ width: 110, fontSize: '13px', fontWeight: 600 }}>Date Facture</Table.Th>
+                <Table.Th c="white" style={{ width: 250, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -632,11 +628,11 @@ export function ListeCommande() {
               ) : (
                 paginatedCommandes.map((commande, index) => (
                   <Table.Tr key={commande.idCommande}>
-                    <Table.Td>
+                    <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
                     </Table.Td>
-                    <Table.Td>
-                      <Group gap="sm">
+                    <Table.Td style={{ verticalAlign: 'middle' }}>
+                      <Group gap="sm" wrap="nowrap">
                         <Avatar size="sm" radius="xl" color="blue">
                           {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
                         </Avatar>
@@ -648,98 +644,95 @@ export function ListeCommande() {
                         </div>
                       </Group>
                     </Table.Td>
-                    <Table.Td>
-                      <Group gap={4}>
-                        <IconCalendar size={12} color="#adb5bd" />
-                        <Text size="sm">
-                          {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
-                        </Text>
-                      </Group>
+                    <Table.Td style={{ verticalAlign: 'middle' }}>
+                      <Text size="sm">
+                        {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
+                      </Text>
                     </Table.Td>
-                    <Table.Td>
+                    <Table.Td style={{ verticalAlign: 'middle' }}>
                       <Badge
                         color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
                         variant="light"
                         size="sm"
-                        leftSection={getTypeIcon(commande.type_commande)}
+                        leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
                       >
-                        {getTypeLabel(commande.type_commande)}
+                        {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
                       </Badge>
                     </Table.Td>
-                    <Table.Td ta="right">
+                    <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
                       <Text fw={600} size="sm" c="blue">
                         {commande.montant_ht.toLocaleString('fr-FR')} FCFA
                       </Text>
                     </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" fw={500}>
+                    <Table.Td style={{ verticalAlign: 'middle' }}>
+                      <Text fw={500} size="sm" c={commande.code_facture ? 'green' : 'dimmed'}>
                         {commande.code_facture || '-'}
                       </Text>
                     </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">
+                    <Table.Td style={{ verticalAlign: 'middle' }}>
+                      <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
                         {commande.date_facture
                           ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
                           : '-'}
                       </Text>
                     </Table.Td>
-                    <Table.Td ta="center">
-                      <Group gap={4} justify="center">
+                    <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                      <Group gap="xs" justify="center" wrap="nowrap">
                         <Tooltip label="Voir détails">
                           <ActionIcon
-                            variant="light"
+                            variant="subtle"
                             color="blue"
                             size="md"
                             onClick={() => handleViewDetails(commande.idCommande)}
                           >
-                            <IconEye size={16} />
+                            <IconEye size={18} />
                           </ActionIcon>
                         </Tooltip>
 
                         {(commande.code_facture || commande.idFacture || commande.idFactureRevendeur) && (
                           <Tooltip label="Voir facture">
                             <ActionIcon
-                              variant="light"
+                              variant="subtle"
                               color="grape"
                               size="md"
                               onClick={() => handleVoirFacture(commande)}
                             >
-                              <IconFileInvoice size={16} />
+                              <IconFileInvoice size={18} />
                             </ActionIcon>
                           </Tooltip>
                         )}
 
                         <Tooltip label="Régler">
                           <ActionIcon
-                            variant="light"
+                            variant="subtle"
                             color="green"
                             size="md"
                             onClick={() => handleRegler(commande)}
                           >
-                            <IconCash size={16} />
+                            <IconCash size={18} />
                           </ActionIcon>
                         </Tooltip>
 
                         <Tooltip label="Supprimer">
                           <ActionIcon
-                            variant="light"
+                            variant="subtle"
                             color="red"
                             size="md"
                             onClick={() => handleDelete(commande.idCommande)}
                           >
-                            <IconTrash size={16} />
+                            <IconTrash size={18} />
                           </ActionIcon>
                         </Tooltip>
 
                         {!commande.code_facture && !commande.idFacture && !commande.idFactureRevendeur && (
                           <Tooltip label="Générer facture">
                             <ActionIcon
-                              variant="light"
+                              variant="subtle"
                               color="grape"
                               size="md"
                               onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
                             >
-                              <IconReceipt size={16} />
+                              <IconReceipt size={18} />
                             </ActionIcon>
                           </Tooltip>
                         )}

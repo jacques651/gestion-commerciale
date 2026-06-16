@@ -4,7 +4,7 @@ import {
   Table, TextInput, Button, Group, Badge, ActionIcon,
   Stack, Title, Card, Text, Tooltip, Pagination, Modal,
   ScrollArea, Paper, Flex, ThemeIcon, SimpleGrid, Avatar,
-  Loader, Alert, NumberInput, Divider, Select
+  Loader, Alert, NumberInput, Divider, Select, Grid
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -18,7 +18,7 @@ import { stockService } from '../../database/repositories/stockService';
 import { FormulaireProduit } from './FormulaireProduit';
 import { ModalImportProduits } from './ModalImportProduits';
 
-// Modal d'ajout de stock
+// Modal d'ajout de stock (inchangé)
 const ModalAjoutStock: React.FC<{
   opened: boolean;
   onClose: () => void;
@@ -207,11 +207,6 @@ export const ListeProduits: React.FC = () => {
 
   const formatMontant = (value: number): string => (value || 0).toLocaleString('fr-FR');
 
-  const getStockBadge = (stock: number, seuil: number = 10) => {
-    if (stock <= 0) return <Badge color="red" variant="filled" size="sm">Rupture</Badge>;
-    if (stock <= seuil) return <Badge color="orange" variant="light" size="sm">Stock bas ({stock})</Badge>;
-    return <Badge color="green" variant="light" size="sm">Stock OK ({stock})</Badge>;
-  };
 
   const handleDelete = async () => {
     if (productToDelete) {
@@ -328,7 +323,6 @@ export const ListeProduits: React.FC = () => {
           </Group>
         </Flex>
 
-        {/* Cartes statistiques - Version intégrée comme StockGlobal */}
         <SimpleGrid cols={{ base: 2, sm: 3, md: 6 }} spacing="md" mt="xl">
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
             <Group><ThemeIcon color="white" variant="light" size="lg"><IconPackage size={20} /></ThemeIcon><div><Text c="white" size="xs">Références</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div></Group>
@@ -361,55 +355,160 @@ export const ListeProduits: React.FC = () => {
         </Alert>
       )}
 
-      {/* Barre de recherche et boutons */}
+      {/* Barre de recherche, filtres et boutons sur une seule ligne */}
       <Card withBorder radius="lg" shadow="sm" p="md">
-        <Stack gap="md">
-          <TextInput
-            placeholder="Rechercher par nom ou code..."
-            leftSection={<IconSearch size={16} />}
-            value={searchTerm}
-            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            radius="md"
-            size="md"
-          />
-
-          <Flex gap="sm" wrap="wrap" align="center">
-            <Button variant={showFilters ? "filled" : "light"} color={showFilters ? "blue" : "gray"} leftSection={<IconFilter size={16} />} onClick={() => setShowFilters(!showFilters)} radius="md">
-              Filtres {showFilters && <Badge size="xs" circle ml={5} color="blue" />}
-            </Button>
-            <Button variant={showRuptureOnly ? "filled" : "light"} color={showRuptureOnly ? "red" : "gray"} leftSection={<IconAlertTriangle size={16} />} onClick={() => { setShowRuptureOnly(!showRuptureOnly); setCurrentPage(1); }} radius="md">
-              Rupture {stats.ruptureStock > 0 && !showRuptureOnly && <Badge size="xs" color="red" ml={5}>{stats.ruptureStock}</Badge>}
-            </Button>
-            <Button variant="outline" color="gray" leftSection={<IconClearAll size={16} />} onClick={resetFilters} radius="md">Réinitialiser</Button>
-            <Divider orientation="vertical" />
-            <Button variant="light" color="teal" leftSection={<IconUpload size={16} />} onClick={() => setImportModalOpen(true)} radius="md">Importer</Button>
-            <Button variant="light" color="green" leftSection={<IconFileExcel size={16} />} onClick={exportToExcel} radius="md">Exporter</Button>
-            <Button variant="light" color="indigo" leftSection={<IconPrinter size={16} />} onClick={handlePrint} radius="md">Imprimer</Button>
-            <Divider orientation="vertical" />
-            <Button variant="subtle" color="gray" leftSection={<IconRefresh size={16} />} onClick={loadProducts} radius="md">Actualiser</Button>
-            <Button variant="gradient" gradient={{ from: 'blue', to: 'cyan', deg: 90 }} leftSection={<IconPlus size={16} />} onClick={() => setModalOpened(true)} radius="md" style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>Nouveau produit</Button>
-          </Flex>
-
-          {/* Panneau des filtres */}
-          {showFilters && (
-            <Paper withBorder p="md" radius="md" mt="md" bg="gray.0">
-              <Stack gap="md">
-                <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-                  <Select label="Catégorie" placeholder="Toutes" data={categories.map(c => ({ value: c, label: c }))} value={categorieFiltre} onChange={setCategorieFiltre} clearable radius="md" />
-                  <Select label="Unité" placeholder="Toutes" data={unites.map(u => ({ value: u, label: u }))} value={uniteFiltre} onChange={setUniteFiltre} clearable radius="md" />
-                  <TextInput type="date" label="Date début" value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''} onChange={(e) => setDateDebut(e.target.value ? new Date(e.target.value) : null)} radius="md" />
-                  <TextInput type="date" label="Date fin" value={dateFin ? dateFin.toISOString().split('T')[0] : ''} onChange={(e) => setDateFin(e.target.value ? new Date(e.target.value) : null)} radius="md" />
-                  <NumberInput label="Stock min" placeholder="Min" value={stockMin || ''} onChange={(val) => setStockMin(val === '' ? null : Number(val))} min={0} radius="md" />
-                  <NumberInput label="Stock max" placeholder="Max" value={stockMax || ''} onChange={(val) => setStockMax(val === '' ? null : Number(val))} min={0} radius="md" />
-                </SimpleGrid>
-                <Divider />
-                <Group justify="flex-end"><Button size="xs" variant="outline" onClick={resetFilters} radius="xl">Tout effacer</Button></Group>
-              </Stack>
-            </Paper>
-          )}
+        <Grid  align="flex-end">
+          {/* Recherche */}
+          <Grid.Col span={2.5}>
+            <TextInput
+              placeholder="Rechercher..."
+              leftSection={<IconSearch size={16} />}
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              size="sm"
+            />
+          </Grid.Col>
           
-          <Text size="xs" c="dimmed">📊 {filteredProducts.length} produit(s) trouvé(s) sur {products.length}</Text>
-        </Stack>
+          {/* Filtre Catégorie */}
+          <Grid.Col span={1.5}>
+            <Select
+              placeholder="Catégorie"
+              data={categories.map(c => ({ value: c, label: c }))}
+              value={categorieFiltre}
+              onChange={setCategorieFiltre}
+              clearable
+              size="sm"
+            />
+          </Grid.Col>
+          
+          {/* Filtre Unité */}
+          <Grid.Col span={1.2}>
+            <Select
+              placeholder="Unité"
+              data={unites.map(u => ({ value: u, label: u }))}
+              value={uniteFiltre}
+              onChange={setUniteFiltre}
+              clearable
+              size="sm"
+            />
+          </Grid.Col>
+          
+          {/* Filtre Stock */}
+          <Grid.Col span={1.2}>
+            <Select
+              placeholder="Stock"
+              data={[
+                { value: 'all', label: 'Tous' },
+                { value: 'rupture', label: 'Rupture' },
+                { value: 'bas', label: 'Stock bas' },
+                { value: 'ok', label: 'Stock OK' }
+              ]}
+              value={showRuptureOnly ? 'rupture' : null}
+              onChange={(val) => {
+                setShowRuptureOnly(val === 'rupture');
+                setCurrentPage(1);
+              }}
+              clearable
+              size="sm"
+            />
+          </Grid.Col>
+          
+          {/* Boutons d'action */}
+          <Grid.Col span={3.6}>
+            <Group gap="xs" justify="flex-end">
+              <Button 
+                variant={showFilters ? "filled" : "light"} 
+                color={showFilters ? "blue" : "gray"} 
+                leftSection={<IconFilter size={14} />} 
+                onClick={() => setShowFilters(!showFilters)} 
+                size="sm"
+              >
+                Filtres
+              </Button>
+              <Tooltip label="Réinitialiser">
+                <ActionIcon variant="light" color="red" size="md" onClick={resetFilters}>
+                  <IconClearAll size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Divider orientation="vertical" />
+              <Tooltip label="Importer">
+                <ActionIcon variant="light" color="teal" size="md" onClick={() => setImportModalOpen(true)}>
+                  <IconUpload size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Exporter">
+                <ActionIcon variant="light" color="green" size="md" onClick={exportToExcel}>
+                  <IconFileExcel size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Imprimer">
+                <ActionIcon variant="light" color="indigo" size="md" onClick={handlePrint}>
+                  <IconPrinter size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Divider orientation="vertical" />
+              <Tooltip label="Actualiser">
+                <ActionIcon variant="light" color="gray" size="md" onClick={loadProducts}>
+                  <IconRefresh size={16} />
+                </ActionIcon>
+              </Tooltip>
+              <Button 
+                variant="gradient" 
+                gradient={{ from: 'blue', to: 'cyan', deg: 90 }} 
+                leftSection={<IconPlus size={14} />} 
+                onClick={() => setModalOpened(true)} 
+                size="sm"
+              >
+                Nouveau
+              </Button>
+            </Group>
+          </Grid.Col>
+        </Grid>
+
+        {/* Panneau des filtres avancés (affiché en dessous) */}
+        {showFilters && (
+          <Paper withBorder p="md" radius="md" mt="md" bg="gray.0">
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+              <TextInput 
+                type="date" 
+                label="Date début" 
+                value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''} 
+                onChange={(e) => setDateDebut(e.target.value ? new Date(e.target.value) : null)} 
+                size="xs" 
+              />
+              <TextInput 
+                type="date" 
+                label="Date fin" 
+                value={dateFin ? dateFin.toISOString().split('T')[0] : ''} 
+                onChange={(e) => setDateFin(e.target.value ? new Date(e.target.value) : null)} 
+                size="xs" 
+              />
+              <NumberInput 
+                label="Stock min" 
+                placeholder="Min" 
+                value={stockMin || ''} 
+                onChange={(val) => setStockMin(val === '' ? null : Number(val))} 
+                min={0} 
+                size="xs" 
+              />
+              <NumberInput 
+                label="Stock max" 
+                placeholder="Max" 
+                value={stockMax || ''} 
+                onChange={(val) => setStockMax(val === '' ? null : Number(val))} 
+                min={0} 
+                size="xs" 
+              />
+            </SimpleGrid>
+            <Group justify="flex-end" mt="md">
+              <Button size="xs" variant="outline" onClick={resetFilters}>Tout effacer</Button>
+            </Group>
+          </Paper>
+        )}
+        
+        <Text size="xs" c="dimmed" mt="xs">
+          📊 {filteredProducts.length} produit(s) trouvé(s) sur {products.length}
+        </Text>
       </Card>
 
       {/* Tableau des produits */}
@@ -432,19 +531,92 @@ export const ListeProduits: React.FC = () => {
             <Table.Tbody>
               {paginatedProducts.map((product) => (
                 <Table.Tr key={product.idProduit} style={product.qte_stock <= 0 ? { backgroundColor: '#fff5f5' } : {}}>
-                  <Table.Td><Text fw={600} size="sm">{product.code_produit}</Text></Table.Td>
-                  <Table.Td><Group gap="sm"><Avatar size="sm" radius="xl" color="blue"><IconCube size={14} /></Avatar><Text fw={500} size="sm">{product.designation}</Text></Group></Table.Td>
-                  <Table.Td><Badge variant="light" size="sm">{product.categorie || '-'}</Badge></Table.Td>
-                  <Table.Td><Text size="sm">{product.unite_base}</Text></Table.Td>
-                  <Table.Td ta="center">{getStockBadge(product.qte_stock, product.seuil_alerte)}</Table.Td>
-                  <Table.Td ta="right"><Text size="sm" c="dimmed">{formatMontant(product.prix_moyen_pondere || product.prix_achat_base)} F</Text></Table.Td>
-                  <Table.Td ta="right"><Text size="sm" fw={700} c="blue">{formatMontant(product.prix_vente_detail)} F</Text></Table.Td>
-                  <Table.Td ta="right"><Text size="sm" fw={600}>{(product.qte_stock * product.prix_vente_detail).toLocaleString()} F</Text></Table.Td>
+                  <Table.Td>
+                    <Text fw={600} size="sm">{product.code_produit}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap="sm">
+                      <Avatar size="sm" radius="xl" color="blue">
+                        <IconCube size={14} />
+                      </Avatar>
+                      <Text fw={500} size="sm">{product.designation}</Text>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge variant="light" size="sm">{product.categorie || '-'}</Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">{product.unite_base}</Text>
+                  </Table.Td>
+                  <Table.Td ta="center">
+                    {product.qte_stock <= 0 ? (
+                      <Badge color="red" variant="filled" size="sm">Rupture</Badge>
+                    ) : (
+                      <Badge 
+                        color={product.qte_stock <= (product.seuil_alerte || 10) ? 'orange' : 'green'} 
+                        variant="light" 
+                        size="sm"
+                      >
+                        {product.qte_stock}
+                      </Badge>
+                    )}
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="sm" c="dimmed">
+                      {formatMontant(product.prix_moyen_pondere || product.prix_achat_base)} F
+                    </Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="sm" fw={700} c="blue">
+                      {formatMontant(product.prix_vente_detail)} F
+                    </Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="sm" fw={600}>
+                      {(product.qte_stock * product.prix_vente_detail).toLocaleString()} F
+                    </Text>
+                  </Table.Td>
                   <Table.Td>
                     <Group gap={4} justify="center">
-                      <Tooltip label="Ajouter du stock"><ActionIcon color="blue" variant="light" size="md" onClick={() => { setSelectedProductForStock(product); setAjoutStockModalOpen(true); }}><IconPlus size={16} /></ActionIcon></Tooltip>
-                      <Tooltip label="Modifier"><ActionIcon color="yellow" variant="light" size="md" onClick={() => { setEditingProduct(product); setModalOpened(true); }}><IconEdit size={16} /></ActionIcon></Tooltip>
-                      <Tooltip label="Supprimer"><ActionIcon color="red" variant="light" size="md" onClick={() => { setProductToDelete(product); setDeleteModalOpen(true); }}><IconTrash size={16} /></ActionIcon></Tooltip>
+                      <Tooltip label="Ajouter du stock">
+                        <ActionIcon 
+                          color="blue" 
+                          variant="light" 
+                          size="md" 
+                          onClick={() => { 
+                            setSelectedProductForStock(product); 
+                            setAjoutStockModalOpen(true); 
+                          }}
+                        >
+                          <IconPlus size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Modifier">
+                        <ActionIcon 
+                          color="yellow" 
+                          variant="light" 
+                          size="md" 
+                          onClick={() => { 
+                            setEditingProduct(product); 
+                            setModalOpened(true); 
+                          }}
+                        >
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Supprimer">
+                        <ActionIcon 
+                          color="red" 
+                          variant="light" 
+                          size="md" 
+                          onClick={() => { 
+                            setProductToDelete(product); 
+                            setDeleteModalOpen(true); 
+                          }}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -452,8 +624,16 @@ export const ListeProduits: React.FC = () => {
             </Table.Tbody>
           </Table>
         </ScrollArea>
-        {filteredProducts.length === 0 && <Text ta="center" c="dimmed" py={60}>{showRuptureOnly ? '🎉 Aucun produit en rupture de stock !' : 'Aucun produit trouvé'}</Text>}
-        {totalPages > 1 && <Group justify="center" p="md"><Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} /></Group>}
+        {filteredProducts.length === 0 && (
+          <Text ta="center" c="dimmed" py={60}>
+            {showRuptureOnly ? '🎉 Aucun produit en rupture de stock !' : 'Aucun produit trouvé'}
+          </Text>
+        )}
+        {totalPages > 1 && (
+          <Group justify="center" p="md">
+            <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+          </Group>
+        )}
       </Card>
 
       {/* Modals */}

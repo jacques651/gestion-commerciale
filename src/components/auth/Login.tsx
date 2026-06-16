@@ -25,7 +25,7 @@ import { getDb } from "../../database/db";
 import { useAuth } from "../../contexts/AuthContext";
 
 const Login: React.FC = () => {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
 
   const [isFirstUser, setIsFirstUser] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,9 +39,35 @@ const Login: React.FC = () => {
     const checkUserTable = async () => {
       try {
         const db = await getDb();
-        const result = await db.select<any[]>("SELECT id FROM utilisateurs LIMIT 1");
+        
+        // Vérifier si la table users existe
+        const tables = await db.select<any[]>(`
+          SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+        `);
+        
+        if (tables.length === 0) {
+          console.log("🔧 Table users inexistante, création...");
+          await db.execute(`
+            CREATE TABLE users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              nom TEXT NOT NULL,
+              email TEXT UNIQUE NOT NULL,
+              mot_de_passe TEXT NOT NULL,
+              role TEXT DEFAULT 'utilisateur',
+              telephone TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          console.log("✅ Table users créée");
+          setIsFirstUser(true);
+          return;
+        }
+        
+        // Vérifier s'il y a des utilisateurs
+        const result = await db.select<any[]>("SELECT id FROM users LIMIT 1");
         console.log("Nombre d'utilisateurs:", result.length);
         setIsFirstUser(result.length === 0);
+        
       } catch (err) {
         console.error("Erreur vérification utilisateurs:", err);
         setIsFirstUser(true);
@@ -57,17 +83,52 @@ const Login: React.FC = () => {
 
     try {
       if (isFirstUser) {
-        await register(nom, loginValue, password, 'admin');
-        alert("Administrateur créé ! Connectez-vous maintenant.");
+        // Créer le premier utilisateur (admin)
+        const db = await getDb();
+        
+        // Vérifier si la table existe
+        const tables = await db.select<any[]>(`
+          SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+        `);
+        
+        if (tables.length === 0) {
+          await db.execute(`
+            CREATE TABLE users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              nom TEXT NOT NULL,
+              email TEXT UNIQUE NOT NULL,
+              mot_de_passe TEXT NOT NULL,
+              role TEXT DEFAULT 'utilisateur',
+              telephone TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+        }
+        
+        // Insérer l'admin
+        await db.execute(
+          `INSERT INTO users (nom, email, mot_de_passe, role, telephone) 
+           VALUES (?, ?, ?, ?, ?)`,
+          [nom || 'Administrateur', loginValue, password, 'admin', '']
+        );
+        
+        alert("✅ Administrateur créé avec succès !\n\nIdentifiants:\n👤 " + loginValue + "\n🔑 " + password);
         setIsFirstUser(false);
         setPassword("");
         setNom("");
         setLoginValue("");
+        
+        // Reconnecter automatiquement
+        const success = await login(loginValue, password);
+        if (!success) setError("Erreur lors de la connexion automatique. Veuillez vous reconnecter.");
+        
       } else {
+        // Connexion normale
         const success = await login(loginValue, password);
         if (!success) setError("Identifiants incorrects.");
       }
     } catch (err: any) {
+      console.error("Erreur:", err);
       setError("Erreur : " + err.message);
     } finally {
       setLoading(false);
@@ -75,10 +136,17 @@ const Login: React.FC = () => {
   };
 
   const handleReset = async () => {
-    const db = await getDb();
-    await db.execute("DELETE FROM utilisateurs");
-    alert("Base vidée, redémarrez l'application");
-    window.location.reload();
+    if (!confirm("⚠️ Voulez-vous vraiment supprimer tous les utilisateurs ?")) return;
+    
+    try {
+      const db = await getDb();
+      await db.execute("DELETE FROM users");
+      alert("✅ Base vidée. L'application va redémarrer.");
+      window.location.reload();
+    } catch (err) {
+      alert("❌ Erreur lors de la réinitialisation");
+      console.error(err);
+    }
   };
 
   if (isFirstUser === null) {
@@ -114,7 +182,9 @@ const Login: React.FC = () => {
               {isFirstUser ? "Configuration Initiale" : "Connexion"}
             </Title>
             <Text size="sm" c="dimmed" ta="center">
-              {isFirstUser ? "Créez le compte administrateur pour commencer" : "Connectez-vous à votre compte"}
+              {isFirstUser 
+                ? "Créez le compte administrateur pour commencer" 
+                : "Connectez-vous à votre compte"}
             </Text>
           </Stack>
 
@@ -140,22 +210,24 @@ const Login: React.FC = () => {
 
               <TextInput
                 label="Identifiant"
-                placeholder="Nom d'utilisateur"
+                placeholder={isFirstUser ? "Nom d'utilisateur (ex: admin)" : "Nom d'utilisateur"}
                 value={loginValue}
                 onChange={(e) => setLoginValue(e.target.value)}
                 leftSection={<IconUserCircle size={16} />}
                 size="md"
                 required
+                autoComplete="username"
               />
 
               <PasswordInput
                 label="Mot de passe"
-                placeholder="Votre mot de passe"
+                placeholder={isFirstUser ? "Choisissez un mot de passe fort" : "Votre mot de passe"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 leftSection={<IconLock size={16} />}
                 size="md"
                 required
+                autoComplete="current-password"
               />
 
               <Button
@@ -170,14 +242,17 @@ const Login: React.FC = () => {
                 {loading ? "Traitement..." : (isFirstUser ? "Créer l'administrateur" : "Se connecter")}
               </Button>
 
-              <Button
-                variant="subtle"
-                size="xs"
-                fullWidth
-                onClick={handleReset}
-              >
-                🛠️ Réinitialiser (admin)
-              </Button>
+              {!isFirstUser && (
+                <Button
+                  variant="subtle"
+                  size="xs"
+                  fullWidth
+                  onClick={handleReset}
+                  color="red"
+                >
+                  🛠️ Réinitialiser (admin)
+                </Button>
+              )}
             </Stack>
           </form>
 

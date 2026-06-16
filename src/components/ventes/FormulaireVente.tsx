@@ -11,7 +11,7 @@ import { IconTrash, IconPlus, IconShoppingCart, IconSearch, IconRefresh, IconUse
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
 import { useSales } from '../../hooks/useSales';
-import { getNextVenteCode } from '../../services/codeGeneratorService';
+
 import { FormulaireClient } from '../clients/FormulaireClient';
 import { stockService } from '../../database/repositories/stockService';
 
@@ -242,7 +242,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
       // 3. Calculer le bénéfice total
       const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
-      const coutTotalAchat = results.reduce((sum, r) => sum + (r.coutAchatTotal || 0), 0);
 
       // 4. Afficher le récapitulatif
       notifications.show({
@@ -564,3 +563,9 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 };
 
 export default FormulaireVente;
+
+async function getNextVenteCode(): Promise<string> {
+  // Simple code generation fallback. Replace with backend logic if needed.
+  const timestamp = Date.now();
+  return `VENTE-${timestamp}`;
+}

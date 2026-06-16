@@ -1,22 +1,31 @@
 // src/components/factures/DetailFactureRevendeur.tsx
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader, Center, Text } from '@mantine/core';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Loader, Center, Text, Button, Group, Paper, ThemeIcon, Box } from '@mantine/core';
+import { IconArrowLeft, IconTruck } from '@tabler/icons-react';
 import { FactureRevendeur } from './FactureRevendeur';
 import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 
 export default function DetailFactureRevendeur() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [facture, setFacture] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadFacture = async () => {
       try {
+        setError(null);
         const data = await factureRevendeurRepository.getById(Number(id));
-        setFacture(data);
+        if (!data) {
+          setError('Facture revendeur non trouvée');
+        } else {
+          setFacture(data);
+        }
       } catch (error) {
         console.error('Erreur:', error);
+        setError('Erreur lors du chargement de la facture revendeur');
       } finally {
         setLoading(false);
       }
@@ -32,14 +41,49 @@ export default function DetailFactureRevendeur() {
     );
   }
 
-  if (!facture) {
+  if (error || !facture) {
     return (
       <Center py={100}>
-        <Text>Facture revendeur non trouvée</Text>
+        <Paper p="xl" withBorder ta="center" style={{ maxWidth: 400 }}>
+          <ThemeIcon size={60} radius="xl" color="red" variant="light" mx="auto">
+            <IconTruck size={30} />
+          </ThemeIcon>
+          <Text size="lg" mt="md" fw={600}>{error || 'Facture revendeur non trouvée'}</Text>
+          <Text size="sm" c="dimmed" mb="md">
+            La facture revendeur que vous recherchez n'existe pas ou a été supprimée.
+          </Text>
+          <Button onClick={() => navigate('/factures-revendeur')} variant="light" leftSection={<IconArrowLeft size={16} />}>
+            Retour aux factures revendeurs
+          </Button>
+        </Paper>
       </Center>
     );
   }
 
-  // ✅ Utiliser le composant FactureRevendeur avec le design complet
-  return <FactureRevendeur facture={facture} />;
+  return (
+    <Box>
+      {/* En-tête avec bouton retour */}
+      <Paper p="md" radius={0} style={{ backgroundColor: '#f8f9fa', borderBottom: '1px solid #e9ecef' }} className="no-print">
+        <Group justify="space-between" align="center">
+          <Button
+            variant="light"
+            onClick={() => navigate('/factures-revendeur')}
+            leftSection={<IconArrowLeft size={16} />}
+            size="sm"
+          >
+            Retour
+          </Button>
+          <Group gap="xs">
+            <ThemeIcon size="sm" color="green" variant="light">
+              <IconTruck size={14} />
+            </ThemeIcon>
+            <Text size="sm" c="dimmed">Facture revendeur</Text>
+          </Group>
+        </Group>
+      </Paper>
+      
+      {/* Contenu de la facture */}
+      <FactureRevendeur facture={facture} />
+    </Box>
+  );
 }

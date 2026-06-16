@@ -13,7 +13,6 @@ import {
   SimpleGrid,
   Text,
   Divider,
-  ThemeIcon,
   Tooltip,
   ActionIcon
 } from '@mantine/core';
@@ -24,16 +23,13 @@ import {
   IconScale,
   IconBuildingStore,
   IconShoppingCart,
-  IconAlertCircle,
-  IconRefresh,
-  IconInfoCircle,
   IconPlus,
   IconCoin,
   IconCash
 } from '@tabler/icons-react';
 import { useProducts } from '../../hooks/useProducts';
 import { CreateProductInput } from '../../database/repositories/productRepository';
-import { getNextProductCode } from '../../services/codeGeneratorService';
+
 
 interface FormulaireProduitProps {
   opened: boolean;
@@ -41,7 +37,6 @@ interface FormulaireProduitProps {
   editProduct?: any;
 }
 
-// Gestionnaire de catégories et unités
 const useDynamicOptions = () => {
   const [categories, setCategories] = useState<string[]>([
     'Téléphone Simple', 'Smartphone', 'Accessoire', 'Informatique',
@@ -53,7 +48,6 @@ const useDynamicOptions = () => {
     'pièce', 'kg', 'litre', 'mètre', 'boîte', 'carton', 'lot', 'paire'
   ]);
 
-  // Charger depuis localStorage
   useEffect(() => {
     const savedCategories = localStorage.getItem('custom_categories');
     const savedUnites = localStorage.getItem('custom_unites');
@@ -113,11 +107,11 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
     qte_stock: 0,
   });
 
-  // Calcul automatique du prix de vente détail (Prix achat + Marge fixe)
+  // 🔥 Calcul des prix de vente
   const prixVenteCalcule = formData.prix_achat_base + formData.commission_pourcentage;
   const prixGrosCalcule = Math.round(prixVenteCalcule * 0.9);
 
-  // Mettre à jour automatiquement les prix quand prix achat ou marge change
+  // 🔥 Mettre à jour les prix de vente quand le prix d'achat ou la marge changent
   useEffect(() => {
     if (!editProduct) {
       setFormData(prev => ({
@@ -128,6 +122,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
     }
   }, [formData.prix_achat_base, formData.commission_pourcentage]);
 
+  // 🔥 Générer automatiquement le code produit au format PROD-XXXX
   useEffect(() => {
     const generateCode = async () => {
       if (!editProduct && !formData.code_produit && opened) {
@@ -137,6 +132,8 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
           setFormData(prev => ({ ...prev, code_produit: code }));
         } catch (error) {
           console.error('Erreur génération code:', error);
+          // Fallback: utiliser un code temporaire
+          setFormData(prev => ({ ...prev, code_produit: `PROD-${Date.now().toString().slice(-4)}` }));
         } finally {
           setGeneratingCode(false);
         }
@@ -145,6 +142,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
     generateCode();
   }, [editProduct, opened, formData.code_produit]);
 
+  // 🔥 Remplir le formulaire pour l'édition
   useEffect(() => {
     if (editProduct) {
       setFormData({
@@ -221,260 +219,185 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
       <Modal
         opened={opened}
         onClose={onClose}
+        size="lg"
+        padding="md"
+        centered
+        radius="lg"
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 700 },
+          body: { padding: '20px' }
+        }}
         title={
           <Group gap="sm">
-            <IconPackage size={24} color="#228be6" />
+            <IconPackage size={22} color="white" />
             <div>
-              <Text fw={700} size="lg">{editProduct ? 'Modifier le produit' : 'Nouveau produit'}</Text>
-              <Text size="xs" c="dimmed">
+              <Text fw={700} size="md" c="white">{editProduct ? 'Modifier le produit' : 'Nouveau produit'}</Text>
+              <Text size="xs" opacity={0.7} c="white">
                 {editProduct ? 'Modifiez les informations du produit' : 'Créez un nouveau produit dans le catalogue'}
               </Text>
             </div>
           </Group>
         }
-        size="lg"
-        padding="md"
-        centered
-        radius="lg"
       >
         <LoadingOverlay visible={generatingCode} />
         
         <form onSubmit={handleSubmit}>
           <Stack gap="md">
-            {/* Section Informations générales */}
-            <Card withBorder radius="md" p="md" shadow="sm">
-              <Group gap="xs" mb="md">
-                <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
-                  <IconInfoCircle size={14} />
-                </ThemeIcon>
-                <Text fw={600} size="sm">Informations générales</Text>
-              </Group>
-              
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                <TextInput
-                  label="Code produit"
-                  placeholder="Généré automatiquement"
-                  value={formData.code_produit}
-                  readOnly
-                  disabled
-                  size="md"
-                  leftSection={<IconTag size={16} />}
-                  styles={{ input: { backgroundColor: '#f5f5f5', fontFamily: 'monospace', fontWeight: 600 } }}
-                  required
-                />
-                <Group align="flex-end" gap="xs">
-                  <Select
-                    label="Catégorie"
-                    placeholder="Sélectionnez une catégorie"
-                    data={categories}
-                    value={formData.categorie}
-                    onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
-                    required
-                    size="md"
-                    searchable
-                    leftSection={<IconCategory size={16} />}
-                    style={{ flex: 1 }}
-                  />
-                  <Tooltip label="Nouvelle catégorie">
-                    <ActionIcon 
-                      size="md" 
-                      variant="light" 
-                      color="blue" 
-                      mt={22}
-                      onClick={() => setCategoryModalOpen(true)}
-                    >
-                      <IconPlus size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
-              </SimpleGrid>
-
+            {/* Code produit et Catégorie */}
+            <SimpleGrid cols={2} spacing="md">
               <TextInput
-                label="Désignation"
-                placeholder="Nom du produit"
-                value={formData.designation}
-                onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                required
-                size="md"
-                mt="md"
-                leftSection={<IconPackage size={16} />}
+                label="Code produit"
+                value={formData.code_produit}
+                readOnly
+                disabled
+                size="sm"
+                leftSection={<IconTag size={14} />}
+                styles={{ input: { backgroundColor: '#f5f5f5', fontFamily: 'monospace' } }}
+                description="Format: PROD-XXXX (généré automatiquement)"
               />
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="md">
-                <Group align="flex-end" gap="xs">
-                  <Select
-                    label="Unité de mesure"
-                    data={unites}
-                    value={formData.unite_base}
-                    onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
-                    size="md"
-                    leftSection={<IconScale size={16} />}
-                    style={{ flex: 1 }}
-                  />
-                  <Tooltip label="Nouvelle unité">
-                    <ActionIcon 
-                      size="md" 
-                      variant="light" 
-                      color="blue" 
-                      mt={22}
-                      onClick={() => setUniteModalOpen(true)}
-                    >
-                      <IconPlus size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
-                <NumberInput
-                  label="Stock initial"
-                  description="Quantité initiale en stock"
-                  placeholder="0"
-                  value={formData.qte_stock}
-                  onChange={(value) => setFormData({ ...formData, qte_stock: Number(value) || 0 })}
-                  min={0}
-                  size="md"
-                  leftSection={<IconBuildingStore size={16} />}
-                />
-              </SimpleGrid>
-            </Card>
-
-            {/* Section Prix et Marges */}
-            <Card withBorder radius="md" p="md" shadow="sm">
-              <Group gap="xs" mb="md">
-                <ThemeIcon size="sm" radius="xl" color="green" variant="light">
-                  <IconShoppingCart size={14} />
-                </ThemeIcon>
-                <Text fw={600} size="sm">Prix et marges</Text>
-              </Group>
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                <NumberInput
-                  label="💰 Prix d'achat (F CFA)"
-                  placeholder="0"
-                  value={formData.prix_achat_base}
-                  onChange={(value) => setFormData({ ...formData, prix_achat_base: Number(value) || 0 })}
-                  min={0}
-                  step={100}
-                  size="md"
-                  leftSection={<IconCash size={16} />}
+              <Group align="flex-end" gap="xs">
+                <Select
+                  label="Catégorie"
+                  placeholder="Sélectionner"
+                  data={categories}
+                  value={formData.categorie}
+                  onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
                   required
+                  size="sm"
+                  searchable
+                  leftSection={<IconCategory size={14} />}
+                  style={{ flex: 1 }}
                 />
-                <NumberInput
-                  label="📈 Marge fixe (F CFA)"
-                  description="Sera ajoutée au prix d'achat"
-                  value={formData.commission_pourcentage}
-                  onChange={(value) => setFormData({ ...formData, commission_pourcentage: Number(value) || 0 })}
-                  min={0}
-                  step={100}
-                  size="md"
-                  leftSection={<IconCoin size={16} />}
-                />
-              </SimpleGrid>
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="md">
-                <NumberInput
-                  label="💵 Prix vente détail (F CFA)"
-                  value={prixVenteCalcule}
-                  readOnly
-                  size="md"
-                  leftSection={<IconShoppingCart size={16} />}
-                  styles={{ input: { backgroundColor: '#f0f9f0', fontWeight: 600, color: '#228be6' } }}
-                />
-                <NumberInput
-                  label="🏪 Prix vente gros (F CFA)"
-                  value={prixGrosCalcule}
-                  readOnly
-                  size="md"
-                  leftSection={<IconBuildingStore size={16} />}
-                  styles={{ input: { backgroundColor: '#f5f5f5', fontWeight: 500 } }}
-                />
-              </SimpleGrid>
-
-              {/* Affichage de la marge */}
-              {formData.prix_achat_base > 0 && (
-                <Card withBorder radius="md" mt="md" p="xs" bg={margeUnitaire > 0 ? 'green.0' : 'red.0'}>
-                  <SimpleGrid cols={3} spacing="md">
-                    <div>
-                      <Text size="xs" c="dimmed">Marge unitaire</Text>
-                      <Text fw={700} size="sm" c={margeUnitaire > 0 ? 'green' : 'red'}>
-                        {margeUnitaire > 0 ? '+' : ''}{margeUnitaire.toLocaleString()} F
-                      </Text>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed">Marge (%)</Text>
-                      <Text fw={700} size="sm" c={margePourcentage > 0 ? 'green' : 'red'}>
-                        {margePourcentage.toFixed(1)}%
-                      </Text>
-                    </div>
-                    <div>
-                      <Text size="xs" c="dimmed">Marge fixe</Text>
-                      <Text fw={700} size="sm" c="blue">
-                        {formData.commission_pourcentage?.toLocaleString()} F
-                      </Text>
-                    </div>
-                  </SimpleGrid>
-                </Card>
-              )}
-
-              <NumberInput
-                label="⚠️ Seuil d'alerte stock"
-                description="Alerte quand stock en dessous"
-                placeholder="10"
-                value={formData.seuil_alerte}
-                onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
-                min={0}
-                size="md"
-                mt="md"
-                leftSection={<IconAlertCircle size={16} />}
-              />
-            </Card>
-
-            {/* Note explicative */}
-            <Card withBorder radius="md" p="xs" bg="blue.0">
-              <Group gap="xs">
-                <IconInfoCircle size={16} color="#228be6" />
-                <Text size="xs" c="dimmed">
-                  💡 <strong>Prix vente = Prix achat + Marge fixe</strong> (calcul automatique)
-                </Text>
+                <Tooltip label="Nouvelle catégorie">
+                  <ActionIcon size="sm" variant="light" mt={22} onClick={() => setCategoryModalOpen(true)}>
+                    <IconPlus size={14} />
+                  </ActionIcon>
+                </Tooltip>
               </Group>
-            </Card>
+            </SimpleGrid>
 
-            {/* Boutons d'action */}
+            <TextInput
+              label="Désignation"
+              placeholder="Nom du produit"
+              value={formData.designation}
+              onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
+              required
+              size="sm"
+              leftSection={<IconPackage size={14} />}
+            />
+
+            <SimpleGrid cols={2} spacing="md">
+              <Group align="flex-end" gap="xs">
+                <Select
+                  label="Unité"
+                  data={unites}
+                  value={formData.unite_base}
+                  onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
+                  size="sm"
+                  leftSection={<IconScale size={14} />}
+                  style={{ flex: 1 }}
+                />
+                <Tooltip label="Nouvelle unité">
+                  <ActionIcon size="sm" variant="light" mt={22} onClick={() => setUniteModalOpen(true)}>
+                    <IconPlus size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+              <NumberInput
+                label="Stock initial"
+                value={formData.qte_stock}
+                onChange={(value) => setFormData({ ...formData, qte_stock: Number(value) || 0 })}
+                min={0}
+                size="sm"
+                leftSection={<IconBuildingStore size={14} />}
+              />
+            </SimpleGrid>
+
+            <Divider label="Prix et marges" labelPosition="center" />
+
+            <SimpleGrid cols={2} spacing="md">
+              <NumberInput
+                label="Prix d'achat (FCFA)"
+                value={formData.prix_achat_base}
+                onChange={(value) => setFormData({ ...formData, prix_achat_base: Number(value) || 0 })}
+                min={0}
+                step={100}
+                size="sm"
+                leftSection={<IconCash size={14} />}
+                required
+              />
+              <NumberInput
+                label="Marge fixe (FCFA)"
+                value={formData.commission_pourcentage}
+                onChange={(value) => setFormData({ ...formData, commission_pourcentage: Number(value) || 0 })}
+                min={0}
+                step={100}
+                size="sm"
+                leftSection={<IconCoin size={14} />}
+              />
+            </SimpleGrid>
+
+            <SimpleGrid cols={2} spacing="md">
+              <NumberInput
+                label="Prix vente détail"
+                value={prixVenteCalcule}
+                readOnly
+                size="sm"
+                leftSection={<IconShoppingCart size={14} />}
+                styles={{ input: { backgroundColor: '#e8f5e9', fontWeight: 600, color: '#2e7d32' } }}
+              />
+              <NumberInput
+                label="Prix vente gros"
+                value={prixGrosCalcule}
+                readOnly
+                size="sm"
+                leftSection={<IconBuildingStore size={14} />}
+                styles={{ input: { backgroundColor: '#f5f5f5' } }}
+              />
+            </SimpleGrid>
+
+            {/* Marge */}
+            {formData.prix_achat_base > 0 && (
+              <SimpleGrid cols={3} spacing="sm">
+                <Card p="xs" withBorder>
+                  <Text size="xs" c="dimmed">Marge unitaire</Text>
+                  <Text fw={700} size="sm" c="green">{margeUnitaire.toLocaleString()} F</Text>
+                </Card>
+                <Card p="xs" withBorder>
+                  <Text size="xs" c="dimmed">Marge (%)</Text>
+                  <Text fw={700} size="sm">{margePourcentage.toFixed(1)}%</Text>
+                </Card>
+                <Card p="xs" withBorder>
+                  <Text size="xs" c="dimmed">Seuil alerte</Text>
+                  <NumberInput
+                    size="xs"
+                    value={formData.seuil_alerte}
+                    onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
+                    min={0}
+                    hideControls
+                  />
+                </Card>
+              </SimpleGrid>
+            )}
+
             <Divider />
-            
+
             <Group justify="flex-end" gap="sm">
-              <Button 
-                variant="outline" 
-                onClick={onClose} 
-                size="md"
-                leftSection={<IconRefresh size={16} />}
-              >
-                Annuler
-              </Button>
-              <Button 
-                type="submit" 
-                loading={loading} 
-                size="md"
-                color={editProduct ? 'blue' : 'green'}
-                leftSection={<IconPackage size={16} />}
-              >
-                {editProduct ? 'Mettre à jour' : 'Créer le produit'}
+              <Button variant="outline" onClick={onClose} size="sm">Annuler</Button>
+              <Button type="submit" loading={loading} size="sm" color={editProduct ? 'blue' : 'green'}>
+                {editProduct ? 'Mettre à jour' : 'Créer'}
               </Button>
             </Group>
           </Stack>
         </form>
       </Modal>
 
-      {/* Modal d'ajout de catégorie */}
-      <Modal
-        opened={categoryModalOpen}
-        onClose={() => setCategoryModalOpen(false)}
-        title="Nouvelle catégorie"
-        size="sm"
-        centered
-        padding="md"
-      >
+      {/* Modal nouvelle catégorie */}
+      <Modal opened={categoryModalOpen} onClose={() => setCategoryModalOpen(false)} title="Nouvelle catégorie" size="sm" centered padding="md">
         <Stack>
           <TextInput
-            label="Nom de la catégorie"
+            label="Nom"
             placeholder="Ex: Électroménager"
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
@@ -487,19 +410,12 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
         </Stack>
       </Modal>
 
-      {/* Modal d'ajout d'unité */}
-      <Modal
-        opened={uniteModalOpen}
-        onClose={() => setUniteModalOpen(false)}
-        title="Nouvelle unité"
-        size="sm"
-        centered
-        padding="md"
-      >
+      {/* Modal nouvelle unité */}
+      <Modal opened={uniteModalOpen} onClose={() => setUniteModalOpen(false)} title="Nouvelle unité" size="sm" centered padding="md">
         <Stack>
           <TextInput
-            label="Nom de l'unité"
-            placeholder="Ex: douzaine, centaine"
+            label="Nom"
+            placeholder="Ex: douzaine"
             value={newUnite}
             onChange={(e) => setNewUnite(e.target.value)}
             size="sm"
@@ -515,3 +431,8 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
 };
 
 export default FormulaireProduit;
+
+async function getNextProductCode(): Promise<string> {
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `PROD-${randomSuffix}`;
+}

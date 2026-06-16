@@ -13,6 +13,7 @@ import '@mantine/notifications/styles.css';
 // ==================== FACTURES DÉTAILS (imports directs car utilisés dans les routes) ====================
 import DetailFacture from './components/factures/DetailFacture';
 import DetailFactureRevendeur from './components/factures/DetailFactureRevendeur';
+import ListeCommandes from './components/commandes/ListeCommandes';
 
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
@@ -24,12 +25,12 @@ const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const ListeClients = lazy(() => import('./components/clients/ListeClients'));
 const ListeFactures = lazy(() => import('./components/factures/ListeFactures'));
 const ListeVentes = lazy(() => import('./components/ventes/ListeVentes'));
-const ListeCommandes = lazy(() => import('./components/commandes/ListeCommandes').then(module => ({ default: module.ListeCommande })));
+
+const ListeCommandeStandard = lazy(() => import('./components/commandes/ListeCommandeStandard'));
+const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
 const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireCommande'));
 
 // ==================== REVENDEURS ====================
-// Some commande-related components are exported from the main ListeCommandes file
-const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandes').then(module => ({ default: (module as any).ListeCommandesRevendeur || (module as any).ListeCommande })));
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
@@ -159,8 +160,6 @@ function NouveauDecompteWrapper() {
   );
 }
 
-// Wrapper pour PrintRecuDecompte avec useParams (handled inside Routes)
-
 // ==================== APP AUTHENTIFIÉE ====================
 function AuthenticatedApp() {
   const { user, logout, isAuthenticated, loading } = useAuth();
@@ -223,19 +222,38 @@ function AuthenticatedApp() {
                 <ListeClients />
               </RouteGuard>
             } />
+            
+            {/* Commandes */}
             <Route path="/commandes" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeCommandes />
               </RouteGuard>
             } />
-            <Route path="/commandes/nouveau" element={
+            <Route path="/commandes/standard" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
-                <FormulaireCommande opened={true} onClose={() => { }} />
+                <ListeCommandeStandard />
               </RouteGuard>
             } />
+            <Route path="/commandes/revendeur" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <ListeCommandesRevendeur />
+              </RouteGuard>
+            } />
+            <Route path="/commandes/nouveau" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <FormulaireCommande opened={true} onClose={() => {}} />
+              </RouteGuard>
+            } />
+            
+            {/* Factures */}
             <Route path="/factures" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <ListeFactures />
+              </RouteGuard>
+            } />
+            <Route path="/factures-revendeur" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <ListeFacturesRevendeur />
               </RouteGuard>
             } />
 
@@ -245,7 +263,6 @@ function AuthenticatedApp() {
                 <DetailFacture />
               </RouteGuard>
             } />
-
             <Route path="/factures-revendeur/:id" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
                 <DetailFactureRevendeur />
@@ -269,11 +286,6 @@ function AuthenticatedApp() {
                 <ListeCommandesRevendeur />
               </RouteGuard>
             } />
-            <Route path="/factures-revendeur" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
-                <ListeFacturesRevendeur />
-              </RouteGuard>
-            } />
             <Route path="/stock-revendeurs" element={
               <RouteGuard roles={['admin']}>
                 <ListeStockRevendeur />
@@ -291,6 +303,7 @@ function AuthenticatedApp() {
                 <ListeProduits />
               </RouteGuard>
             } />
+            
             {/* FINANCES */}
             <Route path="/decomptes" element={
               <RouteGuard roles={['admin']}>

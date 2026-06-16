@@ -18,11 +18,11 @@ import { notifications } from "@mantine/notifications";
 interface Utilisateur {
   id: number;
   nom: string;
-  prenom: string;
-  login: string;
-  email: string;
+  email: string; // email sert de login
+  mot_de_passe: string;
   role: string;
-  est_actif: number;
+  telephone: string;
+  created_at: string;
 }
 
 const ListeUtilisateurs: React.FC = () => {
@@ -37,11 +37,11 @@ const ListeUtilisateurs: React.FC = () => {
   const [editing, setEditing] = useState<Utilisateur | null>(null);
   const [formData, setFormData] = useState({
     nom: "",
-    prenom: "",
-    login: "",
     email: "",
+    login: "",
     password: "",
-    role: "commercial"
+    role: "commercial",
+    telephone: ""
   });
   const [saving, setSaving] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
@@ -52,8 +52,8 @@ const ListeUtilisateurs: React.FC = () => {
     try {
       const db = await getDb();
       const result = await db.select<Utilisateur[]>(`
-        SELECT id, nom, prenom, login, email, role, est_actif 
-        FROM utilisateurs 
+        SELECT id, nom, email, mot_de_passe, role, telephone, created_at 
+        FROM users 
         ORDER BY nom
       `);
       setUtilisateurs(result || []);
@@ -79,33 +79,52 @@ const ListeUtilisateurs: React.FC = () => {
     setSaving(true);
     try {
       const db = await getDb();
+      
+      // Vérifier si le login existe déjà
+      const existing = await db.select<any[]>(
+        'SELECT id FROM users WHERE email = ? AND id != ?',
+        [formData.login, editing?.id || 0]
+      );
+      
+      if (existing && existing.length > 0) {
+        notifications.show({ 
+          title: 'Erreur', 
+          message: 'Ce login existe déjà', 
+          color: 'red' 
+        });
+        setSaving(false);
+        return;
+      }
+
       if (editing) {
         if (formData.password) {
+          // Si un nouveau mot de passe est fourni, le hasher
           const hash = await bcrypt.hash(formData.password, 10);
           await db.execute(`
-            UPDATE utilisateurs 
-            SET nom=?, prenom=?, login=?, email=?, role=?, mot_de_passe_hash=? 
+            UPDATE users 
+            SET nom=?, email=?, mot_de_passe=?, role=?, telephone=? 
             WHERE id=?
-          `, [formData.nom, formData.prenom, formData.login, formData.email, formData.role, hash, editing.id]);
+          `, [formData.nom, formData.login, hash, formData.role, formData.telephone, editing.id]);
         } else {
+          // Garder l'ancien mot de passe
           await db.execute(`
-            UPDATE utilisateurs 
-            SET nom=?, prenom=?, login=?, email=?, role=? 
+            UPDATE users 
+            SET nom=?, email=?, role=?, telephone=? 
             WHERE id=?
-          `, [formData.nom, formData.prenom, formData.login, formData.email, formData.role, editing.id]);
+          `, [formData.nom, formData.login, formData.role, formData.telephone, editing.id]);
         }
         notifications.show({ title: 'Succès', message: 'Utilisateur modifié', color: 'green' });
       } else {
         const hash = await bcrypt.hash(formData.password, 10);
         await db.execute(`
-          INSERT INTO utilisateurs (nom, prenom, login, email, mot_de_passe_hash, role, est_actif) 
-          VALUES (?, ?, ?, ?, ?, ?, 1)
-        `, [formData.nom, formData.prenom, formData.login, formData.email, hash, formData.role]);
+          INSERT INTO users (nom, email, mot_de_passe, role, telephone) 
+          VALUES (?, ?, ?, ?, ?)
+        `, [formData.nom, formData.login, hash, formData.role, formData.telephone]);
         notifications.show({ title: 'Succès', message: 'Utilisateur créé', color: 'green' });
       }
       setModalOpen(false);
       setEditing(null);
-      setFormData({ nom: "", prenom: "", login: "", email: "", password: "", role: "commercial" });
+      setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
       chargerUtilisateurs();
     } catch (err) {
       console.error(err);
@@ -124,7 +143,7 @@ const ListeUtilisateurs: React.FC = () => {
     if (!selectedUser) return;
     try {
       const db = await getDb();
-      await db.execute("DELETE FROM utilisateurs WHERE id = ?", [selectedUser.id]);
+      await db.execute("DELETE FROM users WHERE id = ?", [selectedUser.id]);
       notifications.show({ title: 'Succès', message: 'Utilisateur supprimé', color: 'green' });
       setDeleteModalOpen(false);
       setSelectedUser(null);
@@ -137,8 +156,7 @@ const ListeUtilisateurs: React.FC = () => {
   const utilisateursFiltres = utilisateurs.filter(u => {
     const matchRecherche = recherche === "" ||
       u.nom?.toLowerCase().includes(recherche.toLowerCase()) ||
-      u.prenom?.toLowerCase().includes(recherche.toLowerCase()) ||
-      u.login?.toLowerCase().includes(recherche.toLowerCase());
+      u.email?.toLowerCase().includes(recherche.toLowerCase());
     const matchRole = !roleFiltre || u.role === roleFiltre;
     return matchRecherche && matchRole;
   });
@@ -169,9 +187,9 @@ const ListeUtilisateurs: React.FC = () => {
 
   const stats = {
     total: utilisateurs.length,
-    actifs: utilisateurs.filter(u => u.est_actif === 1).length,
     admins: utilisateurs.filter(u => u.role === "admin").length,
-    gestionnaires: utilisateurs.filter(u => u.role === "gestionnaire").length
+    gestionnaires: utilisateurs.filter(u => u.role === "gestionnaire").length,
+    commerciaux: utilisateurs.filter(u => u.role === "commercial").length
   };
 
   const resetFilters = () => {
@@ -192,7 +210,7 @@ const ListeUtilisateurs: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        {/* EN-TÊTE ATTRACTIF */}
+        {/* EN-TÊTE */}
         <Paper
           p="xl"
           radius="lg"
@@ -241,17 +259,6 @@ const ListeUtilisateurs: React.FC = () => {
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconUserCheck size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Utilisateurs actifs</Text>
-                  <Text c="white" fw={700} size="xl">{stats.actifs}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
                 <ThemeIcon color="red" variant="light" size="lg">
                   <IconUserShield size={20} />
                 </ThemeIcon>
@@ -272,6 +279,17 @@ const ListeUtilisateurs: React.FC = () => {
                 </div>
               </Group>
             </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="blue" variant="light" size="lg">
+                  <IconUser size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Commerciaux</Text>
+                  <Text c="white" fw={700} size="xl">{stats.commerciaux}</Text>
+                </div>
+              </Group>
+            </Card>
           </SimpleGrid>
         </Paper>
 
@@ -280,7 +298,7 @@ const ListeUtilisateurs: React.FC = () => {
           <Flex justify="space-between" align="flex-end" wrap="wrap" gap="md">
             <Group grow style={{ flex: 2 }}>
               <TextInput
-                placeholder="Rechercher par nom, prénom ou login..."
+                placeholder="Rechercher par nom ou login..."
                 leftSection={<IconSearch size={16} />}
                 value={recherche}
                 onChange={(e) => { setRecherche(e.target.value); setCurrentPage(1); }}
@@ -304,7 +322,7 @@ const ListeUtilisateurs: React.FC = () => {
             </Group>
             <Group>
               <Tooltip label="Actualiser">
-                <ActionIcon variant="light" onClick={chargerUtilisateurs} size="lg" color="adminBlue">
+                <ActionIcon variant="light" onClick={chargerUtilisateurs} size="lg" color="blue">
                   <IconRefresh size={18} />
                 </ActionIcon>
               </Tooltip>
@@ -312,7 +330,7 @@ const ListeUtilisateurs: React.FC = () => {
                 leftSection={<IconPlus size={16} />}
                 onClick={() => {
                   setEditing(null);
-                  setFormData({ nom: "", prenom: "", login: "", email: "", password: "", role: "commercial" });
+                  setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
                   setModalOpen(true);
                 }}
                 variant="gradient"
@@ -344,12 +362,10 @@ const ListeUtilisateurs: React.FC = () => {
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
                 <Table.Tr style={{background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)', }}>
-                  <Table.Th>Utilisateur</Table.Th>
-                  <Table.Th>Login</Table.Th>
-                  <Table.Th>Email</Table.Th>
-                  <Table.Th>Rôle</Table.Th>
-                  <Table.Th ta="center">Statut</Table.Th>
-                  <Table.Th ta="center" w={120}>Actions</Table.Th>
+                  <Table.Th c="white">Utilisateur</Table.Th>
+                  <Table.Th c="white">Login</Table.Th>
+                  <Table.Th c="white">Rôle</Table.Th>
+                  <Table.Th c="white" ta="center" w={120}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -361,21 +377,15 @@ const ListeUtilisateurs: React.FC = () => {
                           {u.nom?.charAt(0).toUpperCase() || "U"}
                         </Avatar>
                         <div>
-                          <Text fw={600} size="sm">{u.prenom ? `${u.prenom} ${u.nom}` : u.nom}</Text>
-                          <Text size="xs" c="dimmed">ID: {u.id}</Text>
+                          <Text fw={600} size="sm">{u.nom}</Text>
+                          <Text size="xs" c="dimmed">{u.telephone || 'Pas de téléphone'}</Text>
                         </div>
                       </Group>
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>
                         <IconUser size={12} color="#1b365d" />
-                        <Text size="sm">{u.login}</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={4}>
-                        <IconMail size={12} color="#1b365d" />
-                        <Text size="sm">{u.email || '-'}</Text>
+                        <Text size="sm">{u.email}</Text>
                       </Group>
                     </Table.Td>
                     <Table.Td>
@@ -389,15 +399,6 @@ const ListeUtilisateurs: React.FC = () => {
                       </Badge>
                     </Table.Td>
                     <Table.Td ta="center">
-                      <Badge
-                        size="md"
-                        color={u.est_actif === 1 ? "green" : "red"}
-                        variant="light"
-                      >
-                        {u.est_actif === 1 ? "Actif" : "Inactif"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td ta="center">
                       <Group gap={6} justify="center">
                         <Tooltip label="Modifier">
                           <ActionIcon
@@ -408,11 +409,11 @@ const ListeUtilisateurs: React.FC = () => {
                               setEditing(u);
                               setFormData({
                                 nom: u.nom || "",
-                                prenom: u.prenom || "",
-                                login: u.login || "",
                                 email: u.email || "",
+                                login: u.email || "",
                                 password: "",
-                                role: u.role || "commercial"
+                                role: u.role || "commercial",
+                                telephone: u.telephone || ""
                               });
                               setModalOpen(true);
                             }}
@@ -447,7 +448,7 @@ const ListeUtilisateurs: React.FC = () => {
                 variant="light"
                 onClick={() => {
                   setEditing(null);
-                  setFormData({ nom: "", prenom: "", login: "", email: "", password: "", role: "commercial" });
+                  setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
                   setModalOpen(true);
                 }}
                 leftSection={<IconPlus size={16} />}
@@ -476,12 +477,12 @@ const ListeUtilisateurs: React.FC = () => {
         onClose={() => { setModalOpen(false); setEditing(null); }}
         title={
           <Group gap="md">
-            <ThemeIcon size="lg" radius="md" color="adminBlue" variant="light">
+            <ThemeIcon size="lg" radius="md" color="blue" variant="light">
               <IconUserShield size={24} />
             </ThemeIcon>
             <div>
-              <Text size="lg" fw={700}>{editing ? "Modifier l'utilisateur" : "Nouvel utilisateur"}</Text>
-              <Text size="xs" c="dimmed">
+              <Text size="lg" fw={700} c="white">{editing ? "Modifier l'utilisateur" : "Nouvel utilisateur"}</Text>
+              <Text size="xs" c="gray.4">
                 {editing ? "Modifiez les informations de l'utilisateur" : "Créez un nouveau compte utilisateur"}
               </Text>
             </div>
@@ -498,39 +499,31 @@ const ListeUtilisateurs: React.FC = () => {
       >
         <Paper p="xl" radius={0}>
           <Stack gap="md">
-            <SimpleGrid cols={2} spacing="md">
-              <TextInput
-                label="Nom"
-                placeholder="Nom de l'utilisateur"
-                value={formData.nom}
-                onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
-                required
-                size="md"
-              />
-              <TextInput
-                label="Prénom"
-                placeholder="Prénom de l'utilisateur"
-                value={formData.prenom}
-                onChange={(e) => setFormData({ ...formData, prenom: e.target.value })}
-                size="md"
-              />
-            </SimpleGrid>
+            <TextInput
+              label="Nom complet"
+              placeholder="Nom de l'utilisateur"
+              value={formData.nom}
+              onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
+              required
+              size="md"
+            />
 
             <TextInput
-              label="Login"
-              placeholder="Nom d'utilisateur"
+              label="Login (identifiant)"
+              placeholder="Nom d'utilisateur pour la connexion"
               value={formData.login}
               onChange={(e) => setFormData({ ...formData, login: e.target.value })}
               required
               size="md"
               leftSection={<IconUser size={16} />}
+              description="Utilisé pour se connecter à l'application"
             />
 
             <TextInput
-              label="Email"
-              placeholder="email@example.com"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              label="Téléphone"
+              placeholder="Numéro de téléphone"
+              value={formData.telephone}
+              onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
               size="md"
               leftSection={<IconMail size={16} />}
             />

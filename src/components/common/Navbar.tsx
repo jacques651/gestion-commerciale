@@ -44,8 +44,7 @@ import {
   IconHelp,
   IconStar,
   IconPercentage,
-  IconList,
-  IconListDetails
+  IconReceipt2
 } from '@tabler/icons-react';
 import { Role } from '../../types/auth';
 import { userService, UserProfile } from '../../services/userService';
@@ -420,6 +419,8 @@ export default function Navbar({ userRole, userName, userAvatar, onLogout }: Nav
           <NavSection title="VENTES & CLIENTS" icon={<IconShoppingBag size={20} color="white" />} description="Gestion commerciale" userRole={userRole} roles={allRoles}>
             <NavItem label="Clients" path="/clients" icon={<IconUsers size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
             <NavItem label="Commandes" path="/commandes" icon={<IconShoppingBag size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
+            <NavItem label="Commandes Standard" path="/commandes/standard" icon={<IconBuildingStore size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Filtre" badgeColor="cyan" />
+            <NavItem label="Commandes Revendeurs" path="/commandes/revendeur" icon={<IconTruck size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Filtre" badgeColor="green" />
             <NavItem label="Factures" path="/factures" icon={<IconReceipt size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
             <NavItem label="Ventes comptoir" path="/ventes" icon={<IconBuildingStore size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
           </NavSection>
@@ -429,9 +430,9 @@ export default function Navbar({ userRole, userName, userAvatar, onLogout }: Nav
           </NavSection>
 
           <NavSection title="REVENDEURS" icon={<IconTruck size={20} color="white" />} description="Gestion des revendeurs" userRole={userRole} roles={revendeurAccess}>
-            <NavItem label="Stocks revendeurs" path="/stock-revendeurs" icon={<IconList size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Décomptes" path="/decomptes" icon={<IconListDetails size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Gestion" badgeColor="teal" />
-            <NavItem label="Factures revendeurs" path="/factures-revendeur" icon={<IconFileInvoice size={18} color="white" />} roles={adminOnly} userRole={userRole} badge="Documents" badgeColor="blue" />
+            <NavItem label="Stocks revendeurs" path="/stock-revendeurs" icon={<IconPackage size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
+            <NavItem label="Gestion Décomptes" path="/decomptes" icon={<IconReceipt2 size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Principal" badgeColor="teal" /> 
+            <NavItem label="Factures revendeurs" path="/factures-revendeur" icon={<IconFileInvoice size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Documents" badgeColor="blue" />
           </NavSection>
 
           <NavSection title="FINANCES" icon={<IconMoneybag size={20} color="white" />} description="Suivi financier" userRole={userRole} roles={adminAndManager}>

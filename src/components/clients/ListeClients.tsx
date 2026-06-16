@@ -3,11 +3,14 @@ import React, { useState } from 'react';
 import {
   Table, TextInput, Button, Group, Badge, ActionIcon,
   Stack, Title, Card, Text, Tooltip, Pagination, Paper,
-  Flex, ThemeIcon, Avatar, SimpleGrid, Loader, Modal, Alert} from '@mantine/core';
+  Flex, ThemeIcon, Avatar, SimpleGrid, Loader, Modal, Alert,
+  ScrollArea, Grid, Select
+} from '@mantine/core';
 import {
   IconSearch, IconPlus, IconEdit, IconTrash, IconPhone,
   IconUsers, IconBuildingStore, IconUserCheck,
-  IconUserPlus, IconMapPin, IconX, IconAlertCircle
+  IconUserPlus, IconMapPin, IconX, IconAlertCircle,
+  IconMail, IconBuilding, IconFilter
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { FormulaireClient } from './FormulaireClient';
@@ -17,12 +20,16 @@ import { notifications } from '@mantine/notifications';
 export const ListeClients: React.FC = () => {
   const { clients, loading, deleteClient, searchClients, refresh } = useClients();
   const [searchTerm, setSearchTerm] = useState('');
+  const [typeFiltre, setTypeFiltre] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [deleteModalOpened, setDeleteModalOpened] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  // Extraire les types uniques
+  const typesUniques = [...new Set(clients.map(c => c.TypeClient).filter(Boolean))];
 
   const handleSearch = () => {
     searchClients(searchTerm);
@@ -89,20 +96,41 @@ export const ListeClients: React.FC = () => {
     return 'Client sans nom';
   };
 
+  // Filtrer les clients
+  const filteredClients = clients.filter(client => {
+    const matchSearch = searchTerm === '' ||
+      client.NomComplet?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.Societe?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.Tel?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.Email?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchType = !typeFiltre || client.TypeClient === typeFiltre;
+
+    return matchSearch && matchType;
+  });
+
   // Statistiques
   const stats = {
     total: clients.length,
     revendeurs: clients.filter(c => c.TypeClient === 'revendeur').length,
     clients: clients.filter(c => c.TypeClient === 'client').length,
-    avecTel: clients.filter(c => c.Tel).length
+    avecTel: clients.filter(c => c.Tel).length,
+    filtered: filteredClients.length
   };
 
   // Pagination
-  const totalPages = Math.ceil(clients.length / itemsPerPage);
-  const paginatedClients = clients.slice(
+  const totalPages = Math.ceil(filteredClients.length / itemsPerPage);
+  const paginatedClients = filteredClients.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setTypeFiltre(null);
+    setCurrentPage(1);
+    refresh();
+  };
 
   if (loading && clients.length === 0) {
     return (
@@ -200,126 +228,203 @@ export const ListeClients: React.FC = () => {
           </SimpleGrid>
         </Paper>
 
-        {/* SECTION RECHERCHE */}
+        {/* SECTION RECHERCHE ET FILTRE - SUR UNE SEULE LIGNE */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Group justify="space-between" mb="md">
-            <Group>
-              <IconSearch size={20} color="#1b365d" />
-              <Title order={3} size="h4">Rechercher</Title>
-            </Group>
-            {searchTerm && (
-              <Button variant="light" color="gray" onClick={() => {
-                setSearchTerm('');
-                refresh();
-              }} size="xs" leftSection={<IconX size={14} />}>
-                Réinitialiser
-              </Button>
-            )}
-          </Group>
+          <Grid  align="flex-end">
+            {/* Recherche */}
+            <Grid.Col span={6}>
+              <TextInput
+                placeholder="Rechercher par nom, société, téléphone, email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                leftSection={<IconSearch size={16} />}
+                size="sm"
+              />
+            </Grid.Col>
 
-          <Group grow>
-            <TextInput
-              placeholder="Rechercher par nom, société, téléphone, email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              leftSection={<IconSearch size={16} />}
-              size="md"
-            />
-            <Button
-              onClick={handleSearch}
-              size="md"
-              variant="filled"
-              color="adminBlue"
-              leftSection={<IconSearch size={16} />}
-            >
-              Rechercher
-            </Button>
-          </Group>
+            {/* Filtre Type */}
+            <Grid.Col span={2.5}>
+              <Select
+                placeholder="Type de client"
+                data={[
+                  { value: '', label: 'Tous les types' },
+                  ...typesUniques.map(t => ({ value: t, label: t === 'client' ? 'Client' : 'Revendeur' }))
+                ]}
+                value={typeFiltre}
+                onChange={setTypeFiltre}
+                clearable
+                size="sm"
+                leftSection={<IconFilter size={14} />}
+              />
+            </Grid.Col>
+
+            {/* Boutons d'action */}
+            <Grid.Col span={3.5}>
+              <Group gap="xs" justify="flex-end">
+                <Button
+                  onClick={handleSearch}
+                  size="sm"
+                  variant="filled"
+                  color="blue"
+                  leftSection={<IconSearch size={14} />}
+                >
+                  Rechercher
+                </Button>
+                <Tooltip label="Réinitialiser">
+                  <ActionIcon 
+                    variant="light" 
+                    color="red" 
+                    size="md" 
+                    onClick={resetFilters}
+                  >
+                    <IconX size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <Text size="xs" c="dimmed">
+                  {stats.filtered} client(s)
+                </Text>
+              </Group>
+            </Grid.Col>
+          </Grid>
         </Card>
 
-        {/* TABLEAU PRINCIPAL - VERSION COMPACTE */}
+        {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="md" shadow="sm" p={0}>
-          <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Client</Table.Th>
-                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px', width: 100 }}>Type</Table.Th>
-                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Contact</Table.Th>
-                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px' }}>Ville</Table.Th>
-                <Table.Th style={{ color: 'white', fontSize: '12px', padding: '10px 12px', width: 80, textAlign: 'center' }}>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {paginatedClients.map((client) => (
-                <Table.Tr key={client.idClient} style={{ fontSize: '13px' }}>
-                  <Table.Td style={{ padding: '8px 12px' }}>
-                    <Group gap="xs" wrap="nowrap">
-                      <Avatar size="sm" radius="xl" color="blue">
-                        {getNomAffichage(client).charAt(0).toUpperCase()}
-                      </Avatar>
-                      <div>
-                        <Text fw={600} size="sm">{getNomAffichage(client)}</Text>
-                        {client.Societe && client.Societe !== client.NomComplet && (
-                          <Text size="xs" c="dimmed">{client.Societe}</Text>
-                        )}
-                      </div>
-                    </Group>
-                  </Table.Td>
-                  <Table.Td style={{ padding: '8px 12px' }}>{getTypeBadge(client.TypeClient)}</Table.Td>
-                  <Table.Td style={{ padding: '8px 12px' }}>
-                    {client.Tel ? (
-                      <Group gap="4" wrap="nowrap">
-                        <IconPhone size={12} color="#1b365d" />
-                        <Text size="sm">{client.Tel}</Text>
-                      </Group>
-                    ) : (
-                      <Text size="xs" c="dimmed">-</Text>
-                    )}
-                  </Table.Td>
-                  <Table.Td style={{ padding: '8px 12px' }}>
-                    {client.Ville ? (
-                      <Group gap="4" wrap="nowrap">
-                        <IconMapPin size={12} color="#1b365d" />
-                        <Text size="sm">{client.Ville}</Text>
-                      </Group>
-                    ) : (
-                      <Text size="xs" c="dimmed">-</Text>
-                    )}
-                  </Table.Td>
-                  <Table.Td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                    <Group gap={4} justify="center" wrap="nowrap">
-                      <Tooltip label="Modifier">
-                        <ActionIcon variant="subtle" color="adminBlue" size="sm" onClick={() => handleEdit(client)}>
-                          <IconEdit size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Supprimer">
-                        <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteClick(client)}>
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </Group>
-                  </Table.Td>
+          <ScrollArea style={{ overflowX: 'auto' }}>
+            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+              <Table.Thead>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                  <Table.Th c="white" w={200}>Nom / Société</Table.Th>
+                  <Table.Th c="white" w={100}>Type</Table.Th>
+                  <Table.Th c="white" w={150}>Téléphone</Table.Th>
+                  <Table.Th c="white" w={180}>Email</Table.Th>
+                  <Table.Th c="white" w={150}>Adresse</Table.Th>
+                  <Table.Th c="white" w={100}>Ville</Table.Th>
+                  <Table.Th c="white" ta="center" w={100}>Actions</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+              </Table.Thead>
+              <Table.Tbody>
+                {paginatedClients.map((client) => (
+                  <Table.Tr key={client.idClient}>
+                    <Table.Td>
+                      <Group gap="sm" wrap="nowrap">
+                        <Avatar size="md" radius="xl" color="blue">
+                          {getNomAffichage(client).charAt(0).toUpperCase()}
+                        </Avatar>
+                        <div>
+                          <Text fw={600} size="sm">{client.NomComplet || '-'}</Text>
+                          {client.Societe && (
+                            <Group gap={4}>
+                              <IconBuilding size={12} color="#adb5bd" />
+                              <Text size="xs" c="dimmed">{client.Societe}</Text>
+                            </Group>
+                          )}
+                        </div>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>{getTypeBadge(client.TypeClient)}</Table.Td>
+                    <Table.Td>
+                      {client.Tel ? (
+                        <Group gap="4" wrap="nowrap">
+                          <IconPhone size={14} color="#1b365d" />
+                          <Text size="sm">{client.Tel}</Text>
+                        </Group>
+                      ) : (
+                        <Text size="xs" c="dimmed">-</Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      {client.Email ? (
+                        <Group gap="4" wrap="nowrap">
+                          <IconMail size={14} color="#1b365d" />
+                          <Text size="sm">{client.Email}</Text>
+                        </Group>
+                      ) : (
+                        <Text size="xs" c="dimmed">-</Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      {client.Adresse ? (
+                        <Text size="sm" lineClamp={1}>{client.Adresse}</Text>
+                      ) : (
+                        <Text size="xs" c="dimmed">-</Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      {client.Ville ? (
+                        <Group gap="4" wrap="nowrap">
+                          <IconMapPin size={14} color="#1b365d" />
+                          <Text size="sm">{client.Ville}</Text>
+                        </Group>
+                      ) : (
+                        <Text size="xs" c="dimmed">-</Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td ta="center">
+                      <Group gap={4} justify="center" wrap="nowrap">
+                        <Tooltip label="Modifier">
+                          <ActionIcon 
+                            variant="light" 
+                            color="blue" 
+                            size="md" 
+                            onClick={() => handleEdit(client)}
+                          >
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Supprimer">
+                          <ActionIcon 
+                            variant="light" 
+                            color="red" 
+                            size="md" 
+                            onClick={() => handleDeleteClick(client)}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
 
-          {clients.length === 0 && (
-            <Flex justify="center" align="center" direction="column" py={40}>
-              <IconUsers size={40} color="#ccc" />
-              <Text ta="center" c="dimmed" mt="sm" size="sm">Aucun client trouvé</Text>
-              <Button mt="md" variant="light" size="sm" onClick={() => setModalOpened(true)} leftSection={<IconPlus size={14} />}>
+          {filteredClients.length === 0 && (
+            <Flex justify="center" align="center" direction="column" py={60}>
+              <IconUsers size={60} color="#ccc" />
+              <Text ta="center" c="dimmed" mt="md">Aucun client trouvé</Text>
+              <Button 
+                mt="md" 
+                variant="light" 
+                onClick={() => setModalOpened(true)} 
+                leftSection={<IconPlus size={16} />}
+              >
                 Ajouter un client
               </Button>
             </Flex>
           )}
 
           {totalPages > 1 && (
-            <Group justify="center" p="sm">
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="sm" />
+            <Group justify="center" p="md">
+              <Pagination 
+                total={totalPages} 
+                value={currentPage} 
+                onChange={setCurrentPage} 
+                size="md" 
+              />
             </Group>
+          )}
+
+          {filteredClients.length > 0 && (
+            <Paper p="md" style={{ borderTop: '1px solid #e5e7eb' }}>
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">
+                  Affichage de {Math.min(filteredClients.length, (currentPage - 1) * itemsPerPage + 1)} à {Math.min(currentPage * itemsPerPage, filteredClients.length)} sur {filteredClients.length} clients
+                </Text>
+              </Group>
+            </Paper>
           )}
         </Card>
       </Stack>

@@ -1,4 +1,4 @@
-// src/pages/revendeurs/ListeStockRevendeur.tsx
+// src/components/pages/revendeurs/ListeStockRevendeur.tsx
 import { useEffect, useState, useRef } from "react";
 import {
   Card,
@@ -19,8 +19,11 @@ import {
   Button,
   TextInput,
   Tooltip,
-  ActionIcon
+  ActionIcon,
+  Divider,
+  Modal
 } from "@mantine/core";
+import '@mantine/dates/styles.css';
 import {
   IconUser,
   IconPackage,
@@ -32,12 +35,16 @@ import {
   IconBuildingStore,
   IconPrinter,
   IconFileExcel,
-  IconFileTypePdf
+  IconFileTypePdf,
+  IconEye,
+  IconReceipt,
+  IconFileInvoice
 } from "@tabler/icons-react";
 import { getDb } from "../../../database/db";
 import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
 import { useReactToPrint } from "react-to-print";
 import { notifications } from "@mantine/notifications";
+
 
 interface Client {
   idClient: number;
@@ -55,7 +62,6 @@ interface StockItem {
   qte_stock: number;
   prix_achat_base: number;
   prix_vente_gros: number;
-  commission_pourcentage: number;
   categorie: string;
 }
 
@@ -69,6 +75,10 @@ export default function ListeStockRevendeur() {
   const [loadingStock, setLoadingStock] = useState(false);
   const [valeurStock, setValeurStock] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
+  const [] = useState<Date | null>(null);
+  const [] = useState<Date | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<StockItem | null>(null);
 
   useEffect(() => {
     loadRevendeurs();
@@ -79,7 +89,6 @@ export default function ListeStockRevendeur() {
       setLoading(true);
       const db = await getDb();
       
-      // ✅ Filtrer STRICTEMENT uniquement les clients de type 'revendeur'
       const data = await db.select<Client[]>(`
         SELECT 
           idClient, 
@@ -92,10 +101,11 @@ export default function ListeStockRevendeur() {
         ORDER BY NomComplet
       `);
       
-      console.log("Revendeurs chargés:", data); // Debug
+      console.log("Revendeurs chargés:", data);
       setClients(data);
     } catch (error) {
       console.error(error);
+      notifications.show({ title: "Erreur", message: "Impossible de charger les revendeurs", color: "red" });
     } finally {
       setLoading(false);
     }
@@ -110,6 +120,7 @@ export default function ListeStockRevendeur() {
       setValeurStock(valeur);
     } catch (error) {
       console.error(error);
+      notifications.show({ title: "Erreur", message: "Impossible de charger le stock", color: "red" });
     } finally {
       setLoadingStock(false);
     }
@@ -119,17 +130,14 @@ export default function ListeStockRevendeur() {
     setSelectedClient(value);
     if (value) {
       const client = clients.find(c => c.idClient.toString() === value);
-      // ✅ Vérification supplémentaire du type
       if (client && client.TypeClient === 'revendeur') {
         setSelectedClientDetails(client);
         loadStock(Number(value));
       } else {
-        // Si ce n'est pas un revendeur, réinitialiser
         setSelectedClient(null);
         setSelectedClientDetails(null);
         setStock([]);
         setValeurStock(0);
-        // Afficher une notification
         notifications.show({
           title: "Erreur",
           message: "Ce client n'est pas un revendeur",
@@ -144,37 +152,59 @@ export default function ListeStockRevendeur() {
     }
   };
 
-  // ✅ Filtrer les données du select pour n'avoir que les revendeurs
   const clientData = clients
-    .filter(client => client.TypeClient === 'revendeur') // Double filtre
+    .filter(client => client.TypeClient === 'revendeur')
     .map(client => ({
       value: client.idClient.toString(),
       label: client.NomComplet || client.Societe || "Revendeur sans nom"
     }));
 
+  // Voir les détails d'un produit
+  const handleViewDetails = (product: StockItem) => {
+    setSelectedProduct(product);
+    setShowDetailsModal(true);
+  };
+
+  // Générer la facture pour un produit (à implémenter si nécessaire)
+  const handleGenererFacture = async () => {
+    notifications.show({
+      title: "Information",
+      message: "Cette fonctionnalité sera disponible prochainement",
+      color: "blue"
+    });
+  };
+
+  // Créer un décompte pour un produit
+  const handleCreerDecompte = (product: StockItem) => {
+    notifications.show({
+      title: "Décompte",
+      message: `Créer un décompte pour ${product.designation}`,
+      color: "blue"
+    });
+  };
+
   // Impression
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Stock_${selectedClientDetails?.NomComplet || selectedClientDetails?.Societe || "Revendeur"}_${new Date().toLocaleDateString()}`,
-    onAfterPrint: () => {
-      console.log("Impression lancée");
-    }
   });
 
   // Export CSV
   const handleExportCSV = () => {
-    if (filteredStock.length === 0) return;
+    if (filteredStock.length === 0) {
+      notifications.show({ title: "Info", message: "Aucune donnée à exporter", color: "blue" });
+      return;
+    }
     
-    const headers = ["Code", "Produit", "Catégorie", "Stock", "Prix Achat", "Prix Vente", "Commission", "Valeur"];
+    const headers = ["Code", "Produit", "Catégorie", "Stock", "Prix Achat", "Prix Vente", "Valeur Stock"];
     const rows = filteredStock.map(item => [
       item.code_produit,
       item.designation,
       item.categorie || "-",
       item.qte_stock,
-      item.prix_achat_base,
-      item.prix_vente_gros,
-      `${item.commission_pourcentage}%`,
-      (item.qte_stock * item.prix_achat_base)
+      item.prix_achat_base.toLocaleString(),
+      item.prix_vente_gros.toLocaleString(),
+      (item.qte_stock * item.prix_achat_base).toLocaleString()
     ]);
     
     const csvContent = [headers, ...rows].map(row => row.join(";")).join("\n");
@@ -187,6 +217,8 @@ export default function ListeStockRevendeur() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    
+    notifications.show({ title: "Succès", message: "Export CSV terminé", color: "green" });
   };
 
   // Export PDF (via impression)
@@ -194,10 +226,17 @@ export default function ListeStockRevendeur() {
     handlePrint();
   };
 
-  const filteredStock = stock.filter(item =>
-    item.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.code_produit?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filtrer le stock par recherche et dates
+  const filteredStock = stock.filter(item => {
+    const matchSearch = item.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Note: Les dates ne sont pas disponibles dans stock_revendeur
+    // Cette fonctionnalité peut être ajoutée si nécessaire
+    const matchDate = true;
+    
+    return matchSearch && matchDate;
+  });
 
   const stats = {
     totalProduits: stock.length,
@@ -302,7 +341,7 @@ export default function ListeStockRevendeur() {
       {/* Cartes statistiques */}
       {selectedClient && stock.length > 0 && (
         <SimpleGrid cols={{ base: 2, sm: 2, md: 4 }} spacing="md">
-          <Card withBorder radius="md" p="sm" bg="blue.0">
+          <Card withBorder radius="md" p="sm" style={{ backgroundColor: '#e3f2fd' }}>
             <Group>
               <ThemeIcon color="blue" variant="light" size="lg">
                 <IconPackage size={20} />
@@ -313,7 +352,7 @@ export default function ListeStockRevendeur() {
               </div>
             </Group>
           </Card>
-          <Card withBorder radius="md" p="sm" bg="green.0">
+          <Card withBorder radius="md" p="sm" style={{ backgroundColor: '#e8f5e9' }}>
             <Group>
               <ThemeIcon color="green" variant="light" size="lg">
                 <IconPackage size={20} />
@@ -324,25 +363,25 @@ export default function ListeStockRevendeur() {
               </div>
             </Group>
           </Card>
-          <Card withBorder radius="md" p="sm" bg="orange.0">
+          <Card withBorder radius="md" p="sm" style={{ backgroundColor: '#fff3e0' }}>
             <Group>
               <ThemeIcon color="orange" variant="light" size="lg">
                 <IconCurrencyFrank size={20} />
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed">Valeur achat</Text>
-                <Text fw={700} size="xl">{stats.valeurAchat.toLocaleString()} FCFA</Text>
+                <Text fw={700} size="xl">{stats.valeurAchat.toLocaleString()} F</Text>
               </div>
             </Group>
           </Card>
-          <Card withBorder radius="md" p="sm" bg="grape.0">
+          <Card withBorder radius="md" p="sm" style={{ backgroundColor: '#f3e5f5' }}>
             <Group>
               <ThemeIcon color="grape" variant="light" size="lg">
                 <IconCurrencyFrank size={20} />
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed">Valeur vente</Text>
-                <Text fw={700} size="xl">{stats.valeurVente.toLocaleString()} FCFA</Text>
+                <Text fw={700} size="xl">{stats.valeurVente.toLocaleString()} F</Text>
               </div>
             </Group>
           </Card>
@@ -375,7 +414,7 @@ export default function ListeStockRevendeur() {
               <Group justify="space-between" mb="md">
                 <Group gap="xs">
                   <IconCurrencyFrank size={20} color="#1b365d" />
-                  <Text fw={700}>Valeur totale du stock</Text>
+                  <Text fw={700}>Valeur totale du stock (prix achat)</Text>
                 </Group>
                 <Badge color="green" size="lg" variant="filled">
                   {valeurStock.toLocaleString()} FCFA
@@ -384,7 +423,7 @@ export default function ListeStockRevendeur() {
 
               {/* Zone à imprimer */}
               <div ref={printRef}>
-                {/* En-tête pour impression */}
+                {/* En-tête pour impression (visible seulement à l'impression) */}
                 <div style={{ textAlign: "center", marginBottom: 20, display: "none" }}>
                   <Title order={2}>Stock Revendeur</Title>
                   <Text>Revendeur: {selectedClientDetails?.NomComplet || selectedClientDetails?.Societe}</Text>
@@ -402,14 +441,15 @@ export default function ListeStockRevendeur() {
                         <Table.Th c="white" ta="center">Stock</Table.Th>
                         <Table.Th c="white" ta="right">Prix Achat</Table.Th>
                         <Table.Th c="white" ta="right">Prix Vente</Table.Th>
-                        <Table.Th c="white" ta="center">Commission</Table.Th>
-                        <Table.Th c="white" ta="right">Valeur</Table.Th>
+                        <Table.Th c="white" ta="right">Marge unitaire</Table.Th>
+                        <Table.Th c="white" ta="right">Valeur stock</Table.Th>
+                        <Table.Th c="white" ta="center">Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
                       {filteredStock.length === 0 ? (
                         <Table.Tr>
-                          <Table.Td colSpan={8} align="center">
+                          <Table.Td colSpan={9} align="center">
                             <Text c="dimmed" py={50}>
                               {searchTerm ? "Aucun produit trouvé" : "Aucun stock disponible pour ce revendeur"}
                             </Text>
@@ -418,8 +458,7 @@ export default function ListeStockRevendeur() {
                       ) : (
                         filteredStock.map((item) => {
                           const valeur = (item.qte_stock || 0) * (item.prix_achat_base || 0);
-                          const beneficeUnitaire = (item.prix_vente_gros || 0) - (item.prix_achat_base || 0);
-                          const commissionUnitaire = beneficeUnitaire * (item.commission_pourcentage / 100);
+                          const margeUnitaire = (item.prix_vente_gros || 0) - (item.prix_achat_base || 0);
                           
                           return (
                             <Table.Tr key={item.idStockRevendeur}>
@@ -442,19 +481,30 @@ export default function ListeStockRevendeur() {
                                 </Badge>
                               </Table.Td>
                               <Table.Td ta="right">
-                                <Text size="sm">{item.prix_achat_base?.toLocaleString()} FCFA</Text>
+                                <Text size="sm">{item.prix_achat_base?.toLocaleString()} F</Text>
                               </Table.Td>
                               <Table.Td ta="right">
-                                <Text size="sm" fw={600} c="blue">{item.prix_vente_gros?.toLocaleString()} FCFA</Text>
+                                <Text size="sm" fw={600} c="blue">{item.prix_vente_gros?.toLocaleString()} F</Text>
+                              </Table.Td>
+                              <Table.Td ta="right">
+                                <Text size="sm" c={margeUnitaire >= 0 ? "green" : "red"}>
+                                  {margeUnitaire.toLocaleString()} F
+                                </Text>
+                              </Table.Td>
+                              <Table.Td ta="right">
+                                <Text fw={600} c="green">{valeur.toLocaleString()} F</Text>
                               </Table.Td>
                               <Table.Td ta="center">
-                                <Badge color="orange" variant="light" size="sm">
-                                  {item.commission_pourcentage}%
-                                </Badge>
-                                <Text size="xs" c="dimmed">{commissionUnitaire.toLocaleString()} F/unité</Text>
-                              </Table.Td>
-                              <Table.Td ta="right">
-                                <Text fw={600} c="green">{valeur.toLocaleString()} FCFA</Text>
+                                <Tooltip label="Voir détails">
+                                  <ActionIcon
+                                    variant="light"
+                                    color="blue"
+                                    size="sm"
+                                    onClick={() => handleViewDetails(item)}
+                                  >
+                                    <IconEye size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
                               </Table.Td>
                             </Table.Tr>
                           );
@@ -468,27 +518,33 @@ export default function ListeStockRevendeur() {
               {/* Résumé des bénéfices potentiels */}
               {stock.length > 0 && (
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="lg">
-                  <Card withBorder p="sm" bg="yellow.0">
+                  <Card withBorder p="sm" style={{ backgroundColor: '#e8f5e9' }}>
                     <Group justify="space-between">
                       <Group gap="xs">
-                        <IconPercentage size={18} color="#ed6c02" />
+                        <IconPercentage size={18} color="#2e7d32" />
                         <Text fw={600}>Bénéfice potentiel total</Text>
                       </Group>
                       <Text fw={700} size="lg" c="green">
-                        {stats.beneficePotentiel.toLocaleString()} FCFA
+                        {stats.beneficePotentiel.toLocaleString()} F
                       </Text>
                     </Group>
+                    <Text size="xs" c="dimmed" mt={4}>
+                      (Prix vente - Prix achat) × Stock
+                    </Text>
                   </Card>
-                  <Card withBorder p="sm" bg="orange.0">
+                  <Card withBorder p="sm" style={{ backgroundColor: '#fff3e0' }}>
                     <Group justify="space-between">
                       <Group gap="xs">
                         <IconCurrencyFrank size={18} color="#ed6c02" />
-                        <Text fw={600}>Commission potentielle totale</Text>
+                        <Text fw={600}>Chiffre d'affaires potentiel</Text>
                       </Group>
-                      <Text fw={700} size="lg" c="orange">
-                        {(stats.beneficePotentiel * 0.6).toLocaleString()} FCFA
+                      <Text fw={700} size="lg" c="blue">
+                        {stats.valeurVente.toLocaleString()} F
                       </Text>
                     </Group>
+                    <Text size="xs" c="dimmed" mt={4}>
+                      (Prix vente × Stock)
+                    </Text>
                   </Card>
                 </SimpleGrid>
               )}
@@ -505,6 +561,77 @@ export default function ListeStockRevendeur() {
           <Text c="dimmed" size="lg">Sélectionnez un revendeur pour voir son stock</Text>
         </Card>
       )}
+
+      {/* MODAL DÉTAILS PRODUIT */}
+      <Modal
+        opened={showDetailsModal}
+        onClose={() => setShowDetailsModal(false)}
+        title={`Détails du produit - ${selectedProduct?.designation || ''}`}
+        size="md"
+        centered
+      >
+        {selectedProduct && (
+          <Stack gap="md">
+            <SimpleGrid cols={2} spacing="md">
+              <div>
+                <Text size="xs" c="dimmed">Code produit</Text>
+                <Text fw={600}>{selectedProduct.code_produit}</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Catégorie</Text>
+                <Text fw={600}>{selectedProduct.categorie || '-'}</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Stock actuel</Text>
+                <Badge color={selectedProduct.qte_stock <= 0 ? 'red' : 'green'} size="lg">
+                  {selectedProduct.qte_stock} unités
+                </Badge>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Prix d'achat</Text>
+                <Text fw={600} c="orange">{selectedProduct.prix_achat_base.toLocaleString()} F</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Prix de vente</Text>
+                <Text fw={600} c="blue">{selectedProduct.prix_vente_gros.toLocaleString()} F</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Marge unitaire</Text>
+                <Text fw={600} c="green">{(selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base).toLocaleString()} F</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Valeur stock</Text>
+                <Text fw={700} c="green">{(selectedProduct.qte_stock * selectedProduct.prix_achat_base).toLocaleString()} F</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Bénéfice potentiel</Text>
+                <Text fw={700} c="blue">{(selectedProduct.qte_stock * (selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base)).toLocaleString()} F</Text>
+              </div>
+            </SimpleGrid>
+
+            <Divider />
+
+            <Group justify="flex-end" gap="sm">
+              <Button
+                variant="light"
+                color="blue"
+                leftSection={<IconReceipt size={16} />}
+                onClick={() => handleCreerDecompte(selectedProduct)}
+              >
+                Créer décompte
+              </Button>
+              <Button
+                variant="light"
+                color="green"
+                leftSection={<IconFileInvoice size={16} />}
+                onClick={() => handleGenererFacture()}
+              >
+                Générer facture
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   );
 }

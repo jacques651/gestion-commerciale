@@ -1,5 +1,6 @@
 // src/components/factures/ListeFactures.tsx
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
   Pagination, Select, Grid, Box, Loader, Paper, Flex, ThemeIcon, SimpleGrid,
@@ -8,16 +9,20 @@ import {
 import {
   IconEye, IconPrinter, IconDownload, IconSearch, IconRefresh, IconX,
   IconFileInvoice, IconCalendar, IconBuildingStore,
-  IconTruck, IconCurrencyFrank
+  IconTruck, IconCurrencyFrank, IconCash, IconReceipt, IconArrowBackUp,
+  IconShoppingBag
 } from '@tabler/icons-react';
 import { useFactures } from '../../hooks/useFactures';
 import { factureRepository } from '../../database/repositories/factureRepository';
 import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 import { FactureStandard } from './FactureStandard';
 import { FactureRevendeur } from './FactureRevendeur';
+import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import { notifications } from '@mantine/notifications';
+import { getDb } from '../../database/db';
 
 export const ListeFactures: React.FC = () => {
+  const navigate = useNavigate();
   const { factures, loading, refresh } = useFactures();
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -28,6 +33,17 @@ export const ListeFactures: React.FC = () => {
   const [selectedFacture, setSelectedFacture] = useState<any>(null);
   const [factureModalOpened, setFactureModalOpened] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  
+  // États pour le règlement
+  const [reglementModalOpened, setReglementModalOpened] = useState(false);
+  const [reglementData, setReglementData] = useState({
+    idFacture: 0,
+    idClient: 0,
+    montantMax: 0,
+    codeFacture: '',
+    clientNom: '',
+    type: 'standard' as 'standard' | 'revendeur'
+  });
 
   const itemsPerPage = 10;
 
@@ -38,25 +54,20 @@ export const ListeFactures: React.FC = () => {
     return num.toLocaleString('fr-FR');
   };
 
-  // ✅ Déterminer le type de facture
   const getTypeFactureLabel = (facture: any): string => {
-    // Si c'est une facture revendeur (provient de factures_revendeur)
     if (facture.idFactureRevendeur !== undefined) {
       return 'Revendeur';
     }
-    // Si c'est une facture standard avec type_commande
     if (facture.type_commande === 'REVENDEUR') {
       return 'Revendeur';
     }
     return 'Standard';
   };
 
-  // ✅ Vérifier si c'est une facture revendeur
   const isRevendeurFacture = (facture: any): boolean => {
     return facture.idFactureRevendeur !== undefined || facture.type_commande === 'REVENDEUR';
   };
 
-  // ✅ Charger les détails selon le type
   const handleViewFacture = async (facture: any) => {
     try {
       setLoadingDetails(true);
@@ -64,13 +75,11 @@ export const ListeFactures: React.FC = () => {
       let completeFacture = null;
       
       if (isRevendeurFacture(facture)) {
-        // Facture revendeur
         const factureId = facture.idFactureRevendeur;
         if (factureId) {
           completeFacture = await factureRevendeurRepository.getById(factureId);
         }
       } else {
-        // Facture standard
         const factureId = facture.idFacture;
         if (factureId) {
           completeFacture = await factureRepository.getById(factureId);
@@ -81,7 +90,6 @@ export const ListeFactures: React.FC = () => {
         setSelectedFacture(completeFacture);
         setFactureModalOpened(true);
       } else {
-        // Fallback : afficher une notification d'erreur
         notifications.show({
           title: 'Erreur',
           message: 'Impossible de charger les détails de la facture',
@@ -97,6 +105,183 @@ export const ListeFactures: React.FC = () => {
       });
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  const handleRegler = async (facture: any) => {
+    try {
+      const db = await getDb();
+      let idFacture = 0;
+      let montantRestant = 0;
+      let montantTotal = 0;
+      let codeFacture = '';
+      let type: 'standard' | 'revendeur' = 'standard';
+      
+      if (isRevendeurFacture(facture)) {
+        type = 'revendeur';
+        idFacture = facture.idFactureRevendeur;
+        montantTotal = facture.montant_ttc || 0;
+        
+        const reglements = await db.select<any[]>(`
+          SELECT COALESCE(SUM(montant), 0) as total_regle 
+          FROM reglements_revendeur 
+          WHERE idFactureRevendeur = ?
+        `, [idFacture]);
+        
+        const montantRegle = reglements[0]?.total_regle || 0;
+        montantRestant = montantTotal - montantRegle;
+        codeFacture = facture.code_facture || `FR-${idFacture}`;
+      } else {
+        type = 'standard';
+        idFacture = facture.idFacture;
+        montantTotal = facture.montant_ttc || 0;
+        
+        const reglements = await db.select<any[]>(`
+          SELECT COALESCE(SUM(montant), 0) as total_regle 
+          FROM reglements 
+          WHERE idFacture = ?
+        `, [idFacture]);
+        
+        const montantRegle = reglements[0]?.total_regle || 0;
+        montantRestant = montantTotal - montantRegle;
+        codeFacture = facture.code_facture || `F-${idFacture}`;
+      }
+      
+      if (montantRestant <= 0) {
+        notifications.show({
+          title: 'Information',
+          message: 'Cette facture est déjà entièrement réglée',
+          color: 'blue'
+        });
+        return;
+      }
+      
+      setReglementData({
+        idFacture: idFacture,
+        idClient: facture.idClient || facture.idRevendeur,
+        montantMax: montantRestant,
+        codeFacture: codeFacture,
+        clientNom: facture.NomComplet || facture.client_nom || 'Client',
+        type: type
+      });
+      setReglementModalOpened(true);
+      
+    } catch (error) {
+      console.error('Erreur lors du règlement:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les informations de règlement',
+        color: 'red'
+      });
+    }
+  };
+
+  const handleGenererRecu = async (facture: any) => {
+    try {
+      const db = await getDb();
+      let reglements: any[] = [];
+      let codeFacture = '';
+      let clientNom = facture.NomComplet || facture.client_nom || 'Client';
+      
+      if (isRevendeurFacture(facture)) {
+        const idFacture = facture.idFactureRevendeur;
+        codeFacture = facture.code_facture || `FR-${idFacture}`;
+        
+        reglements = await db.select(`
+          SELECT r.*, 'revendeur' as type
+          FROM reglements_revendeur r
+          WHERE r.idFactureRevendeur = ?
+          ORDER BY r.date_reglement DESC
+        `, [idFacture]);
+      } else {
+        const idFacture = facture.idFacture;
+        codeFacture = facture.code_facture || `F-${idFacture}`;
+        
+        reglements = await db.select(`
+          SELECT r.*, 'standard' as type
+          FROM reglements r
+          WHERE r.idFacture = ?
+          ORDER BY r.date_reglement DESC
+        `, [idFacture]);
+      }
+      
+      if (reglements.length === 0) {
+        notifications.show({
+          title: 'Information',
+          message: 'Aucun règlement trouvé pour cette facture',
+          color: 'blue'
+        });
+        return;
+      }
+      
+      const totalRegle = reglements.reduce((sum, r) => sum + (r.montant || 0), 0);
+      const montantTotal = facture.montant_ttc || 0;
+      const resteAPayer = montantTotal - totalRegle;
+      
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Reçu de règlement - ${codeFacture}</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              .header { text-align: center; margin-bottom: 30px; }
+              .title { color: #1b365d; font-size: 24px; }
+              .info { margin: 20px 0; }
+              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+              th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+              th { background-color: #1b365d; color: white; }
+              .total { font-weight: bold; font-size: 18px; text-align: right; margin-top: 20px; }
+              .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #666; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1 class="title">REÇU DE RÈGLEMENT</h1>
+              <p>Facture N° ${codeFacture}</p>
+            </div>
+            <div class="info">
+              <p><strong>Client :</strong> ${clientNom}</p>
+              <p><strong>Date :</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Date règlement</th><th>Montant</th><th>Mode de règlement</th></tr>
+              </thead>
+              <tbody>
+                ${reglements.map(r => `
+                  <tr>
+                    <td>${new Date(r.date_reglement).toLocaleDateString('fr-FR')}</td>
+                    <td>${formatMontant(r.montant)} FCFA</td>
+                    <td>${r.mode_reglement || 'Espèces'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div class="total">
+              <p>Total réglé : ${formatMontant(totalRegle)} FCFA</p>
+              <p>Reste à payer : ${formatMontant(resteAPayer)} FCFA</p>
+              <p><strong>Montant total de la facture : ${formatMontant(montantTotal)} FCFA</strong></p>
+            </div>
+            <div class="footer">
+              <p>Merci de votre confiance</p>
+            </div>
+            <script>window.print();setTimeout(()=>window.close(),1000);</script>
+          </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+      
+    } catch (error) {
+      console.error('Erreur génération reçu:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de générer le reçu',
+        color: 'red'
+      });
     }
   };
 
@@ -147,7 +332,6 @@ export const ListeFactures: React.FC = () => {
     }
   };
 
-  // ✅ Extraire les dates disponibles pour les filtres
   const datesDisponibles = useMemo(() => {
     const dates = factures
       .map(facture => {
@@ -176,18 +360,15 @@ export const ListeFactures: React.FC = () => {
     return isNaN(date.getTime()) ? null : date;
   };
 
-  // ✅ Filtrer les factures
   const filteredFactures = useMemo(() => {
     let filtered = [...factures];
 
-    // Filtre par nom du client
     if (searchClient) {
       filtered = filtered.filter(facture =>
         (facture.NomComplet || '').toLowerCase().includes(searchClient.toLowerCase())
       );
     }
 
-    // Filtre par type
     if (typeFacture && typeFacture !== 'all') {
       filtered = filtered.filter(facture => {
         const type = getTypeFactureLabel(facture).toLowerCase();
@@ -195,7 +376,6 @@ export const ListeFactures: React.FC = () => {
       });
     }
 
-    // Filtre par date
     const dateDebutObj = stringToDate(dateDebut);
     const dateFinObj = stringToDate(dateFin);
 
@@ -230,7 +410,6 @@ export const ListeFactures: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // ✅ Statistiques
   const stats = {
     total: factures.length,
     montantTotal: factures.reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
@@ -256,7 +435,7 @@ export const ListeFactures: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        {/* EN-TÊTE ATTRACTIF */}
+        {/* EN-TÊTE */}
         <Paper
           p="xl"
           radius="lg"
@@ -283,6 +462,15 @@ export const ListeFactures: React.FC = () => {
                 size="md"
                 variant="light"
                 color="white"
+                leftSection={<IconArrowBackUp size={18} />}
+                onClick={() => navigate('/commandes')}
+              >
+                Retour aux commandes
+              </Button>
+              <Button
+                size="md"
+                variant="light"
+                color="white"
                 leftSection={<IconRefresh size={18} />}
                 onClick={refresh}
               >
@@ -291,62 +479,34 @@ export const ListeFactures: React.FC = () => {
             </Group>
           </Flex>
 
-          {/* Cartes statistiques */}
           <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconFileInvoice size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Total factures</Text>
-                  <Text c="white" fw={700} size="xl">{stats.total}</Text>
-                </div>
+              <Group><ThemeIcon color="white" variant="light" size="lg"><IconFileInvoice size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Total factures</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
               </Group>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="blue" variant="light" size="lg">
-                  <IconBuildingStore size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Factures standard</Text>
-                  <Text c="white" fw={700} size="xl">{stats.standards}</Text>
-                </div>
+              <Group><ThemeIcon color="blue" variant="light" size="lg"><IconBuildingStore size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Factures standard</Text><Text c="white" fw={700} size="xl">{stats.standards}</Text></div>
               </Group>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconTruck size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Factures revendeurs</Text>
-                  <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
-                </div>
+              <Group><ThemeIcon color="green" variant="light" size="lg"><IconTruck size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Factures revendeurs</Text><Text c="white" fw={700} size="xl">{stats.revendeurs}</Text></div>
               </Group>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="yellow" variant="light" size="lg">
-                  <IconCurrencyFrank size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Montant total</Text>
-                  <Text c="white" fw={700} size="xl">{formatMontant(stats.montantTotal)} FCFA</Text>
-                </div>
+              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconCurrencyFrank size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Montant total</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.montantTotal)} FCFA</Text></div>
               </Group>
             </Card>
           </SimpleGrid>
         </Paper>
 
-        {/* SECTION RECHERCHE */}
+        {/* RECHERCHE */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group justify="space-between" mb="md">
-            <Group>
-              <IconSearch size={20} color="#1b365d" />
-              <Title order={3} size="h4">Rechercher</Title>
-            </Group>
+            <Group><IconSearch size={20} color="#1b365d" /><Title order={3} size="h4">Rechercher</Title></Group>
             <Button variant="light" color="gray" onClick={resetFilters} size="xs" leftSection={<IconX size={14} />}>
               Réinitialiser
             </Button>
@@ -407,7 +567,45 @@ export const ListeFactures: React.FC = () => {
           </Grid>
         </Card>
 
-        {/* TABLEAU PRINCIPAL */}
+        {/* BARRE DE NAVIGATION VERS LES COMMANDES */}
+        <Card withBorder radius="lg" shadow="sm" p="md">
+          <Group justify="center" gap="md">
+            <Button
+              variant="light"
+              color="blue"
+              leftSection={<IconShoppingBag size={18} />}
+              onClick={() => navigate('/commandes')}
+            >
+              Commandes Standard
+            </Button>
+            <Button
+              variant="light"
+              color="green"
+              leftSection={<IconTruck size={18} />}
+              onClick={() => navigate('/commandes-revendeur')}
+            >
+              Commandes Revendeurs
+            </Button>
+            <Button
+              variant="filled"
+              color="orange"
+              leftSection={<IconFileInvoice size={18} />}
+              onClick={() => navigate('/factures')}
+            >
+              Factures Standard
+            </Button>
+            <Button
+              variant="light"
+              color="grape"
+              leftSection={<IconReceipt size={18} />}
+              onClick={() => navigate('/factures-revendeur')}
+            >
+              Factures Revendeurs
+            </Button>
+          </Group>
+        </Card>
+
+        {/* TABLEAU */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
           <Paper bg="gray.0" p="md" style={{ borderBottom: '1px solid #e5e7eb' }}>
             <Flex justify="space-between" align="center">
@@ -419,123 +617,131 @@ export const ListeFactures: React.FC = () => {
             </Flex>
           </Paper>
 
-          <Box style={{ overflowX: 'auto' }}>
-            <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
-              <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                  <Table.Th w={60}>N°</Table.Th>
-                  <Table.Th>Client</Table.Th>
-                  <Table.Th w={120}>Date facture</Table.Th>
-                  <Table.Th w={110}>Type</Table.Th>
-                  <Table.Th w={150}>Montant TTC</Table.Th>
-                  <Table.Th w={150}>Code Facture</Table.Th>
-                  <Table.Th ta="center" w={160}>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {paginatedFactures.map((facture: any, index) => {
-                  const typeLabel = getTypeFactureLabel(facture);
-                  const uniqueKey = facture.idFacture || facture.idFactureRevendeur;
-                  const clientName = facture.NomComplet || '-';
-                  const codeFacture = facture.code_facture || '-';
+       <Box style={{ overflowX: 'auto' }}>
+  <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
+    <Table.Thead>
+      <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+        <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '12px' }}>N°</Table.Th>
+        <Table.Th c="white" style={{ width: 180, fontSize: '12px' }}>Client</Table.Th>
+        <Table.Th c="white" style={{ width: 100, fontSize: '12px' }}>Date</Table.Th>
+        <Table.Th c="white" style={{ width: 90, fontSize: '12px' }}>Type</Table.Th>
+        <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '12px' }}>Montant TTC</Table.Th>
+        <Table.Th c="white" style={{ width: 130, fontSize: '12px' }}>Code Facture</Table.Th>
+        <Table.Th c="white" style={{ width: 280, textAlign: 'center', fontSize: '12px' }}>Actions</Table.Th>
+      </Table.Tr>
+    </Table.Thead>
+    <Table.Tbody>
+      {paginatedFactures.map((facture: any, index) => {
+        const typeLabel = getTypeFactureLabel(facture);
+        const uniqueKey = facture.idFacture || facture.idFactureRevendeur;
+        const clientName = facture.NomComplet || '-';
+        const codeFacture = facture.code_facture || '-';
 
-                  return (
-                    <Table.Tr key={uniqueKey}>
-                      <Table.Td fw={500}>
-                        {(currentPage - 1) * itemsPerPage + index + 1}
-                      </Table.Td>
+        return (
+          <Table.Tr key={uniqueKey}>
+            <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+              <Text fw={600} size="sm">{(currentPage - 1) * itemsPerPage + index + 1}</Text>
+            </Table.Td>
+            <Table.Td style={{ verticalAlign: 'middle' }}>
+              <Group gap="sm" wrap="nowrap">
+                <Avatar size="sm" radius="xl" color="blue">
+                  {clientName.charAt(0).toUpperCase()}
+                </Avatar>
+                <Text fw={500} size="sm">{clientName}</Text>
+              </Group>
+            </Table.Td>
+            <Table.Td style={{ verticalAlign: 'middle' }}>
+              <Text size="sm">
+                {facture.date_facture ? new Date(facture.date_facture).toLocaleDateString("fr-FR") : "-"}
+              </Text>
+            </Table.Td>
+            <Table.Td style={{ verticalAlign: 'middle' }}>
+              <Badge 
+                size="sm" 
+                color={typeLabel === "Revendeur" ? "green" : "blue"} 
+                variant="light"
+                leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+              >
+                {typeLabel}
+              </Badge>
+            </Table.Td>
+            <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+              <Text fw={600} size="sm" c="blue">{formatMontant(facture.montant_ttc)} FCFA</Text>
+            </Table.Td>
+            <Table.Td style={{ verticalAlign: 'middle' }}>
+              <Text fw={500} size="sm">{codeFacture}</Text>
+            </Table.Td>
+            <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+              {/* 🔥 Boutons compactés sur une seule ligne */}
+              <Group gap="4" justify="center" wrap="nowrap">
+                <Tooltip label="Voir détails">
+                  <ActionIcon 
+                    variant="light" 
+                    color="blue" 
+                    size="sm" 
+                    onClick={() => handleViewFacture(facture)} 
+                    loading={loadingDetails}
+                  >
+                    <IconEye size={16} />
+                  </ActionIcon>
+                </Tooltip>
 
-                      <Table.Td>
-                        <Group gap="sm">
-                          <Avatar size="md" radius="xl" color="blue">
-                            {clientName.charAt(0).toUpperCase()}
-                          </Avatar>
-                          <Text fw={500} size="sm">
-                            {clientName}
-                          </Text>
-                        </Group>
-                      </Table.Td>
+                <Tooltip label="Régler">
+                  <ActionIcon 
+                    variant="light" 
+                    color="green" 
+                    size="sm" 
+                    onClick={() => handleRegler(facture)}
+                  >
+                    <IconCash size={16} />
+                  </ActionIcon>
+                </Tooltip>
 
-                      <Table.Td>
-                        {facture.date_facture
-                          ? new Date(facture.date_facture).toLocaleDateString("fr-FR")
-                          : "-"}
-                      </Table.Td>
+                <Tooltip label="Reçu de règlement">
+                  <ActionIcon 
+                    variant="light" 
+                    color="orange" 
+                    size="sm" 
+                    onClick={() => handleGenererRecu(facture)}
+                  >
+                    <IconReceipt size={16} />
+                  </ActionIcon>
+                </Tooltip>
 
-                      <Table.Td>
-                        <Badge
-                          size="md"
-                          color={typeLabel === "Revendeur" ? "green" : "blue"}
-                          variant="light"
-                          leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
-                        >
-                          {typeLabel}
-                        </Badge>
-                      </Table.Td>
+                <Tooltip label="Imprimer">
+                  <ActionIcon 
+                    variant="light" 
+                    color="teal" 
+                    size="sm" 
+                    onClick={handlePrint}
+                  >
+                    <IconPrinter size={16} />
+                  </ActionIcon>
+                </Tooltip>
 
-                      <Table.Td>
-                        <Text fw={600} c="blue">
-                          {formatMontant(facture.montant_ttc)} FCFA
-                        </Text>
-                      </Table.Td>
-
-                      <Table.Td>
-                        <Text fw={500} size="sm">
-                          {codeFacture}
-                        </Text>
-                      </Table.Td>
-
-                      <Table.Td ta="center">
-                        <Group gap="xs" justify="center">
-                          <Tooltip label="Voir détails">
-                            <ActionIcon
-                              variant="light"
-                              color="blue"
-                              size="lg"
-                              onClick={() => handleViewFacture(facture)}
-                              loading={loadingDetails}
-                            >
-                              <IconEye size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Imprimer">
-                            <ActionIcon
-                              variant="light"
-                              color="teal"
-                              size="lg"
-                              onClick={handlePrint}
-                            >
-                              <IconPrinter size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Télécharger">
-                            <ActionIcon
-                              variant="light"
-                              color="grape"
-                              size="lg"
-                              onClick={() => handleDownload(facture)}
-                            >
-                              <IconDownload size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </Box>
-
+                <Tooltip label="Télécharger">
+                  <ActionIcon 
+                    variant="light" 
+                    color="grape" 
+                    size="sm" 
+                    onClick={() => handleDownload(facture)}
+                  >
+                    <IconDownload size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Table.Td>
+          </Table.Tr>
+        );
+      })}
+    </Table.Tbody>
+  </Table>
+</Box>
           {filteredFactures.length === 0 && (
             <Flex justify="center" align="center" direction="column" py={60}>
               <IconFileInvoice size={60} color="#ccc" />
               <Text ta="center" c="dimmed" mt="md">Aucune facture trouvée</Text>
-              <Button mt="md" variant="light" onClick={refresh} leftSection={<IconRefresh size={16} />}>
-                Actualiser
-              </Button>
+              <Button mt="md" variant="light" onClick={refresh} leftSection={<IconRefresh size={16} />}>Actualiser</Button>
             </Flex>
           )}
 
@@ -548,39 +754,16 @@ export const ListeFactures: React.FC = () => {
       </Stack>
 
       {/* MODAL FACTURE */}
-      <Modal
-        opened={factureModalOpened}
-        onClose={() => setFactureModalOpened(false)}
-        title={`Facture ${selectedFacture?.code_facture || ''}`}
-        size="xl"
-        fullScreen
-      >
+      <Modal opened={factureModalOpened} onClose={() => setFactureModalOpened(false)} title={`Facture ${selectedFacture?.code_facture || ''}`} size="xl" fullScreen>
         {selectedFacture && (
           <>
             <Group justify="flex-end" mb="md">
-              <Button
-                variant="outline"
-                onClick={() => setFactureModalOpened(false)}
-                leftSection={<IconX size={16} />}
-              >
-                Fermer
-              </Button>
-              <Button
-                variant="filled"
-                color="blue"
-                leftSection={<IconPrinter size={16} />}
-                onClick={handlePrint}
-              >
-                Imprimer
-              </Button>
+              <Button variant="outline" onClick={() => setFactureModalOpened(false)} leftSection={<IconX size={16} />}>Fermer</Button>
+              <Button variant="filled" color="blue" leftSection={<IconPrinter size={16} />} onClick={handlePrint}>Imprimer</Button>
             </Group>
-
             <Divider mb="md" />
-
             {loadingDetails ? (
-              <Flex justify="center" py={60}>
-                <Loader size="xl" />
-              </Flex>
+              <Flex justify="center" py={60}><Loader size="xl" /></Flex>
             ) : isRevendeurFacture(selectedFacture) ? (
               <FactureRevendeur facture={selectedFacture} />
             ) : (
@@ -589,6 +772,18 @@ export const ListeFactures: React.FC = () => {
           </>
         )}
       </Modal>
+
+      {/* MODAL RÈGLEMENT */}
+      <FormulaireReglement
+        opened={reglementModalOpened}
+        onClose={() => {
+          setReglementModalOpened(false);
+          refresh();
+        }}
+        idFacture={reglementData.idFacture}
+        idClient={reglementData.idClient}
+        montantMax={reglementData.montantMax}
+      />
     </>
   );
 };
