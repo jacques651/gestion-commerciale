@@ -5,12 +5,14 @@ import {
   Button, Group, Stack, Title, Card, Text,
   Modal, TextInput, Paper,
   Loader, ThemeIcon, Flex, ActionIcon,
-  ScrollArea, Pagination, Tooltip, Select, Badge, Table, SimpleGrid} from '@mantine/core';
+  ScrollArea, Pagination, Tooltip, Select, Badge, Table, SimpleGrid
+} from '@mantine/core';
 import {
   IconSearch, IconRefresh, IconReceipt,
   IconX, IconEye,
   IconPrinter, IconFilter, IconList, IconPlus, IconArrowBackUp, IconFileInvoice,
-  IconCalendar, IconPackage} from '@tabler/icons-react';
+  IconCalendar, IconPackage
+} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import NouveauDecompte from './NouveauDecompte';
@@ -78,128 +80,128 @@ export const ListeDecomptes: React.FC = () => {
 
   // Charger les décomptes groupés
   const chargerDecomptes = async () => {
-  setLoading(true);
-  try {
-    const db = await getDb();
+    setLoading(true);
+    try {
+      const db = await getDb();
 
-    // Vérifier d'abord la structure de la table
-    const factureColumns = await db.select<any[]>(`
-      PRAGMA table_info(factures_revendeur)
-    `);
-    console.log("Colonnes de factures_revendeur:", factureColumns);
-    
-    // Trouver le nom de la colonne code facture
-    const codeFactureColumn = factureColumns.find(col => 
-      col.name === 'code_facture' || 
-      col.name === 'code' || 
-      col.name === 'facture_code'
-    )?.name || 'code_facture';
-
-    const result = await db.select<any[]>(`
-      SELECT 
-        d.idDecompte,
-        d.code_decompte,
-        d.date_decompte,
-        c.NomComplet as client_nom,
-        c.Societe as client_societe,
-        c.Tel as client_tel,
-        fr.${codeFactureColumn} as code_facture,
-        d.montant_vente,
-        d.montant_commission,
-        d.montant_net,
-        d.taux_commission,
-        dd.idProduit,
-        p.designation as produit_designation,
-        p.categorie as produit_categorie,
-        dd.qte_decompte,
-        dd.prix_achat,
-        dd.prix_vente,
-        dd.benefice,
-        dd.commission
-      FROM decomptes d
-      INNER JOIN clients c ON c.idClient = d.idClient
-      LEFT JOIN factures_revendeur fr ON fr.idFactureRevendeur = d.idFactureRevendeur
-      LEFT JOIN decompte_details dd ON dd.idDecompte = d.idDecompte
-      LEFT JOIN products p ON p.idProduit = dd.idProduit
-      ORDER BY d.date_decompte DESC
-    `);
-
-    console.log("Résultat avec code_facture:", result.map(r => ({ 
-      idDecompte: r.idDecompte, 
-      code_facture: r.code_facture 
-    })));
-
-    // Grouper par décompte
-    const grouped = new Map<number, GroupedDecompte>();
-    
-    for (const row of result) {
-      if (!grouped.has(row.idDecompte)) {
-        grouped.set(row.idDecompte, {
-          idDecompte: row.idDecompte,
-          code_decompte: row.code_decompte,
-          date_decompte: row.date_decompte,
-          client_nom: row.client_nom,
-          client_societe: row.client_societe,
-          client_tel: row.client_tel,
-          code_facture: row.code_facture,
-          montant_vente: row.montant_vente || 0,
-          montant_commission: row.montant_commission || 0,
-          montant_net: row.montant_net || 0,
-          taux_commission: row.taux_commission || 0,
-          produits: []
-        });
-      }
+      // Vérifier d'abord la structure de la table
+      const factureColumns = await db.select<any[]>(`
+        PRAGMA table_info(factures_revendeur)
+      `);
+      console.log("Colonnes de factures_revendeur:", factureColumns);
       
-      if (row.idProduit) {
-        grouped.get(row.idDecompte)!.produits.push({
-          idDecompte: row.idDecompte,
-          code_decompte: row.code_decompte,
-          date_decompte: row.date_decompte,
-          client_nom: row.client_nom,
-          client_societe: row.client_societe,
-          client_tel: row.client_tel,
-          produit_designation: row.produit_designation,
-          produit_categorie: row.produit_categorie,
-          code_facture: row.code_facture,
-          quantite_decompte: row.qte_decompte,
-          quantite_vendue: 0,
-          quantite_restante: 0,
-          prix_achat: row.prix_achat,
-          prix_vente: row.prix_vente,
-          total_achat: (row.prix_achat || 0) * (row.qte_decompte || 0),
-          total_vente: (row.prix_vente || 0) * (row.qte_decompte || 0),
-          benefice: row.benefice || 0,
-          commission: row.commission || 0,
-          taux_commission: row.taux_commission || 0
-        } as DetailDecompte);
+      // Trouver le nom de la colonne code facture
+      const codeFactureColumn = factureColumns.find(col => 
+        col.name === 'code_facture' || 
+        col.name === 'code' || 
+        col.name === 'facture_code'
+      )?.name || 'code_facture';
+
+      const result = await db.select<any[]>(`
+        SELECT 
+          d.idDecompte,
+          d.code_decompte,
+          d.date_decompte,
+          c.NomComplet as client_nom,
+          c.Societe as client_societe,
+          c.Tel as client_tel,
+          fr.${codeFactureColumn} as code_facture,
+          d.montant_vente,
+          d.montant_commission,
+          d.montant_net,
+          d.taux_commission,
+          dd.idProduit,
+          p.designation as produit_designation,
+          p.categorie as produit_categorie,
+          dd.qte_decompte,
+          dd.prix_achat,
+          dd.prix_vente,
+          dd.benefice,
+          dd.commission
+        FROM decomptes d
+        INNER JOIN clients c ON c.idClient = d.idClient
+        LEFT JOIN factures_revendeur fr ON fr.idFactureRevendeur = d.idFactureRevendeur
+        LEFT JOIN decompte_details dd ON dd.idDecompte = d.idDecompte
+        LEFT JOIN products p ON p.idProduit = dd.idProduit
+        ORDER BY d.date_decompte DESC
+      `);
+
+      console.log("Résultat avec code_facture:", result.map(r => ({ 
+        idDecompte: r.idDecompte, 
+        code_facture: r.code_facture 
+      })));
+
+      // Grouper par décompte
+      const grouped = new Map<number, GroupedDecompte>();
+      
+      for (const row of result) {
+        if (!grouped.has(row.idDecompte)) {
+          grouped.set(row.idDecompte, {
+            idDecompte: row.idDecompte,
+            code_decompte: row.code_decompte,
+            date_decompte: row.date_decompte,
+            client_nom: row.client_nom,
+            client_societe: row.client_societe,
+            client_tel: row.client_tel,
+            code_facture: row.code_facture,
+            montant_vente: row.montant_vente || 0,
+            montant_commission: row.montant_commission || 0,
+            montant_net: row.montant_net || 0,
+            taux_commission: row.taux_commission || 0,
+            produits: []
+          });
+        }
+        
+        if (row.idProduit) {
+          grouped.get(row.idDecompte)!.produits.push({
+            idDecompte: row.idDecompte,
+            code_decompte: row.code_decompte,
+            date_decompte: row.date_decompte,
+            client_nom: row.client_nom,
+            client_societe: row.client_societe,
+            client_tel: row.client_tel,
+            produit_designation: row.produit_designation,
+            produit_categorie: row.produit_categorie,
+            code_facture: row.code_facture,
+            quantite_decompte: row.qte_decompte,
+            quantite_vendue: 0,
+            quantite_restante: 0,
+            prix_achat: row.prix_achat,
+            prix_vente: row.prix_vente,
+            total_achat: (row.prix_achat || 0) * (row.qte_decompte || 0),
+            total_vente: (row.prix_vente || 0) * (row.qte_decompte || 0),
+            benefice: row.benefice || 0,
+            commission: row.commission || 0,
+            taux_commission: row.taux_commission || 0
+          } as DetailDecompte);
+        }
       }
-    }
 
-    const decomptesArray = Array.from(grouped.values());
-    setDecomptes(decomptesArray);
+      const decomptesArray = Array.from(grouped.values());
+      setDecomptes(decomptesArray);
 
-    // Extraire les listes pour les filtres
-    const uniqueClients = [...new Map(decomptesArray.map(d => [d.client_nom, {
-      value: d.client_nom,
-      label: d.client_nom
-    }])).values()];
-    setClientsList(uniqueClients);
-
-    const uniqueCodeFactures = [...new Map(decomptesArray
-      .filter(d => d.code_facture)
-      .map(d => [d.code_facture, {
-        value: d.code_facture,
-        label: d.code_facture
+      // Extraire les listes pour les filtres
+      const uniqueClients = [...new Map(decomptesArray.map(d => [d.client_nom, {
+        value: d.client_nom,
+        label: d.client_nom
       }])).values()];
-    setCodeFacturesList(uniqueCodeFactures);
+      setClientsList(uniqueClients);
 
-  } catch (error) {
-    console.error('Erreur chargement décomptes:', error);
-    notifications.show({ title: 'Erreur', message: 'Erreur de chargement', color: 'red' });
-  } finally {
-    setLoading(false);
-  }
-};
+      const uniqueCodeFactures = [...new Map(decomptesArray
+        .filter(d => d.code_facture)
+        .map(d => [d.code_facture, {
+          value: d.code_facture,
+          label: d.code_facture
+        }])).values()];
+      setCodeFacturesList(uniqueCodeFactures);
+
+    } catch (error) {
+      console.error('Erreur chargement décomptes:', error);
+      notifications.show({ title: 'Erreur', message: 'Erreur de chargement', color: 'red' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Charger les produits non vendus
   const chargerProduitsNonVendus = async () => {
@@ -316,7 +318,6 @@ export const ListeDecomptes: React.FC = () => {
       notifications.show({ title: 'Information', message: 'Aucun décompte à imprimer', color: 'blue' });
       return;
     }
-    // Pour la période, on pourrait générer un récapitulatif
     notifications.show({ title: 'Information', message: 'Impression récapitulative des décomptes de la période', color: 'blue' });
   };
 
@@ -439,29 +440,29 @@ export const ListeDecomptes: React.FC = () => {
                     size="sm"
                   />
                   <TextInput
-  label="Date début"
-  placeholder="Sélectionner une date"
-  type="date"
-  value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''}
-  onChange={(e) => {
-    const val = e.target.value;
-    setDateDebut(val ? new Date(val) : null);
-  }}
-  size="sm"
-  leftSection={<IconCalendar size={14} />}
-/>
-<TextInput
-  label="Date fin"
-  placeholder="Sélectionner une date"
-  type="date"
-  value={dateFin ? dateFin.toISOString().split('T')[0] : ''}
-  onChange={(e) => {
-    const val = e.target.value;
-    setDateFin(val ? new Date(val) : null);
-  }}
-  size="sm"
-  leftSection={<IconCalendar size={14} />}
-/>
+                    label="Date début"
+                    placeholder="Sélectionner une date"
+                    type="date"
+                    value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDateDebut(val ? new Date(val) : null);
+                    }}
+                    size="sm"
+                    leftSection={<IconCalendar size={14} />}
+                  />
+                  <TextInput
+                    label="Date fin"
+                    placeholder="Sélectionner une date"
+                    type="date"
+                    value={dateFin ? dateFin.toISOString().split('T')[0] : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDateFin(val ? new Date(val) : null);
+                    }}
+                    size="sm"
+                    leftSection={<IconCalendar size={14} />}
+                  />
                 </SimpleGrid>
                 <Group justify="flex-end" mt="md">
                   <Button size="xs" variant="outline" onClick={resetFilters}>Tout effacer</Button>
@@ -651,8 +652,11 @@ export const ListeDecomptes: React.FC = () => {
               qteRestante: 0,
               prixAchat: p.prix_achat,
               prixVente: p.prix_vente,
-              commissionPourcentage: selectedDecompte.taux_commission
+              commissionPourcentage: selectedDecompte.taux_commission || 60
             }))}
+            factureOriginale={{ 
+              taux_commission_revendeur: selectedDecompte.taux_commission || 60 
+            }}
           />
         )}
         <Group justify="flex-end" mt="md">

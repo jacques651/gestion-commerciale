@@ -165,7 +165,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
         const totalVentes = Number(ventesCA[0]?.total || 0);
         const chiffreAffairesGlobal = totalCommandes + totalVentes;
 
-        // ✅ CORRECTION: Total des commissions (si la colonne existe)
+        // 🔥 CORRECTION: Total des commissions (si la colonne existe)
         let totalCommissions = 0;
         let netAReverser = 0;
 
@@ -175,9 +175,20 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             FROM decomptes
           `);
           totalCommissions = Number(commissions[0]?.total || 0);
+        } else {
+          // 🔥 Si la colonne n'existe pas, calculer la commission à partir du taux
+          const decomptesData = await db.select<any[]>(`
+            SELECT montant_vente, taux_commission
+            FROM decomptes
+          `);
+          for (const d of decomptesData) {
+            if (d.montant_vente && d.taux_commission) {
+              totalCommissions += (d.montant_vente * d.taux_commission) / 100;
+            }
+          }
         }
 
-        // Net à reverser (si les colonnes existent)
+        // 🔥 Net à reverser
         if (hasMontantVente && hasMontantCommission) {
           const net = await db.select<any[]>(`
             SELECT COALESCE(SUM(montant_vente - montant_commission), 0) as total
@@ -190,6 +201,17 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             FROM decomptes
           `);
           netAReverser = Number(ventesRevendeur[0]?.total || 0);
+        } else {
+          // 🔥 Si les colonnes n'existent pas, calculer à partir des détails
+          const details = await db.select<any[]>(`
+            SELECT dd.qte_decompte, dd.prix_vente, dd.prix_achat, d.taux_commission
+            FROM decompte_details dd
+            INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
+          `);
+          for (const det of details) {
+            const beneficeLigne = (det.prix_vente - det.prix_achat) * det.qte_decompte;
+            netAReverser += beneficeLigne - (beneficeLigne * (det.taux_commission || 60)) / 100;
+          }
         }
 
         // Encaissements reçus
@@ -244,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           stockRevendeur: Number(stockRevendeur[0]?.total || 0)
         });
 
-        // ✅ CORRECTION: Derniers décomptes (avec gestion des colonnes manquantes)
+        // 🔥 CORRECTION: Derniers décomptes (avec gestion des colonnes manquantes)
         let lastDecomptesQuery = `
           SELECT
             d.idDecompte,
@@ -387,7 +409,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        {/* HEADER ATTRACTIF - identique à votre version */}
+        {/* HEADER */}
         <Paper
           p="xl"
           radius="lg"
@@ -397,7 +419,6 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
             overflow: 'hidden'
           }}
         >
-          {/* ... contenu identique ... */}
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
@@ -468,7 +489,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </SimpleGrid>
         </Paper>
 
-        {/* LIENS RAPIDES - identique */}
+        {/* LIENS RAPIDES */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group gap="xs" mb="md">
             <ThemeIcon color="blue" variant="light" size="sm">
@@ -509,7 +530,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </SimpleGrid>
         </Card>
 
-        {/* KPI CARDS - identique */}
+        {/* KPI CARDS */}
         <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md">
           <Card withBorder radius="md" p="sm">
             <Group justify="space-between">
@@ -598,7 +619,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           </SimpleGrid>
         </Card>
 
-        {/* STATISTIQUES FINANCIÈRES - identique */}
+        {/* STATISTIQUES FINANCIÈRES */}
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           <Card withBorder radius="lg" shadow="sm" p="lg">
             <Group gap="xs" mb="md">
@@ -720,7 +741,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group gap="xs" mb="md">
             <ThemeIcon color="grape" variant="light" size="sm">
-              <IconPercentage size={16} />  {/* ✅ Remplacer IconCommission */}
+              <IconPercentage size={16} />
             </ThemeIcon>
             <Text fw={600}>📋 Derniers décomptes revendeurs</Text>
             <Badge color="grape" variant="light">10 derniers</Badge>

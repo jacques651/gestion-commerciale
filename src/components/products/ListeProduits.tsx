@@ -319,7 +319,7 @@ export const ListeProduits: React.FC = () => {
           <Group>
             <Button variant="light" color="yellow" leftSection={<IconUpload size={18} />} onClick={() => setImportModalOpen(true)}>Importer</Button>
             <Button variant="light" color="white" leftSection={<IconRefresh size={18} />} onClick={loadProducts}>Actualiser</Button>
-            <Button variant="filled" color="white" c="dark" leftSection={<IconPlus size={18} />} onClick={() => setModalOpened(true)}>Nouveau produit</Button>
+            <Button variant="filled" color="white" c="yellow" leftSection={<IconPlus size={18} />} onClick={() => setModalOpened(true)}>Nouveau produit</Button>
           </Group>
         </Flex>
 

@@ -1,12 +1,13 @@
 // src/App.tsx
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, BrowserRouter, useNavigate } from 'react-router-dom';
-import { AppShell, Loader, Center, Button, Notification, MantineProvider } from '@mantine/core';
+import { AppShell, Loader, Center, Button, Notification, MantineProvider, Stack, Text } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
 import Navbar from './components/common/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { initDatabase, getDb, isDatabaseConnected } from './database/db';
+import { getDb, isDatabaseConnected } from './database/db';
+import { initDatabaseWithMigrations } from './database/runMigration';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 
@@ -46,10 +47,18 @@ const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
 const ListeDecomptes = lazy(() => import('./components/decomptes/ListeDecomptes'));
 const ListeReglements = lazy(() => import('./components/reglements/ListeReglements'));
 
+// ==================== CAISSE ====================
+const JournalCaisse = lazy(() => import('./components/caisse/JournalCaisse'));
+const ChargesFonctionnement = lazy(() => import('./components/caisse/ChargesFonctionnement'));
+
+// ==================== CRÉDITS ====================
+const ListeCredits = lazy(() => import('./components/credits/ListeCredits'));
+const RemboursementsList = lazy(() => import('./components/credits/RemboursementsList'));
+
 // ==================== PARAMÈTRES ====================
 const ListeUtilisateurs = lazy(() => import('./components/utilisateurs/ListeUtilisateurs'));
 const ParametresAtelier = lazy(() => import('./components/parametres/ParametresAtelier'));
-const ConfigCommerce = lazy(() => import('./components/parametres/ConfigCommerce'));
+const DiagnosticDB = lazy(() => import('./components/DiagnosticDB'));
 
 // ==================== TYPES ====================
 type PageKey =
@@ -62,6 +71,8 @@ type PageKey =
   | 'stock'
   | 'decomptes'
   | 'reglements'
+  | 'credits'
+  | 'remboursements'
   | 'utilisateurs'
   | 'parametres'
   | 'commandes-revendeur'
@@ -183,6 +194,8 @@ function AuthenticatedApp() {
       stock: '/stock',
       decomptes: '/decomptes',
       reglements: '/reglements',
+      credits: '/credits',
+      remboursements: '/remboursements',
       utilisateurs: '/utilisateurs',
       parametres: '/parametres',
       'commandes-revendeur': '/commandes-revendeur',
@@ -215,7 +228,7 @@ function AuthenticatedApp() {
                 <Dashboard setPage={handleSetPage} />
               </RouteGuard>
             } />
-
+            
             {/* GESTION COMMERCIALE */}
             <Route path="/clients" element={
               <RouteGuard roles={['admin', 'gestionnaire']}>
@@ -331,6 +344,32 @@ function AuthenticatedApp() {
               </RouteGuard>
             } />
 
+            {/* 🔥 CAISSE */}
+            <Route path="/caisse" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <JournalCaisse />
+              </RouteGuard>
+            } />
+            <Route path="/charges" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <ChargesFonctionnement />
+              </RouteGuard>
+            } />
+
+            {/* 🔥 CRÉDITS */}
+            <Route path="/credits" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <ListeCredits />
+              </RouteGuard>
+            } />
+
+            {/* 🔥 REMBOURSEMENTS */}
+            <Route path="/remboursements" element={
+              <RouteGuard roles={['admin', 'gestionnaire']}>
+                <RemboursementsList />
+              </RouteGuard>
+            } />
+
             {/* PARAMÈTRES */}
             <Route path="/utilisateurs" element={
               <RouteGuard roles={['admin']}>
@@ -342,9 +381,10 @@ function AuthenticatedApp() {
                 <ParametresAtelier />
               </RouteGuard>
             } />
-            <Route path="/config-commerce" element={
+
+            <Route path="/diagnostic" element={
               <RouteGuard roles={['admin']}>
-                <ConfigCommerce />
+                <DiagnosticDB />
               </RouteGuard>
             } />
 
@@ -379,23 +419,55 @@ const queryClient = new QueryClient({
 // ==================== APP PRINCIPALE ====================
 function App() {
   const [dbReady, setDbReady] = useState(false);
+  const [migrationRunning, setMigrationRunning] = useState(true);
 
   useEffect(() => {
     const setup = async () => {
       try {
-        await initDatabase();
+        console.log('🚀 Démarrage de l\'application...');
+        
+        // 🔥 Exécuter la migration complète avec le schéma
+        await initDatabaseWithMigrations();
+        
+        console.log('✅ Base de données initialisée avec succès');
         setDbReady(true);
       } catch (error: any) {
         const errorMsg = error?.message || 'Erreur inconnue';
-        console.error('Erreur DB fatale:', errorMsg);
+        console.error('❌ Erreur DB fatale:', errorMsg);
         setDbReady(false);
+      } finally {
+        setMigrationRunning(false);
       }
     };
     setup();
   }, []);
 
+  // Afficher un loader pendant la migration
+  if (migrationRunning) {
+    return (
+      <Center style={{ height: '100vh' }}>
+        <Stack align="center" gap="md">
+          <Loader size="xl" variant="dots" />
+          <Text size="lg" fw={600}>Initialisation de la base de données...</Text>
+          <Text size="sm" c="dimmed">Création des tables et migration en cours</Text>
+        </Stack>
+      </Center>
+    );
+  }
+
   if (!dbReady) {
-    return <LoadingFallback />;
+    return (
+      <Center style={{ height: '100vh' }}>
+        <Stack align="center" gap="md">
+          <Notification title="Erreur Base de données" color="red">
+            Impossible d'initialiser la base de données.
+            <Button onClick={() => window.location.reload()} size="xs" mt="md">
+              Réessayer
+            </Button>
+          </Notification>
+        </Stack>
+      </Center>
+    );
   }
 
   return (

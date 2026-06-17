@@ -354,3 +354,86 @@ CREATE TABLE IF NOT EXISTS reglements (
     FOREIGN KEY(idFacture)
         REFERENCES factures(idFacture)
 );
+-- =====================================================
+-- 14. CAISSE - JOURNAL DE CAISSE
+-- =====================================================
+
+-- Journal de caisse principal
+CREATE TABLE IF NOT EXISTS journal_caisse (
+    idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_journal TEXT UNIQUE NOT NULL,
+    date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
+    type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
+    categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    solde_apres REAL NOT NULL,
+    reference TEXT,
+    idReference INTEGER,
+    idUtilisateur INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+-- Charges de fonctionnement
+CREATE TABLE IF NOT EXISTS charges_fonctionnement (
+    idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_charge TEXT UNIQUE NOT NULL,
+    date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    beneficiaire TEXT NOT NULL,
+    categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
+    reference_paiement TEXT,
+    idJournal INTEGER,
+    idUtilisateur INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+-- Catégories de charges
+CREATE TABLE IF NOT EXISTS categories_charges (
+    idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_categorie TEXT UNIQUE NOT NULL,
+    libelle TEXT NOT NULL,
+    description TEXT,
+    est_actif INTEGER DEFAULT 1
+);
+
+-- Récapitulatif journalier
+CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
+    idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_recap DATE UNIQUE NOT NULL,
+    solde_initial REAL DEFAULT 0,
+    total_entrees REAL DEFAULT 0,
+    total_sorties REAL DEFAULT 0,
+    solde_final REAL DEFAULT 0,
+    total_ventes_comptoir REAL DEFAULT 0,
+    total_reglements_factures REAL DEFAULT 0,
+    total_decomptes_revendeurs REAL DEFAULT 0,
+    total_charges REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index pour performance
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_type ON journal_caisse(type_mouvement);
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_categorie ON journal_caisse(categorie);
+CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charge);
+CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
+
+-- =====================================================
+-- 15. DONNEES INITIALES - CATEGORIES DE CHARGES
+-- =====================================================
+
+INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
+('EAU', 'Eau'),
+('ELECTRICITE', 'Électricité'),
+('LOYER', 'Loyer'),
+('SALAIRE', 'Salaire'),
+('TRANSPORT', 'Transport'),
+('COMMUNICATION', 'Communication'),
+('AUTRE', 'Autres charges');

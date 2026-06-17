@@ -1,29 +1,81 @@
 // src/components/decomptes/GestionDecomptes.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Stack, Card, Title, Text, Group, Button, Paper,
-  ThemeIcon, SimpleGrid, Flex, Tabs, Badge, Tooltip
+  ThemeIcon, SimpleGrid, Flex, Tabs, Badge, Tooltip, Loader, Center
 } from '@mantine/core';
 import {
   IconReceipt, IconTruck, IconPackage, 
   IconFileInvoice, IconPlus, IconRefresh, IconArrowBackUp,
-  IconBuildingStore} from '@tabler/icons-react';
+  IconBuildingStore, IconList
+} from '@tabler/icons-react';
+import { getDb } from '../../database/db';
+import { notifications } from '@mantine/notifications';
 import { ListeDecomptes } from './ListeDecomptes';
 import { ListeCommandesRevendeur } from '../commandes/ListeCommandesRevendeur';
 import ListeStockRevendeur from '../pages/revendeurs/ListeStockRevendeur';
 
-
 export const GestionDecomptes: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string | null>('decomptes');
-
-  // Statistiques (à remplacer par des données réelles)
-  const stats = {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
     decomptes: 0,
     commandes: 0,
     stocks: 0
+  });
+
+  // Charger les statistiques
+  const chargerStats = async () => {
+    setLoading(true);
+    try {
+      const db = await getDb();
+      
+      // Nombre de décomptes
+      const decomptes = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM decomptes`
+      );
+      
+      // Nombre de commandes revendeurs
+      const commandes = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM commandes WHERE type_commande = 'REVENDEUR'`
+      );
+      
+      // Nombre de produits en stock revendeur
+      const stocks = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM stock_revendeur WHERE qte_stock > 0`
+      );
+      
+      setStats({
+        decomptes: decomptes[0]?.count || 0,
+        commandes: commandes[0]?.count || 0,
+        stocks: stocks[0]?.count || 0
+      });
+    } catch (error) {
+      console.error('Erreur chargement stats:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les statistiques',
+        color: 'red'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    chargerStats();
+  }, []);
+
+  if (loading) {
+    return (
+      <Center py={100}>
+        <Loader size="xl" />
+        <Text ml="md">Chargement des statistiques...</Text>
+      </Center>
+    );
+  }
 
   return (
     <Stack gap="lg" p="md">
@@ -50,7 +102,7 @@ export const GestionDecomptes: React.FC = () => {
               variant="light"
               color="white"
               leftSection={<IconRefresh size={18} />}
-              onClick={() => window.location.reload()}
+              onClick={chargerStats}
             >
               Actualiser
             </Button>
@@ -178,6 +230,17 @@ export const GestionDecomptes: React.FC = () => {
               size="sm"
             >
               Commandes Standard
+            </Button>
+          </Tooltip>
+          <Tooltip label="Stocks revendeurs">
+            <Button
+              variant="light"
+              color="orange"
+              leftSection={<IconList size={18} />}
+              onClick={() => navigate('/stock-revendeurs')}
+              size="sm"
+            >
+              Stocks Revendeurs
             </Button>
           </Tooltip>
         </Group>

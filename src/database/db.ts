@@ -523,7 +523,110 @@ CREATE TABLE IF NOT EXISTS config_commerce (
 );
 
 -- =====================================================
--- 16. VUES
+-- 16. CREDITS ET REMBOURSEMENTS
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS credits (
+    idCredit INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_credit TEXT NOT NULL UNIQUE,
+    date_credit TEXT NOT NULL,
+    designation TEXT NOT NULL,
+    montant_total REAL NOT NULL,
+    montant_restant REAL NOT NULL,
+    beneficiaire TEXT NOT NULL,
+    type_credit TEXT NOT NULL CHECK (type_credit IN ('CLIENT', 'FOURNISSEUR', 'AUTRE')),
+    reference TEXT,
+    notes TEXT,
+    statut TEXT NOT NULL DEFAULT 'EN_COURS' CHECK (statut IN ('EN_COURS', 'TERMINE', 'ANNULE')),
+    idJournal INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
+);
+
+CREATE TABLE IF NOT EXISTS remboursements (
+    idRemboursement INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_remboursement TEXT NOT NULL UNIQUE,
+    date_remboursement TEXT NOT NULL,
+    idCredit INTEGER NOT NULL,
+    montant REAL NOT NULL,
+    mode_paiement TEXT NOT NULL CHECK (mode_paiement IN ('ESPECES', 'VIREMENT', 'CHEQUE', 'MOBILE_MONEY', 'AUTRE')),
+    reference_paiement TEXT,
+    notes TEXT,
+    idJournal INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (idCredit) REFERENCES credits(idCredit) ON DELETE CASCADE,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
+CREATE INDEX IF NOT EXISTS idx_credits_statut ON credits(statut);
+CREATE INDEX IF NOT EXISTS idx_credits_date ON credits(date_credit);
+CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredit);
+CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
+
+-- =====================================================
+-- 17. JOURNAL DE CAISSE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS journal_caisse (
+    idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_journal TEXT UNIQUE NOT NULL,
+    date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
+    type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
+    categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    solde_apres REAL NOT NULL,
+    reference TEXT,
+    idReference INTEGER,
+    idUtilisateur INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+CREATE TABLE IF NOT EXISTS charges_fonctionnement (
+    idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_charge TEXT UNIQUE NOT NULL,
+    date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    beneficiaire TEXT NOT NULL,
+    categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
+    reference_paiement TEXT,
+    idJournal INTEGER,
+    idUtilisateur INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+CREATE TABLE IF NOT EXISTS categories_charges (
+    idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_categorie TEXT UNIQUE NOT NULL,
+    libelle TEXT NOT NULL,
+    description TEXT,
+    est_actif INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
+    idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_recap DATE UNIQUE NOT NULL,
+    solde_initial REAL DEFAULT 0,
+    total_entrees REAL DEFAULT 0,
+    total_sorties REAL DEFAULT 0,
+    solde_final REAL DEFAULT 0,
+    total_ventes_comptoir REAL DEFAULT 0,
+    total_reglements_factures REAL DEFAULT 0,
+    total_decomptes_revendeurs REAL DEFAULT 0,
+    total_charges REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- 18. VUES
 -- =====================================================
 
 -- Vue pour le calcul du PMP et stock actuel
@@ -571,7 +674,7 @@ LEFT JOIN lots_stock l ON m.idLot = l.idLot
 ORDER BY m.date_mouvement DESC;
 
 -- =====================================================
--- 17. INDEX
+-- 19. INDEX
 -- =====================================================
 
 CREATE INDEX IF NOT EXISTS idx_products_code ON products(code_produit);
@@ -583,9 +686,14 @@ CREATE INDEX IF NOT EXISTS idx_sorties_lot ON sorties_lots(idLot);
 CREATE INDEX IF NOT EXISTS idx_historique_produit ON historique_prix(idProduit);
 CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements_stock(idProduit);
 CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements_stock(date_mouvement);
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_type ON journal_caisse(type_mouvement);
+CREATE INDEX IF NOT EXISTS idx_journal_caisse_categorie ON journal_caisse(categorie);
+CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charge);
+CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
 
 -- =====================================================
--- 18. DONNÉES PAR DÉFAUT
+-- 20. DONNÉES PAR DÉFAUT
 -- =====================================================
 
 INSERT OR IGNORE INTO config_generale (id_config, nom_application, devise, taux_tva_default) 
@@ -628,6 +736,15 @@ INSERT OR IGNORE INTO unites (code_unite, nom_unite, symbole, est_unite_base) VA
 
 INSERT OR IGNORE INTO config_commerce (id, id_type_commerce, modules_actifs, parametres) 
 VALUES (1, 1, '[]', '{"tva_default":18,"devise":"FCFA"}');
+
+INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
+('EAU', 'Eau'),
+('ELECTRICITE', 'Électricité'),
+('LOYER', 'Loyer'),
+('SALAIRE', 'Salaire'),
+('TRANSPORT', 'Transport'),
+('COMMUNICATION', 'Communication'),
+('AUTRE', 'Autres charges');
 `;
 
 export const getDb = async (): Promise<Database> => {
@@ -668,6 +785,14 @@ export const initDatabase = async (): Promise<void> => {
     `);
     
     console.log('📋 Colonnes de products:', columns.map(c => c.name).join(', '));
+    
+    // Vérifier les tables de crédits
+    const creditTables = tables.filter(t => t.name === 'credits' || t.name === 'remboursements');
+    if (creditTables.length > 0) {
+      console.log('✅ Tables de crédits créées:', creditTables.map(t => t.name).join(', '));
+    } else {
+      console.warn('⚠️ Les tables de crédits n\'ont pas été créées');
+    }
     
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';

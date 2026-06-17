@@ -1,488 +1,791 @@
 // src/components/common/Navbar.tsx
-import React, { useState } from 'react';
+
+import { useState } from 'react';
 import {
-  Stack,
-  Text,
-  Box,
-  Divider,
-  useMantineTheme,
   ScrollArea,
   Group,
-  Tooltip,
-  Badge,
+  Text,
+  Box,
+  NavLink as MantineNavLink,
+  Divider,
   Avatar,
-  Menu,
   UnstyledButton,
+  Badge,
+  Stack,
   Modal,
-  TextInput,
+  Paper,
+  SimpleGrid,
+  ThemeIcon,
+  ActionIcon,
+  Tooltip,
   Button,
-  Switch,
-  Select,
-  PasswordInput,
-  LoadingOverlay
 } from '@mantine/core';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { notifications } from '@mantine/notifications';
 import {
-  IconLayoutDashboard,
+  IconDashboard,
+  IconPackage,
   IconUsers,
-  IconShoppingBag,
+  IconShoppingCart,
+  IconFileInvoice,
+  IconTruckDelivery,
+  IconCash,
   IconReceipt,
   IconMoneybag,
-  IconBuildingStore,
-  IconPackage,
-  IconUserCog,
+  IconChartBar,
   IconSettings,
+  IconUserCog,
   IconLogout,
-  IconChevronRight,
-  IconChevronDown,
-  IconBusinessplan,
-  IconTruck,
-  IconFileInvoice,
-  IconUser,
-  IconReportAnalytics,
-  IconHelp,
-  IconStar,
+  IconHistory,
+  IconBuildingWarehouse,
+  IconCoin,
   IconPercentage,
-  IconReceipt2
+  IconReportAnalytics,
+  IconChevronDown,
+  IconChevronRight,
+  IconCreditCard,
+  IconReceipt2,
+  IconUser,
+  IconMail,
+  IconPhone,
+  IconBuilding,
+  IconEdit,
+  IconLock,
+  IconShield,
 } from '@tabler/icons-react';
-import { Role } from '../../types/auth';
-import { userService, UserProfile } from '../../services/userService';
-import ParametresAtelier from '../parametres/ParametresAtelier';
+import { Link, useLocation } from 'react-router-dom';
 
-// ============================================================
-// TYPES
-// ============================================================
+interface NavbarProps {
+  userRole?: string;
+  userName?: string;
+  userEmail?: string;
+  userPhone?: string;
+  userCompany?: string;
+  onLogout: () => void;
+  onProfileUpdate?: () => void;
+}
+
 interface NavItemProps {
+  to: string;
   label: string;
-  path: string;
-  icon?: React.ReactNode;
-  roles?: Role[];
-  userRole?: Role;
+  icon: React.ReactNode;
+  active?: boolean;
   badge?: string;
   badgeColor?: string;
-  onClick?: () => void;
   disabled?: boolean;
+  onClick?: () => void;
 }
 
-interface SectionProps {
+interface NavSectionProps {
   title: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   children: React.ReactNode;
   defaultOpen?: boolean;
-  userRole?: Role;
-  roles?: Role[];
-  description?: string;
-  count?: number;
 }
 
-// ============================================================
-// COMPOSANT MODAL PROFIL
-// ============================================================
-interface ModalProfilProps {
-  opened: boolean;
-  onClose: () => void;
-  userName: string;
-  userRole: string;
-}
+// Composant pour un élément de navigation
+const NavItem: React.FC<NavItemProps> = ({
+  to,
+  label,
+  icon,
+  active,
+  badge,
+  badgeColor = 'blue',
+  disabled = false,
+  onClick,
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
 
-const ModalProfil: React.FC<ModalProfilProps> = ({ opened, onClose, userName, userRole }) => {
-  const [loading, setLoading] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [formData, setFormData] = useState({
-    email: '',
-    telephone: '',
-    theme: 'light',
-    notifications: true
-  });
-  const [passwordData, setPasswordData] = useState({
-    oldPassword: '',
-    newPassword: '',
-    confirmPassword: ''
-  });
-
-  React.useEffect(() => {
-    if (opened) {
-      loadProfile();
-    }
-  }, [opened]);
-
-  const loadProfile = async () => {
-    setLoading(true);
-    try {
-      const data = await userService.getCurrentUserProfile();
-      setProfile(data);
-      if (data) {
-        setFormData({
-          email: data.email || '',
-          telephone: data.telephone || '',
-          theme: data.theme || 'light',
-          notifications: data.notifications !== false
-        });
-      }
-    } catch (error) {
-      console.error('Erreur chargement profil:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateProfile = async () => {
-    if (!profile) return;
-    setLoading(true);
-    try {
-      const success = await userService.updateUserProfile(profile.id, {
-        email: formData.email,
-        telephone: formData.telephone,
-        theme: formData.theme,
-        notifications: formData.notifications
-      });
-      if (success) {
-        notifications.show({ title: '✅ Succès', message: 'Profil mis à jour', color: 'green' });
-        onClose();
-      } else {
-        notifications.show({ title: '❌ Erreur', message: 'Erreur lors de la mise à jour', color: 'red' });
-      }
-    } catch (error) {
-      notifications.show({ title: '❌ Erreur', message: 'Erreur lors de la mise à jour', color: 'red' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      notifications.show({ title: 'Erreur', message: 'Les mots de passe ne correspondent pas', color: 'red' });
-      return;
-    }
-    if (passwordData.newPassword.length < 4) {
-      notifications.show({ title: 'Erreur', message: 'Mot de passe trop court (min 4 caractères)', color: 'red' });
-      return;
-    }
-    setLoading(true);
-    try {
-      const success = await userService.changePassword(profile!.id, passwordData.oldPassword, passwordData.newPassword);
-      if (success) {
-        notifications.show({ title: '✅ Succès', message: 'Mot de passe modifié', color: 'green' });
-        setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
-      } else {
-        notifications.show({ title: '❌ Erreur', message: 'Ancien mot de passe incorrect', color: 'red' });
-      }
-    } catch (error) {
-      notifications.show({ title: '❌ Erreur', message: 'Erreur lors du changement', color: 'red' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getInitials = (name: string) => {
-    if (!name) return 'U';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  };
+  if (disabled) {
+    return (
+      <MantineNavLink
+        label={label}
+        leftSection={icon}
+        disabled
+        opacity={0.4}
+        styles={{
+          root: {
+            borderRadius: 8,
+            marginBottom: 2,
+          },
+          label: {
+            color: 'rgba(255,255,255,0.4)',
+          },
+        }}
+      />
+    );
+  }
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Mon profil" size="md" centered padding="lg">
-      <LoadingOverlay visible={loading} />
-      <Stack gap="md">
-        <Group justify="center">
-          <Avatar size={100} radius={100} color="blue">{getInitials(userName)}</Avatar>
+    <MantineNavLink
+      component={Link}
+      to={to}
+      label={
+        <Group justify="space-between" style={{ flex: 1 }}>
+          <Text
+            size="sm"
+            fw={active ? 600 : 400}
+            style={{
+              color: active ? '#ffffff' : (isHovered ? '#ffffff' : 'rgba(255,255,255,0.7)'),
+              transition: 'color 0.2s ease',
+            }}
+          >
+            {label}
+          </Text>
+          {badge && (
+            <Badge
+              size="xs"
+              color={badgeColor}
+              variant="filled"
+              radius="sm"
+              styles={{
+                root: {
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.3px',
+                  fontWeight: 600,
+                  fontSize: 9,
+                  padding: '2px 8px',
+                }
+              }}
+            >
+              {badge}
+            </Badge>
+          )}
         </Group>
-        <Group justify="center">
-          <Text fw={700} size="lg">{userName}</Text>
-          <Badge color="yellow" variant="light">{userRole}</Badge>
-        </Group>
-        <Divider label="Informations personnelles" labelPosition="center" />
-        <TextInput label="Email" placeholder="votre@email.com" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
-        <TextInput label="Téléphone" placeholder="+225 XX XX XX XX" value={formData.telephone} onChange={(e) => setFormData({ ...formData, telephone: e.target.value })} />
-        <Select label="Thème" value={formData.theme} onChange={(value) => setFormData({ ...formData, theme: value || 'light' })} data={[{ value: 'light', label: '☀️ Clair' }, { value: 'dark', label: '🌙 Sombre' }]} />
-        <Switch label="Activer les notifications" checked={formData.notifications} onChange={(e) => setFormData({ ...formData, notifications: e.currentTarget.checked })} />
-        <Divider label="Changer le mot de passe" labelPosition="center" />
-        <PasswordInput label="Mot de passe actuel" value={passwordData.oldPassword} onChange={(e) => setPasswordData({ ...passwordData, oldPassword: e.target.value })} />
-        <PasswordInput label="Nouveau mot de passe" value={passwordData.newPassword} onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })} />
-        <PasswordInput label="Confirmer" value={passwordData.confirmPassword} onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })} />
-        <Button variant="light" color="blue" onClick={handleChangePassword} disabled={!passwordData.oldPassword || !passwordData.newPassword}>Changer le mot de passe</Button>
-        <Divider />
-        <Group justify="flex-end">
-          <Button variant="outline" onClick={onClose}>Annuler</Button>
-          <Button onClick={handleUpdateProfile} color="green">Enregistrer</Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
-};
-
-// ============================================================
-// COMPOSANT MODAL PARAMÈTRES (utilise ParametresAtelier)
-// ============================================================
-const ModalParametres: React.FC<{ opened: boolean; onClose: () => void }> = ({ opened, onClose }) => {
-  return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title="Paramètres de l'entreprise"
-      size="xl"
-      centered
-      padding={0}
+      }
+      leftSection={
+        <Box style={{
+          color: active ? '#4a6cf7' : (isHovered ? '#4a6cf7' : 'rgba(255,255,255,0.45)'),
+          transition: 'color 0.2s ease',
+        }}>
+          {icon}
+        </Box>
+      }
+      active={active}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       styles={{
-        header: { padding: '16px 20px', borderBottom: '1px solid #dee2e6' },
-        body: { padding: 0 }
+        root: {
+          borderRadius: 8,
+          marginBottom: 2,
+          padding: '8px 12px',
+          transition: 'all 0.2s ease',
+          backgroundColor: active
+            ? 'rgba(255,255,255,0.12)'
+            : (isHovered ? 'rgba(255,255,255,0.06)' : 'transparent'),
+          boxShadow: active
+            ? '0 4px 12px rgba(0,0,0,0.15)'
+            : 'none',
+          borderLeft: active
+            ? '4px solid #f4b400'
+            : '4px solid transparent',
+          '&:hover': {
+            backgroundColor: active
+              ? 'rgba(74, 108, 247, 0.20)'
+              : 'rgba(255, 255, 255, 0.08)',
+          },
+        },
+        label: {
+          fontSize: 14,
+          fontWeight: active ? 600 : 400,
+        },
       }}
-    >
-      <ParametresAtelier />
-    </Modal>
+    />
   );
 };
 
-// ============================================================
-// COMPOSANT NAVIGATION ITEM
-// ============================================================
-function NavItem({ label, path, icon, roles, userRole, badge, badgeColor = 'yellow', onClick, disabled }: NavItemProps) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const theme = useMantineTheme();
-
-  if ((roles && userRole && !roles.includes(userRole)) || disabled) return null;
-
-  const active = location.pathname === path;
-  const lightBlue = theme.colors.adminBlue?.[5] || '#4f82c3';
-  const hoverBlue = theme.colors.adminBlue?.[6] || '#3669a9';
-
-  const handleClick = () => {
-    if (disabled) return;
-    if (onClick) onClick();
-    else navigate(path);
-  };
+// Composant pour une section de navigation
+const NavSection: React.FC<NavSectionProps> = ({
+  title,
+  icon,
+  children,
+  defaultOpen = false,
+}) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <Tooltip label={badge} position="right" offset={10} disabled={!badge}>
+    <Box mb={4}>
       <UnstyledButton
-        onClick={handleClick}
+        onClick={() => setIsOpen(!isOpen)}
         style={{
           width: '100%',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          padding: '10px 12px 10px 28px',
-          borderRadius: theme.radius.sm,
-          backgroundColor: active ? lightBlue : 'transparent',
+          padding: '8px 12px',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
           transition: 'all 0.2s ease',
-          marginBottom: '2px',
-          opacity: disabled ? 0.5 : 1,
+          '&:hover': {
+            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+          },
         }}
-        onMouseEnter={(e) => { if (!active && !disabled) e.currentTarget.style.backgroundColor = hoverBlue; }}
-        onMouseLeave={(e) => { if (!active && !disabled) e.currentTarget.style.backgroundColor = 'transparent'; }}
       >
-        <Group gap="sm" wrap="nowrap">
-          <Box style={{ width: 24, display: 'flex', alignItems: 'center', color: 'white' }}>{icon}</Box>
-          <Text size="sm" fw={active ? 600 : 500} c={active ? 'white' : 'gray.3'} style={{ flex: 1 }}>{label}</Text>
-          {badge && <Badge size="xs" color={badgeColor} variant="filled">{badge}</Badge>}
-        </Group>
-      </UnstyledButton>
-    </Tooltip>
-  );
-}
-
-// ============================================================
-// COMPOSANT SECTION
-// ============================================================
-function NavSection({ title, icon, children, defaultOpen = false, userRole, roles, description, count }: SectionProps) {
-  const [opened, setOpened] = useState(defaultOpen);
-  const theme = useMantineTheme();
-
-  if (roles && userRole && !roles.includes(userRole)) return null;
-
-  return (
-    <Box mb="xs">
-      <UnstyledButton
-        onClick={() => setOpened(!opened)}
-        style={{
-          width: '100%',
-          padding: '10px 12px',
-          borderRadius: theme.radius.sm,
-          transition: 'all 0.2s ease',
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7] || '#295080'}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap="xs" wrap="nowrap" style={{ flex: 1 }}>
-            <Box style={{ width: 24, display: 'flex', alignItems: 'center', color: 'white' }}>{icon}</Box>
-            <Box style={{ flex: 1 }}>
-              <Text size="sm" fw={600} c="white" tt="uppercase" style={{ letterSpacing: '0.5px' }}>{title}</Text>
-              {description && <Text size="xs" c="gray.5" style={{ fontSize: '10px' }}>{description}</Text>}
-            </Box>
-          </Group>
-          <Group gap="xs" wrap="nowrap">
-            {count !== undefined && count > 0 && <Badge size="xs" color="blue" variant="filled" radius="xl">{count}</Badge>}
-            {opened ? <IconChevronDown size={14} color="white" /> : <IconChevronRight size={14} color="white" />}
-          </Group>
-        </Group>
-      </UnstyledButton>
-      {opened && <Box ml="lg" mt={4}>{children}</Box>}
-    </Box>
-  );
-}
-
-// ============================================================
-// COMPOSANT PRINCIPAL NAVBAR
-// ============================================================
-interface NavbarProps {
-  userRole?: Role;
-  userName?: string;
-  userAvatar?: string;
-  onLogout?: () => void;
-}
-
-export default function Navbar({ userRole, userName, userAvatar, onLogout }: NavbarProps) {
-  const theme = useMantineTheme();
-  const darkBlue = theme.colors.adminBlue?.[8] || '#1b365d';
-  const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-
-  const adminOnly: Role[] = ['admin'];
-  const adminAndManager: Role[] = ['admin', 'gestionnaire'];
-  const allRoles: Role[] = ['admin', 'gestionnaire', 'commercial', 'stockiste', 'comptable'];
-  const revendeurAccess: Role[] = ['admin', 'gestionnaire', 'commercial'];
-
-  const getInitials = (name: string) => {
-    if (!name) return 'U';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  };
-
-  const roleLabels: Record<string, string> = {
-    admin: 'Administrateur',
-    gestionnaire: 'Gestionnaire',
-    commercial: 'Commercial',
-    stockiste: 'Gestionnaire stock',
-    comptable: 'Comptable'
-  };
-
-  return (
-    <Stack gap={0} style={{ height: '100%', backgroundColor: darkBlue }}>
-      {/* HEADER - Logo et profil utilisateur */}
-      <Box p="lg" pb="md" style={{ borderBottom: `1px solid ${theme.colors.adminBlue?.[6]}` }}>
+        {icon && (
+          <Box style={{ color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center' }}>
+            {icon}
+          </Box>
+        )}
         <Text
-          fw={800}
-          size="xl"
-          c="yellow"
-          ta="center"
+          size="xs"
+          fw={700}
+          tt="uppercase"
           style={{
-            fontFamily: "'Times New Roman', serif",
-            letterSpacing: '4px',
-            textShadow: '2px 2px 4px rgba(0,0,0,0.5)',
-            fontSize: '20px',
+            flex: 1,
+            letterSpacing: '0.8px',
+            fontSize: 12,
+            color: '#B8C7E0',
+            fontWeight: 700,
           }}
         >
-          GESTION PRO
+          {title}
         </Text>
+        <Box style={{ color: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center' }}>
+          {isOpen ? (
+            <IconChevronDown size={14} />
+          ) : (
+            <IconChevronRight size={14} />
+          )}
+        </Box>
+      </UnstyledButton>
+      {isOpen && (
+        <Box pl={8} mt={2}>
+          {children}
+        </Box>
+      )}
+    </Box>
+  );
+};
 
-        {userName && (
-          <>
-            <Divider color={theme.colors.adminBlue?.[6]} my="md" />
-            <Menu position="bottom-start" width={200}>
-              <Menu.Target>
-                <UnstyledButton
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    borderRadius: theme.radius.md,
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7]}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <Group gap="sm" wrap="nowrap">
-                    <Avatar size="md" radius="xl" color="yellow" src={userAvatar} style={{ border: '2px solid yellow' }}>{getInitials(userName)}</Avatar>
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                      <Text size="sm" fw={600} c="white" truncate>{userName}</Text>
-                      <Text size="xs" c="gray.4" tt="capitalize">{roleLabels[userRole || ''] || userRole}</Text>
-                    </div>
-                  </Group>
-                </UnstyledButton>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>Mon compte</Menu.Label>
-                <Menu.Item leftSection={<IconUser size={14} />} onClick={() => setProfileModalOpen(true)}>Mon profil</Menu.Item>
-                <Menu.Item leftSection={<IconSettings size={14} />} onClick={() => setSettingsModalOpen(true)}>Paramètres</Menu.Item>
-                <Menu.Divider />
-                <Menu.Item color="red" leftSection={<IconLogout size={14} />} onClick={onLogout}>Déconnexion</Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          </>
-        )}
-      </Box>
+export default function Navbar({
+  userRole,
+  userName,
+  userEmail,
+  userPhone,
+  userCompany,
+  onLogout,
+  onProfileUpdate,
+}: NavbarProps) {
+  const location = useLocation();
+  const isAdmin = userRole === 'admin';
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
 
-      {/* ZONE DE NAVIGATION PRINCIPALE */}
-      <ScrollArea style={{ flex: 1 }} scrollbarSize={6} offsetScrollbars>
-        <Stack gap={4} p="md" pt="sm">
-          <NavItem label="Tableau de bord" path="/" icon={<IconLayoutDashboard size={20} color="white" />} userRole={userRole} />
-          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
 
-          <NavSection title="VENTES & CLIENTS" icon={<IconShoppingBag size={20} color="white" />} description="Gestion commerciale" userRole={userRole} roles={allRoles}>
-            <NavItem label="Clients" path="/clients" icon={<IconUsers size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Commandes" path="/commandes" icon={<IconShoppingBag size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Commandes Standard" path="/commandes/standard" icon={<IconBuildingStore size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Filtre" badgeColor="cyan" />
-            <NavItem label="Commandes Revendeurs" path="/commandes/revendeur" icon={<IconTruck size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Filtre" badgeColor="green" />
-            <NavItem label="Factures" path="/factures" icon={<IconReceipt size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Ventes comptoir" path="/ventes" icon={<IconBuildingStore size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-          </NavSection>
+  const getRoleColor = () => {
+    switch (userRole) {
+      case 'admin':
+        return 'red';
+      case 'gestionnaire':
+        return 'blue';
+      default:
+        return 'gray';
+    }
+  };
 
-          <NavSection title="PRODUITS" icon={<IconPackage size={20} color="white" />} description="Gestion des produits" userRole={userRole} roles={allRoles}>
-            <NavItem label="Produits" path="/products" icon={<IconPackage size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-          </NavSection>
+  const getRoleLabel = () => {
+    switch (userRole) {
+      case 'admin':
+        return 'Administrateur';
+      case 'gestionnaire':
+        return 'Gestionnaire';
+      default:
+        return 'Utilisateur';
+    }
+  };
 
-          <NavSection title="REVENDEURS" icon={<IconTruck size={20} color="white" />} description="Gestion des revendeurs" userRole={userRole} roles={revendeurAccess}>
-            <NavItem label="Stocks revendeurs" path="/stock-revendeurs" icon={<IconPackage size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Gestion Décomptes" path="/decomptes" icon={<IconReceipt2 size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Principal" badgeColor="teal" /> 
-            <NavItem label="Factures revendeurs" path="/factures-revendeur" icon={<IconFileInvoice size={18} color="white" />} roles={adminAndManager} userRole={userRole} badge="Documents" badgeColor="blue" />
-          </NavSection>
+  return (
+    <>
+      <Box
+        style={{
+          width: 280,
+          background: 'linear-gradient(180deg, #0d1520 0%, #162a44 40%, #1a3355 100%)',
+          borderRight: '1px solid rgba(255,255,255,0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100vh',
+          position: 'relative',
+        }}
+      >
+        {/* HEADER */}
+        <Box
+          p="md"
+          style={{
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            textAlign: 'center',
+            paddingTop: 25,
+            paddingBottom: 20,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: '20px',
+              fontWeight: 900,
+              letterSpacing: '4px',
+              color: '#f4b400',
+              fontFamily: 'Georgia, Times New Roman, serif',
+              textTransform: 'uppercase',
+              textShadow: `
+                1px 1px 0 #000,
+                -1px 1px 0 #000,
+                1px -1px 0 #000,
+                -1px -1px 0 #000,
+                0 3px 6px rgba(0,0,0,0.5)
+              `,
+            }}
+          >
+            GESTION PRO
+          </Text>
 
-          <NavSection title="FINANCES" icon={<IconMoneybag size={20} color="white" />} description="Suivi financier" userRole={userRole} roles={adminAndManager}>
-            <NavItem label="Règlements" path="/reglements" icon={<IconMoneybag size={18} color="white" />} roles={adminAndManager} userRole={userRole} />
-            <NavItem label="Commissions" path="/commissions" icon={<IconPercentage size={18} color="white" />} roles={adminOnly} userRole={userRole} badge="Bientôt" badgeColor="gray" disabled />
-            <NavItem label="Rapports" path="/rapports" icon={<IconReportAnalytics size={18} color="white" />} roles={adminOnly} userRole={userRole} badge="Bientôt" badgeColor="gray" disabled />
-          </NavSection>
+          <Divider
+            my="md"
+            style={{
+              borderColor: 'rgba(255,255,255,0.15)',
+            }}
+          />
+        </Box>
 
-          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
+        {/* MENU */}
+        <ScrollArea
+          flex={1}
+          px="sm"
+          py="sm"
+          style={{ flex: 1 }}
+          styles={{
+            scrollbar: {
+              '&[data-orientation="vertical"]': {
+                width: 3,
+              },
+              '& .mantine-ScrollArea-thumb': {
+                backgroundColor: 'rgba(255,255,255,0.08)',
+              },
+            },
+          }}
+        >
+          <Stack gap={1}>
+            {/* DASHBOARD */}
+            <NavItem
+              to="/"
+              label="Tableau de bord"
+              icon={<IconDashboard size={18} />}
+              active={location.pathname === '/'}
+            />
 
-          <NavSection title="ADMINISTRATION" icon={<IconSettings size={20} color="white" />} description="Configuration" userRole={userRole} roles={adminOnly} defaultOpen={userRole === 'admin'}>
-            <NavItem label="Utilisateurs" path="/utilisateurs" icon={<IconUserCog size={18} color="white" />} roles={adminOnly} userRole={userRole} />
-            <NavItem label="Configuration" path="/parametres" icon={<IconSettings size={18} color="white" />} roles={adminOnly} userRole={userRole} />
-            <NavItem label="Commerce" path="/config-commerce" icon={<IconBusinessplan size={18} color="white" />} roles={adminOnly} userRole={userRole} badge="Premium" badgeColor="cyan" />
-          </NavSection>
+            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
 
-          <Divider color={theme.colors.adminBlue?.[6]} my="sm" />
-          <NavItem label="Aide & Support" path="/aide" icon={<IconHelp size={20} color="white" />} userRole={userRole} disabled />
-        </Stack>
-      </ScrollArea>
+            {/* CATALOGUE */}
+            <NavSection
+              title="Catalogue"
+              icon={<IconPackage size={18} />}
+              defaultOpen
+            >
+              <NavItem
+                to="/products"
+                label="Produits"
+                icon={<IconPackage size={17} />}
+                active={location.pathname === '/products'}
+              />
+              <NavItem
+                to="/clients"
+                label="Clients"
+                icon={<IconUsers size={17} />}
+                active={location.pathname === '/clients'}
+              />
+            </NavSection>
 
-      {/* FOOTER */}
-      <Box p="md" pt="xs" style={{ borderTop: `1px solid ${theme.colors.adminBlue?.[6]}` }}>
-        <Divider color={theme.colors.adminBlue?.[6]} mb="sm" />
-        {onLogout && (
+            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
+
+            {/* VENTES */}
+            <NavSection title="Ventes" icon={<IconShoppingCart size={18} />} defaultOpen>
+              <NavItem
+                to="/commandes"
+                label="Commandes"
+                icon={<IconShoppingCart size={18} />}
+                active={location.pathname === '/commandes'}
+                badge="En cours"
+                badgeColor="orange"
+              />
+              <NavItem
+                to="/factures"
+                label="Factures"
+                icon={<IconFileInvoice size={17} />}
+                active={location.pathname === '/factures'}
+              />
+              <NavItem
+                to="/ventes"
+                label="Ventes"
+                icon={<IconChartBar size={18} />}
+                active={location.pathname === '/ventes'}
+              />
+            </NavSection>
+
+            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
+
+            {/* REVENDEURS */}
+            {isAdmin && (
+              <>
+                <NavSection title="Revendeurs" icon={<IconTruckDelivery size={18} />}>
+                  <NavItem
+                    to="/commandes-revendeur"
+                    label="Commandes"
+                    icon={<IconShoppingCart size={18} />}
+                    active={location.pathname === '/commandes-revendeur'}
+                  />
+                  <NavItem
+                    to="/factures-revendeur"
+                    label="Factures"
+                    icon={<IconFileInvoice size={18} />}
+                    active={location.pathname === '/factures-revendeur'}
+                  />
+                  <NavItem
+                    to="/stock-revendeurs"
+                    label="Stock"
+                    icon={<IconBuildingWarehouse size={18} />}
+                    active={location.pathname === '/stock-revendeurs'}
+                  />
+                  <NavItem
+                    to="/decomptes"
+                    label="Décomptes"
+                    icon={<IconReceipt size={18} />}
+                    active={location.pathname === '/decomptes'}
+                  />
+                  <NavItem
+                    to="/revendeurs/historique"
+                    label="Historique"
+                    icon={<IconHistory size={18} />}
+                    active={location.pathname === '/revendeurs/historique'}
+                  />
+                </NavSection>
+
+                <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
+              </>
+            )}
+
+            {/* FINANCES */}
+            <NavSection title="Finances" icon={<IconCoin size={18} />} defaultOpen>
+              <NavItem
+                to="/caisse"
+                label="Journal de caisse"
+                icon={<IconCash size={18} />}
+                active={location.pathname === '/caisse'}
+                badge="Live"
+                badgeColor="green"
+              />
+              <NavItem
+                to="/charges"
+                label="Charges"
+                icon={<IconMoneybag size={18} />}
+                active={location.pathname === '/charges'}
+              />
+              <NavItem
+                to="/reglements"
+                label="Règlements"
+                icon={<IconReceipt size={18} />}
+                active={location.pathname === '/reglements'}
+              />
+              <NavItem
+                to="/credits"
+                label="Crédits"
+                icon={<IconCreditCard size={18} />}
+                active={location.pathname === '/credits'}
+                badge="Suivi"
+                badgeColor="blue"
+              />
+              <NavItem
+                to="/remboursements"
+                label="Remboursements"
+                icon={<IconReceipt2 size={18} />}
+                active={location.pathname === '/remboursements'}
+                badge="Historique"
+                badgeColor="teal"
+              />
+              {isAdmin && (
+                <>
+                  <NavItem
+                    to="/commissions"
+                    label="Commissions"
+                    icon={<IconPercentage size={18} />}
+                    active={location.pathname === '/commissions'}
+                    disabled
+                    badge="Soon"
+                    badgeColor="gray"
+                  />
+                  <NavItem
+                    to="/rapports"
+                    label="Rapports"
+                    icon={<IconReportAnalytics size={18} />}
+                    active={location.pathname === '/rapports'}
+                    disabled
+                    badge="Soon"
+                    badgeColor="gray"
+                  />
+                </>
+              )}
+            </NavSection>
+
+            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
+
+            {/* ADMINISTRATION */}
+            {isAdmin && (
+              <NavSection title="Administration" icon={<IconSettings size={18} />}>
+                <NavItem
+                  to="/utilisateurs"
+                  label="Utilisateurs"
+                  icon={<IconUserCog size={18} />}
+                  active={location.pathname === '/utilisateurs'}
+                />
+                <NavItem
+                  to="/parametres"
+                  label="Paramètres"
+                  icon={<IconSettings size={18} />}
+                  active={location.pathname === '/parametres'}
+                />
+              </NavSection>
+            )}
+          </Stack>
+        </ScrollArea>
+
+        <NavItem
+          to="/diagnostic"
+          label="Diagnostic DB"
+          icon={<IconReportAnalytics size={18} />}
+        />
+        {/* FOOTER - Version avec clic sur l'utilisateur */}
+        <Box
+          p="md"
+          style={{
+            borderTop: '1px solid rgba(255,255,255,0.05)',
+            background: 'rgba(0,0,0,0.15)',
+          }}
+        >
+          {/* Profil utilisateur cliquable */}
+          <UnstyledButton
+            onClick={() => setProfileModalOpen(true)}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 8,
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <Avatar
+              radius="xl"
+              size={40}
+              style={{
+                backgroundColor: 'rgba(74, 108, 247, 0.2)',
+                color: '#4a6cf7',
+                border: '2px solid rgba(74, 108, 247, 0.3)',
+                flexShrink: 0,
+              }}
+            >
+              {userName?.charAt(0).toUpperCase() || 'U'}
+            </Avatar>
+
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <Text size="sm" fw={600} style={{ color: 'rgba(255,255,255,0.85)' }} lineClamp={1}>
+                {userName || 'Utilisateur'}
+              </Text>
+              <Group gap="xs">
+                <Badge size="xs" color={getRoleColor()} variant="light" style={{ textTransform: 'none' }}>
+                  {getRoleLabel()}
+                </Badge>
+                <Text size="xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  <IconChevronRight size={12} />
+                </Text>
+              </Group>
+            </Box>
+          </UnstyledButton>
+
+          {/* Déconnexion */}
           <UnstyledButton
             onClick={onLogout}
-            style={{ width: '100%', padding: '10px 12px', borderRadius: theme.radius.sm, transition: 'all 0.2s ease', marginBottom: '12px' }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.colors.adminBlue?.[7]}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: 8,
+              color: 'rgba(239, 68, 68, 0.7)',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 8,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.08)';
+              e.currentTarget.style.color = '#ef4444';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'rgba(239, 68, 68, 0.7)';
+            }}
           >
-            <Group gap="sm" wrap="nowrap">
-              <IconLogout size={18} color="white" />
-              <Text size="sm" fw={500} c="white">Déconnexion</Text>
-            </Group>
+            <IconLogout size={18} />
+            <Text size="sm" fw={500}>
+              Déconnexion
+            </Text>
           </UnstyledButton>
-        )}
-        <Box ta="center">
-          <Group justify="center" gap="xs" mb={4}>
-            <IconStar size={12} color="white" />
-            <Text size="xs" c="gray.5">Version 3.0.0</Text>
-          </Group>
-          <Text size="xs" c="gray.5">© 2026 Gestion Commerciale Pro</Text>
-          <Text size="xs" c="gray.5" mt={2}>Tous droits réservés</Text>
         </Box>
       </Box>
 
-      {/* MODALS */}
-      <ModalProfil opened={profileModalOpen} onClose={() => setProfileModalOpen(false)} userName={userName || ''} userRole={userRole || ''} />
-      <ModalParametres opened={settingsModalOpen} onClose={() => setSettingsModalOpen(false)} />
-    </Stack>
+      {/* MODAL PROFIL */}
+      <Modal
+        opened={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={28} radius="xl" color="blue" variant="light">
+              <IconUser size={16} />
+            </ThemeIcon>
+            <Text fw={600}>Mon Profil</Text>
+          </Group>
+        }
+        size="md"
+        centered
+        styles={{
+          header: {
+            backgroundColor: '#1b365d',
+            padding: '16px 20px',
+            borderTopLeftRadius: '12px',
+            borderTopRightRadius: '12px',
+          },
+          title: { color: 'white', fontWeight: 600, flex: 1 },
+          body: { padding: '20px' },
+        }}
+      >
+        <Stack gap="md">
+          {/* Avatar et informations principales */}
+          <Paper withBorder p="lg" radius="md" style={{ textAlign: 'center' }}>
+            <Avatar
+              radius="xl"
+              size={80}
+              style={{
+                backgroundColor: 'rgba(74, 108, 247, 0.15)',
+                color: '#4a6cf7',
+                border: '3px solid #4a6cf7',
+                margin: '0 auto',
+              }}
+            >
+              {userName?.charAt(0).toUpperCase() || 'U'}
+            </Avatar>
+            <Text fw={700} size="lg" mt="sm">
+              {userName || 'Utilisateur'}
+            </Text>
+            <Badge color={getRoleColor()} variant="light" size="sm" mt={4}>
+              {getRoleLabel()}
+            </Badge>
+          </Paper>
+
+          {/* Informations détaillées */}
+          <SimpleGrid cols={2} spacing="sm">
+            <Paper withBorder p="sm" radius="md">
+              <Group gap="xs">
+                <ThemeIcon color="gray" variant="light" size="sm">
+                  <IconUser size={14} />
+                </ThemeIcon>
+                <Box>
+                  <Text size="xs" c="dimmed">Nom</Text>
+                  <Text size="sm" fw={500}>{userName || '-'}</Text>
+                </Box>
+              </Group>
+            </Paper>
+
+            <Paper withBorder p="sm" radius="md">
+              <Group gap="xs">
+                <ThemeIcon color="gray" variant="light" size="sm">
+                  <IconShield size={14} />
+                </ThemeIcon>
+                <Box>
+                  <Text size="xs" c="dimmed">Rôle</Text>
+                  <Text size="sm" fw={500}>{getRoleLabel()}</Text>
+                </Box>
+              </Group>
+            </Paper>
+
+            <Paper withBorder p="sm" radius="md">
+              <Group gap="xs">
+                <ThemeIcon color="gray" variant="light" size="sm">
+                  <IconMail size={14} />
+                </ThemeIcon>
+                <Box>
+                  <Text size="xs" c="dimmed">Email</Text>
+                  <Text size="sm" fw={500}>{userEmail || '-'}</Text>
+                </Box>
+              </Group>
+            </Paper>
+
+            <Paper withBorder p="sm" radius="md">
+              <Group gap="xs">
+                <ThemeIcon color="gray" variant="light" size="sm">
+                  <IconPhone size={14} />
+                </ThemeIcon>
+                <Box>
+                  <Text size="xs" c="dimmed">Téléphone</Text>
+                  <Text size="sm" fw={500}>{userPhone || '-'}</Text>
+                </Box>
+              </Group>
+            </Paper>
+
+            {userCompany && (
+              <Paper withBorder p="sm" radius="md" >
+                <Group gap="xs">
+                  <ThemeIcon color="gray" variant="light" size="sm">
+                    <IconBuilding size={14} />
+                  </ThemeIcon>
+                  <Box>
+                    <Text size="xs" c="dimmed">Entreprise</Text>
+                    <Text size="sm" fw={500}>{userCompany}</Text>
+                  </Box>
+                </Group>
+              </Paper>
+            )}
+          </SimpleGrid>
+
+          <Divider />
+
+          {/* Actions */}
+          <Group justify="space-between">
+            <Group>
+              <Tooltip label="Modifier le profil">
+                <ActionIcon
+                  variant="light"
+                  color="blue"
+                  onClick={() => {
+                    setProfileModalOpen(false);
+                    if (onProfileUpdate) onProfileUpdate();
+                  }}
+                >
+                  <IconEdit size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Changer le mot de passe">
+                <ActionIcon
+                  variant="light"
+                  color="orange"
+                >
+                  <IconLock size={18} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            <Button
+              variant="light"
+              onClick={() => setProfileModalOpen(false)}
+              size="sm"
+            >
+              Fermer
+            </Button>
+          </Group>
+
+          <Text size="xs" c="dimmed" ta="center">
+            Dernière connexion: {new Date().toLocaleString()}
+          </Text>
+        </Stack>
+      </Modal>
+    </>
   );
 }

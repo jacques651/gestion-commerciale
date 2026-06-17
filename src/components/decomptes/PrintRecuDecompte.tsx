@@ -5,7 +5,19 @@ import { Button, Group, Loader, Center, Stack, Paper, Text } from '@mantine/core
 import { IconPrinter, IconArrowLeft } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { getDb } from '../../database/db';
-import RecuDecompte, { RecuDecompteDetail } from './RecuDecompte';
+import RecuDecompte from './RecuDecompte';
+
+type RecuDecompteDetail = {
+  idProduit: number;
+  codeFacture: string;
+  designation: string;
+  qteInitiale: number;
+  qteVendue: number;
+  qteRestante: number;
+  prixAchat: number;
+  prixVente: number;
+  commissionPourcentage: number;
+};
 
 // ✅ Supprimer l'interface des props et utiliser useParams
 export default function PrintRecuDecompte() {
