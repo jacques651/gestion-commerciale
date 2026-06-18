@@ -5,14 +5,14 @@ import {
   NumberInput, Table, ActionIcon, Text, Card,
   Divider, LoadingOverlay, Grid, Badge,
   Tooltip, Pagination, ScrollArea, ThemeIcon, Paper, Center,
-  Alert
+  Alert, SegmentedControl
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
   IconTrash, IconPlus, IconSearch,
   IconRefresh, IconUserPlus, IconShoppingBag, IconPhone, IconUser,
-  IconPackage, IconBuildingStore, IconShoppingCart, IconCheck, IconTruck,
-  IconPercentage
+  IconPackage, IconBuildingStore, IconShoppingCart, IconTruck,
+  IconPercentage, IconEdit
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
@@ -22,6 +22,7 @@ import { FormulaireClient } from '../clients/FormulaireClient';
 import { generateCommandeCode } from '../../utils/codeGenerator';
 import { stockService } from '../../database/repositories/stockService';
 import FormulaireProduit from '../products/FormulaireProduit';
+import { getDb } from '../../database/db';
 
 interface FormulaireCommandeProps {
   opened: boolean;
@@ -39,12 +40,16 @@ interface CartItem {
   prix_achat_base?: number;
   quantite_commande: number;
   total: number;
+  prix_original?: number;
+  type_prix?: 'DETAIL' | 'GROS';
 }
+
+type PrixType = 'DETAIL' | 'GROS';
 
 export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, onClose }) => {
   const { clients, loading: clientsLoading, refresh: refreshClients } = useClients();
   const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
-  const { createCommande, loading } = useCommandes();
+  const { loading } = useCommandes();
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClientDetails, setSelectedClientDetails] = useState<any>(null);
@@ -60,6 +65,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const [typeCommande, setTypeCommande] = useState<string>('STANDARD');
   const [commissionPourcentage, setCommissionPourcentage] = useState<number>(0);
   const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
+  const [, setDbError] = useState<string | null>(null);
+  
+  // ✅ Prix par défaut : DÉTAIL
+  const [prixType, setPrixType] = useState<PrixType>('DETAIL');
+  const [editingPrix, setEditingPrix] = useState<Record<number, boolean>>({});
+  const [prixModifies, setPrixModifies] = useState<Record<number, boolean>>({});
 
   const itemsPerPage = 5;
 
@@ -87,8 +98,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       if (client) {
         if (client.TypeClient === 'revendeur') {
           setTypeCommande('REVENDEUR');
+          // ✅ On garde le prix en détail par défaut, même pour les revendeurs
+          // L'utilisateur peut basculer manuellement vers "Gros" si besoin
         } else {
           setTypeCommande('STANDARD');
+          // ✅ On garde 'DETAIL' par défaut
         }
       }
     } else {
@@ -108,8 +122,42 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       setTypeCommande('STANDARD');
       setCommissionPourcentage(0);
       setQuantiteInput({});
+      setDbError(null);
+      // ✅ Réinitialiser à 'DETAIL' quand on ferme
+      setPrixType('DETAIL');
+      setPrixModifies({});
+      setEditingPrix({});
     }
   }, [opened]);
+
+  // Recalculer les prix du panier quand le type de prix change
+  useEffect(() => {
+    if (cart.length > 0 && prixType) {
+      const updatedCart = cart.map(item => {
+        // Si le prix a été modifié manuellement, on le garde
+        if (prixModifies[item.idProduit]) {
+          return item;
+        }
+        
+        const product = products.find(p => p.idProduit === item.idProduit);
+        if (product) {
+          const newPrix = prixType === 'DETAIL' 
+            ? (product.prix_vente_detail || 0) 
+            : (product.prix_vente_gros || 0);
+          
+          return {
+            ...item,
+            prix_vente: newPrix,
+            total: newPrix * item.quantite_commande,
+            prix_original: newPrix,
+            type_prix: prixType
+          };
+        }
+        return item;
+      });
+      setCart(updatedCart);
+    }
+  }, [prixType, products, prixModifies]);
 
   const filteredProducts = products.filter(product => {
     const matchesSearch = searchTerm === '' ||
@@ -132,7 +180,18 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     return value.toLocaleString();
   };
 
-  // Fonction addToCart modifiée pour accepter la quantité
+  const getPrixProduit = (product: any): number => {
+    if (prixType === 'DETAIL') {
+      return product.prix_vente_detail || 0;
+    } else {
+      return product.prix_vente_gros || 0;
+    }
+  };
+
+  const getPrixLabel = (): string => {
+    return prixType === 'DETAIL' ? 'Détail' : 'Gros';
+  };
+
   const addToCart = (product: any, quantite: number) => {
     if (quantite <= 0) {
       notifications.show({
@@ -145,12 +204,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
 
     const existingItem = cart.find(item => item.idProduit === product.idProduit);
     const stock = product.qte_stock || 0;
-    const prix = product.prix_vente_detail || 0;
+    const prix = getPrixProduit(product);
 
     if (prix <= 0) {
       notifications.show({
         title: 'Erreur',
-        message: `Le prix du produit "${product.designation}" n'est pas défini`,
+        message: `Le prix ${prixType === 'DETAIL' ? 'de détail' : 'de gros'} du produit "${product.designation}" n'est pas défini`,
         color: 'red',
       });
       return;
@@ -197,11 +256,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
           prix_achat_base: product.prix_achat_base || 0,
           quantite_commande: quantite,
           total: quantite * prix,
+          prix_original: prix,
+          type_prix: prixType
         }
       ]);
     }
     
-    // Réinitialiser le champ quantité après ajout
     setQuantiteInput({ ...quantiteInput, [product.idProduit]: 0 });
   };
 
@@ -217,15 +277,53 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     }
     const newCart = [...cart];
     newCart[index].quantite_commande = newQuantite;
-    newCart[index].total = newQuantite * item.prix_vente;
+    newCart[index].total = newQuantite * newCart[index].prix_vente;
     setCart(newCart);
   };
 
+  const updatePrix = (index: number, newPrix: number) => {
+    if (newPrix < 0) return;
+    const newCart = [...cart];
+    newCart[index].prix_vente = newPrix;
+    newCart[index].total = newPrix * newCart[index].quantite_commande;
+    setPrixModifies(prev => ({ ...prev, [newCart[index].idProduit]: true }));
+    setCart(newCart);
+  };
+
+  const toggleEditPrix = (idProduit: number) => {
+    setEditingPrix(prev => ({ ...prev, [idProduit]: !prev[idProduit] }));
+  };
+
   const removeFromCart = (index: number) => {
+    const item = cart[index];
+    setPrixModifies(prev => {
+      const newPrixModifies = { ...prev };
+      delete newPrixModifies[item.idProduit];
+      return newPrixModifies;
+    });
     setCart(cart.filter((_, i) => i !== index));
   };
 
-  // Gestion du modal produit
+  const resetPrixModifies = () => {
+    setPrixModifies({});
+    const updatedCart = cart.map(item => {
+      const product = products.find(p => p.idProduit === item.idProduit);
+      if (product) {
+        const newPrix = prixType === 'DETAIL' 
+          ? (product.prix_vente_detail || 0) 
+          : (product.prix_vente_gros || 0);
+        return {
+          ...item,
+          prix_vente: newPrix,
+          total: newPrix * item.quantite_commande,
+          prix_original: newPrix
+        };
+      }
+      return item;
+    });
+    setCart(updatedCart);
+  };
+
   const handleOpenProduitModal = (product?: any) => {
     if (product) {
       setProduitToEdit(product);
@@ -248,6 +346,14 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const commissionTotale = typeCommande === 'REVENDEUR' ? montantTotal * (commissionPourcentage / 100) : 0;
   const montantApresCommission = montantTotal - commissionTotale;
 
+  // Calculer le prix moyen pour le panier
+  const getPrixMoyen = () => {
+    if (cart.length === 0) return 0;
+    const total = cart.reduce((sum, item) => sum + (item.prix_vente * item.quantite_commande), 0);
+    const totalQte = cart.reduce((sum, item) => sum + item.quantite_commande, 0);
+    return totalQte > 0 ? total / totalQte : 0;
+  };
+
   const handleSubmit = async () => {
     if (!selectedClientId) {
       notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
@@ -259,55 +365,53 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       return;
     }
 
-    for (const item of cart) {
-      if (item.quantite_commande > item.quantite_stock) {
-        notifications.show({
-          title: 'Stock insuffisant',
-          message: `Stock insuffisant pour ${item.designation}. Disponible: ${item.quantite_stock}`,
-          color: 'red'
-        });
-        return;
-      }
-    }
-
     setSubmitting(true);
 
     try {
+      const db = await getDb();
+      
+      await db.execute('BEGIN TRANSACTION');
+
       const montantHT = montantTotal / 1.18;
 
-      const commande = {
-        code_commande: codeCommande,
-        idClient: parseInt(selectedClientId),
-        type_commande: typeCommande,
-        montant_ht: montantHT,
-        montant_ttc: typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-        statut: 'CONFIRMEE',
-        commission_pourcentage: typeCommande === 'REVENDEUR' ? commissionPourcentage : null
-      };
+      const result = await db.execute(`
+        INSERT INTO commandes (code_commande, idClient, type_commande, montant_ht, montant_ttc, statut)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [
+        codeCommande,
+        parseInt(selectedClientId),
+        typeCommande,
+        montantHT,
+        typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
+        'CONFIRMEE'
+      ]);
 
-      const details = cart.map(item => ({
-        idProduit: item.idProduit,
-        qte_commande: item.quantite_commande,
-        prix_unitaire_vente: item.prix_vente
-      }));
+      const idCommande = Number(result.lastInsertId);
 
-      await createCommande(commande, details);
+      for (const item of cart) {
+        await db.execute(`
+          INSERT INTO commande_details (idCommande, idProduit, qte_commande, prix_unitaire_vente)
+          VALUES (?, ?, ?, ?)
+        `, [idCommande, item.idProduit, item.quantite_commande, item.prix_vente]);
+      }
+
+      await db.execute('COMMIT');
 
       if (typeCommande === 'STANDARD') {
         const results = [];
         for (const item of cart) {
-          const result = await stockService.sortieStock({
+          const resultStock = await stockService.sortieStock({
             idProduit: item.idProduit,
             quantite: item.quantite_commande,
             prix_vente: item.prix_vente,
             reference: `COMMANDE-${codeCommande}`,
-            notes: `Commande standard - ${codeCommande} - Client: ${selectedClientDetails?.NomComplet || selectedClientDetails?.Societe || 'N/A'}`
+            notes: `Commande standard - ${codeCommande} - Client: ${selectedClientDetails?.NomComplet || selectedClientDetails?.Societe || 'N/A'} - Prix: ${prixType}`
           });
 
-          if (!result.success) {
-            throw new Error(`Erreur pour ${item.designation}: ${result.message}`);
+          if (!resultStock.success) {
+            throw new Error(`Erreur pour ${item.designation}: ${resultStock.message}`);
           }
-          results.push(result);
+          results.push(resultStock);
         }
 
         const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
@@ -331,8 +435,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             `📦 ${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
             `💰 Montant total: ${montantTotal.toLocaleString()} FCFA\n` +
             `📊 Commission (${commissionPourcentage}%): ${commissionTotale.toLocaleString()} FCFA\n` +
-            `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA\n` +
-            `Le stock revendeur sera mis à jour séparément.`,
+            `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA`,
           color: 'green',
           autoClose: 8000
         });
@@ -342,11 +445,14 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       onClose();
 
     } catch (error: any) {
-      const errorMessage = error?.message || 'Erreur lors de la création de la commande';
-      console.error('Erreur création commande:', errorMessage);
+      try {
+        const db = await getDb();
+        await db.execute('ROLLBACK');
+      } catch (e) {}
+      
       notifications.show({
         title: '❌ Erreur',
-        message: errorMessage,
+        message: error?.message || 'Erreur lors de la création de la commande',
         color: 'red',
       });
     } finally {
@@ -385,210 +491,254 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         }
       >
         <ScrollArea h="calc(100vh - 180px)" type="auto" p="lg">
-          <Stack gap="xl">
-            {/* Partie Client */}
-            <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#ffffff' }}>
-              <Group gap="xs" mb="md">
-                <ThemeIcon color="blue" variant="light" radius="md">
-                  <IconUser size={18} />
-                </ThemeIcon>
-                <Text fw={600} size="md" c="#1b365d">Informations client</Text>
-              </Group>
-
-              <Grid>
-                <Grid.Col span={8}>
+          <Stack gap="md">
+            {/* ============================================ */}
+            {/* LIGNE 1: Client - Compactée */}
+            {/* ============================================ */}
+            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+              <Grid align="flex-end">
+                <Grid.Col span={3}>
                   <Select
-                    label="Sélectionnez le client"
-                    placeholder="Rechercher un client..."
+                    label="Client"
+                    placeholder="Rechercher..."
                     data={clientData}
                     value={selectedClientId}
                     onChange={setSelectedClientId}
                     searchable
                     required
-                    size="md"
-                    leftSection={<IconUser size={16} />}
+                    size="xs"
+                    leftSection={<IconUser size={14} />}
                   />
                 </Grid.Col>
-                <Grid.Col span={4}>
+
+                <Grid.Col span={1.5}>
+                  <TextInput
+                    label="Contact"
+                    value={selectedClientDetails?.Tel || ''}
+                    readOnly
+                    size="xs"
+                    leftSection={<IconPhone size={14} />}
+                    placeholder="Tél"
+                  />
+                </Grid.Col>
+
+                <Grid.Col span={1.5}>
+                  <Select
+                    label="Type"
+                    value={selectedClientDetails?.TypeClient || ''}
+                    data={[
+                      { value: 'client', label: 'Client' },
+                      { value: 'revendeur', label: 'Revendeur' }
+                    ]}
+                    readOnly
+                    size="xs"
+                    leftSection={<IconBuildingStore size={14} />}
+                  />
+                </Grid.Col>
+
+                <Grid.Col span={2}>
                   <Button
-                    leftSection={<IconUserPlus size={16} />}
+                    leftSection={<IconUserPlus size={14} />}
                     onClick={() => setClientModalOpened(true)}
-                    fullWidth
-                    mt="auto"
-                    size="md"
+                    size="xs"
                     variant="light"
                     color="blue"
-                    style={{ marginTop: 28 }}
+                    fullWidth
                   >
                     Nouveau client
                   </Button>
                 </Grid.Col>
-              </Grid>
 
-              {selectedClientDetails && (
-                <Paper p="sm" withBorder radius="md" mt="sm" style={{ backgroundColor: '#f8f9fa' }}>
-                  <Group grow>
-                    <Group gap="xs">
-                      <IconPhone size={14} color="#1b365d" />
-                      <Text size="sm">{selectedClientDetails.Tel || 'Tél non renseigné'}</Text>
-                    </Group>
-                    <Group gap="xs">
-                      <IconBuildingStore size={14} color="#1b365d" />
-                      <Text size="sm">
-                        {selectedClientDetails.TypeClient === 'revendeur' ? 'Revendeur' : 'Client Standard'}
-                      </Text>
-                    </Group>
-                  </Group>
-                </Paper>
-              )}
-            </Card>
-
-            {/* Type de commande */}
-            <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#ffffff' }}>
-              <Group gap="xs" mb="md">
-                <ThemeIcon color="green" variant="light" radius="md">
-                  <IconPackage size={18} />
-                </ThemeIcon>
-                <Text fw={600} size="md" c="#1b365d">Type de commande</Text>
-              </Group>
-
-              <Grid>
-                <Grid.Col span={6}>
-                  <Paper
-                    p="md"
-                    withBorder
-                    radius="md"
-                    style={{
-                      cursor: 'pointer',
-                      backgroundColor: typeCommande === 'STANDARD' ? '#eef3f9' : 'white',
-                      borderColor: typeCommande === 'STANDARD' ? '#1b365d' : '#e5e7eb'
-                    }}
-                    onClick={() => setTypeCommande('STANDARD')}
-                  >
-                    <Group>
-                      <ThemeIcon color="blue" variant={typeCommande === 'STANDARD' ? 'filled' : 'light'} radius="xl">
-                        <IconShoppingBag size={18} />
-                      </ThemeIcon>
-                      <div style={{ flex: 1 }}>
-                        <Text fw={600} size="sm" c={typeCommande === 'STANDARD' ? '#1b365d' : '#333'}>Commande Standard</Text>
-                        <Text size="xs" c="dimmed">Vente au détail - Prix normal</Text>
-                      </div>
-                      {typeCommande === 'STANDARD' && <IconCheck size={18} color="#1b365d" />}
-                    </Group>
-                  </Paper>
-                </Grid.Col>
-                <Grid.Col span={6}>
-                  <Paper
-                    p="md"
-                    withBorder
-                    radius="md"
-                    style={{
-                      cursor: 'pointer',
-                      backgroundColor: typeCommande === 'REVENDEUR' ? '#e8f5e9' : 'white',
-                      borderColor: typeCommande === 'REVENDEUR' ? '#2e7d32' : '#e5e7eb'
-                    }}
-                    onClick={() => setTypeCommande('REVENDEUR')}
-                  >
-                    <Group>
-                      <ThemeIcon color="green" variant={typeCommande === 'REVENDEUR' ? 'filled' : 'light'} radius="xl">
-                        <IconTruck size={18} />
-                      </ThemeIcon>
-                      <div style={{ flex: 1 }}>
-                        <Text fw={600} size="sm" c={typeCommande === 'REVENDEUR' ? '#2e7d32' : '#333'}>Commande Revendeur</Text>
-                        <Text size="xs" c="dimmed">Approvisionnement stock revendeur</Text>
-                      </div>
-                      {typeCommande === 'REVENDEUR' && <IconCheck size={18} color="#2e7d32" />}
-                    </Group>
-                  </Paper>
-                </Grid.Col>
-              </Grid>
-
-              <Divider my="md" />
-
-              <Grid>
-                <Grid.Col span={typeCommande === 'REVENDEUR' ? 6 : 12}>
+                <Grid.Col span={2}>
                   <TextInput
-                    label="Code commande"
+                    label="Code"
                     value={codeCommande}
                     readOnly
                     disabled
-                    size="md"
-                    leftSection={<IconPackage size={16} />}
+                    size="xs"
+                    leftSection={<IconPackage size={14} />}
                   />
                 </Grid.Col>
-                {typeCommande === 'REVENDEUR' && (
-                  <Grid.Col span={6}>
-                    <NumberInput
-                      label="Taux de commission (%)"
-                      description="Appliqué sur le montant total"
-                      value={commissionPourcentage}
-                      onChange={(val) => setCommissionPourcentage(typeof val === 'number' ? val : 0)}
-                      min={0}
-                      max={100}
-                      step={1}
-                      size="md"
-                      leftSection={<IconPercentage size={16} />}
-                    />
-                  </Grid.Col>
-                )}
+
+                <Grid.Col span={2}>
+                  <SegmentedControl
+                    size="xs"
+                    value={prixType}
+                    onChange={(value) => setPrixType(value as PrixType)}
+                    data={[
+                      { label: 'Détail', value: 'DETAIL' },
+                      { label: 'Gros', value: 'GROS' }
+                    ]}
+                    fullWidth
+                    color={prixType === 'DETAIL' ? 'blue' : 'green'}
+                  />
+                </Grid.Col>
+              </Grid>
+            </Card>
+
+            {/* ============================================ */}
+            {/* LIGNE 2: Type de commande - Compactée */}
+            {/* ============================================ */}
+            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+              <Grid align="center">
+                <Grid.Col span={3}>
+                  <Group gap="xs" grow>
+                    <Paper
+                      p="xs"
+                      withBorder
+                      radius="md"
+                      style={{
+                        cursor: 'pointer',
+                        backgroundColor: typeCommande === 'STANDARD' ? '#eef3f9' : 'white',
+                        borderColor: typeCommande === 'STANDARD' ? '#1b365d' : '#e5e7eb',
+                        textAlign: 'center'
+                      }}
+                      onClick={() => setTypeCommande('STANDARD')}
+                    >
+                      <Group gap="xs" justify="center">
+                        <ThemeIcon color="blue" variant={typeCommande === 'STANDARD' ? 'filled' : 'light'} size="xs" radius="xl">
+                          <IconShoppingBag size={12} />
+                        </ThemeIcon>
+                        <Text size="xs" fw={600} c={typeCommande === 'STANDARD' ? '#1b365d' : '#333'}>Standard</Text>
+                      </Group>
+                    </Paper>
+
+                    <Paper
+                      p="xs"
+                      withBorder
+                      radius="md"
+                      style={{
+                        cursor: 'pointer',
+                        backgroundColor: typeCommande === 'REVENDEUR' ? '#e8f5e9' : 'white',
+                        borderColor: typeCommande === 'REVENDEUR' ? '#2e7d32' : '#e5e7eb',
+                        textAlign: 'center'
+                      }}
+                      onClick={() => setTypeCommande('REVENDEUR')}
+                    >
+                      <Group gap="xs" justify="center">
+                        <ThemeIcon color="green" variant={typeCommande === 'REVENDEUR' ? 'filled' : 'light'} size="xs" radius="xl">
+                          <IconTruck size={12} />
+                        </ThemeIcon>
+                        <Text size="xs" fw={600} c={typeCommande === 'REVENDEUR' ? '#2e7d32' : '#333'}>Revendeur</Text>
+                      </Group>
+                    </Paper>
+                  </Group>
+                </Grid.Col>
+
+                <Grid.Col span={typeCommande === 'REVENDEUR' ? 2 : 0} style={{ display: typeCommande === 'REVENDEUR' ? 'block' : 'none' }}>
+                  <NumberInput
+                    label="Commission %"
+                    placeholder="%"
+                    value={commissionPourcentage}
+                    onChange={(val) => setCommissionPourcentage(typeof val === 'number' ? val : 0)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    size="xs"
+                    leftSection={<IconPercentage size={14} />}
+                  />
+                </Grid.Col>
+
+                <Grid.Col span={typeCommande === 'REVENDEUR' ? 3 : 6}>
+                  {selectedClientDetails && (
+                    <Paper p="xs" withBorder radius="md" bg="gray.0">
+                      <Group gap="xs" justify="center">
+                        <IconBuildingStore size={14} color="#1b365d" />
+                        <Text size="xs" c="dimmed">
+                          {selectedClientDetails.NomComplet || selectedClientDetails.Societe}
+                        </Text>
+                        <Badge 
+                          size="xs" 
+                          color={selectedClientDetails.TypeClient === 'revendeur' ? 'green' : 'blue'}
+                          variant="light"
+                        >
+                          {selectedClientDetails.TypeClient === 'revendeur' ? 'Revendeur' : 'Client'}
+                        </Badge>
+                        <Badge size="xs" color={prixType === 'DETAIL' ? 'blue' : 'green'} variant="light">
+                          {prixType === 'DETAIL' ? 'Prix détail' : 'Prix gros'}
+                        </Badge>
+                      </Group>
+                    </Paper>
+                  )}
+                </Grid.Col>
+
+                <Grid.Col span={typeCommande === 'REVENDEUR' ? 4 : 3}>
+                  <Group gap="xs" grow>
+                    <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
+                      <Text size="xs" c="dimmed">Articles</Text>
+                      <Text size="sm" fw={700} c="#1b365d">{totalArticles}</Text>
+                    </Paper>
+                    <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
+                      <Text size="xs" c="dimmed">Pièces</Text>
+                      <Text size="sm" fw={700} c="#1b365d">{totalPieces}</Text>
+                    </Paper>
+                    <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
+                      <Text size="xs" c="dimmed">Total</Text>
+                      <Text size="sm" fw={700} c="#1b365d">{formatPrice(montantTotal)}</Text>
+                    </Paper>
+                  </Group>
+                </Grid.Col>
               </Grid>
 
               {typeCommande === 'REVENDEUR' && commissionPourcentage > 0 && cart.length > 0 && (
-                <Alert color="green" variant="light" mt="sm">
-                  <Group justify="space-between">
-                    <Text size="sm">💰 Montant total:</Text>
-                    <Text size="sm" fw={600}>{montantTotal.toLocaleString()} FCFA</Text>
-                  </Group>
-                  <Group justify="space-between">
-                    <Text size="sm" c="orange">📊 Commission ({commissionPourcentage}%):</Text>
-                    <Text size="sm" fw={600} c="orange">- {commissionTotale.toLocaleString()} FCFA</Text>
-                  </Group>
-                  <Divider my="xs" />
-                  <Group justify="space-between">
-                    <Text size="sm" fw={700}>💵 Net à payer:</Text>
-                    <Text size="md" fw={700} c="green">{montantApresCommission.toLocaleString()} FCFA</Text>
+                <Alert color="green" variant="light" mt="xs" p="xs">
+                  <Group justify="space-between" gap="xs">
+                    <Text size="xs">💰 Total: {montantTotal.toLocaleString()} F</Text>
+                    <Text size="xs" c="orange">📊 Comm. {commissionPourcentage}%: -{commissionTotale.toLocaleString()} F</Text>
+                    <Divider orientation="vertical" />
+                    <Text size="xs" fw={700} c="green">💵 Net: {montantApresCommission.toLocaleString()} F</Text>
                   </Group>
                 </Alert>
               )}
             </Card>
 
-            {/* Liste des produits */}
-            <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#ffffff' }}>
-              <Group gap="xs" mb="md" justify="space-between">
-                <Group>
-                  <ThemeIcon color="grape" variant="light" radius="md">
-                    <IconSearch size={18} />
+            {/* ============================================ */}
+            {/* LIGNE 3: Produits - Compactée */}
+            {/* ============================================ */}
+            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+              <Group gap="xs" mb="xs" justify="space-between">
+                <Group gap="xs">
+                  <ThemeIcon color="grape" variant="light" radius="md" size="sm">
+                    <IconSearch size={14} />
                   </ThemeIcon>
-                  <Text fw={600} size="md" c="#1b365d">Liste des produits disponibles en stock à selectionner</Text>
+                  <Text fw={600} size="sm" c="#1b365d">Produits</Text>
+                  <Badge color="blue" variant="light" size="xs">{products.length}</Badge>
+                  <Badge color={prixType === 'DETAIL' ? 'blue' : 'green'} variant="light" size="xs">
+                    {prixType === 'DETAIL' ? 'Prix détail' : 'Prix gros'}
+                  </Badge>
                 </Group>
-                <Group>
-                  <Badge color="blue" variant="light" size="lg">{products.length} produits disponibles</Badge>
+                <Group gap="xs">
                   <Button 
                     size="xs" 
                     variant="light" 
                     color="grape" 
-                    leftSection={<IconPlus size={14} />}
+                    leftSection={<IconPlus size={12} />}
                     onClick={() => handleOpenProduitModal()}
                   >
-                    Nouveau produit
+                    Produit
                   </Button>
+                  <Tooltip label="Actualiser">
+                    <ActionIcon onClick={refreshProducts} size="sm" variant="subtle">
+                      <IconRefresh size={14} />
+                    </ActionIcon>
+                  </Tooltip>
                 </Group>
               </Group>
 
               <Grid>
-                <Grid.Col span={8}>
+                <Grid.Col span={6}>
                   <TextInput
-                    placeholder="Rechercher un produit..."
+                    placeholder="Rechercher..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
                       setCurrentPage(1);
                     }}
-                    leftSection={<IconSearch size={16} />}
-                    size="md"
+                    leftSection={<IconSearch size={14} />}
+                    size="xs"
                   />
                 </Grid.Col>
-                <Grid.Col span={3}>
+                <Grid.Col span={4}>
                   <Select
                     placeholder="Catégorie"
                     data={categories.map(c => ({ value: c, label: c }))}
@@ -598,67 +748,66 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                       setCurrentPage(1);
                     }}
                     clearable
-                    size="md"
+                    size="xs"
                   />
                 </Grid.Col>
-                <Grid.Col span={1}>
-                  <Tooltip label="Actualiser">
-                    <ActionIcon onClick={refreshProducts} size="md" variant="outline" h={38}>
-                      <IconRefresh size={16} />
-                    </ActionIcon>
-                  </Tooltip>
+                <Grid.Col span={2}>
+                  <Text size="xs" c="dimmed" ta="right" mt={4}>
+                    Page {currentPage}/{totalPages || 1}
+                  </Text>
                 </Grid.Col>
               </Grid>
 
-              <ScrollArea h={350} mt="md">
-                <Table striped highlightOnHover>
+              <ScrollArea h={250} mt="xs">
+                <Table striped highlightOnHover verticalSpacing="xs">
                   <Table.Thead>
                     <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                      <Table.Th style={{ width: '30%' }}>Désignation</Table.Th>
-                      <Table.Th style={{ width: '15%' }}>Catégorie</Table.Th>
-                      <Table.Th style={{ width: '10%' }}>Unité</Table.Th>
-                      <Table.Th style={{ width: '10%' }} ta="center">Qte Stock</Table.Th>
-                      <Table.Th style={{ width: '15%' }} ta="right">Prix vente</Table.Th>
-                      <Table.Th style={{ width: '20%' }} ta="center">Quantité à commander</Table.Th>
+                      <Table.Th c="white" style={{ width: '30%' }}>Désignation</Table.Th>
+                      <Table.Th c="white" style={{ width: '12%' }}>Catégorie</Table.Th>
+                      <Table.Th c="white" style={{ width: '8%' }} ta="center">Stock</Table.Th>
+                      <Table.Th c="white" style={{ width: '14%' }} ta="right">Prix {prixType === 'DETAIL' ? 'Détail' : 'Gros'}</Table.Th>
+                      <Table.Th c="white" style={{ width: '18%' }} ta="center">Quantité</Table.Th>
+                      <Table.Th c="white" style={{ width: '18%' }} ta="center">Action</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {paginatedProducts.map((product) => {
                       const isRupture = (product.qte_stock || 0) <= 0;
+                      const prix = getPrixProduit(product);
+                      const hasPrix = prix > 0;
                       return (
                         <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
                           <Table.Td>
-                            <Text fw={500} size="sm">{product.designation}</Text>
+                            <Text fw={500} size="xs">{product.designation}</Text>
                             <Text size="xs" c="dimmed">{product.code_produit}</Text>
                           </Table.Td>
                           <Table.Td>
-                            <Badge variant="light" size="sm">{product.categorie || '-'}</Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="sm">{product.unite_base || 'pièce'}</Text>
+                            <Badge variant="light" size="xs">{product.categorie || '-'}</Badge>
                           </Table.Td>
                           <Table.Td ta="center">
                             <Badge
                               color={isRupture ? 'red' : (product.qte_stock || 0) < (product.seuil_alerte || 10) ? 'orange' : 'green'}
                               variant={isRupture ? 'filled' : 'light'}
-                              size="sm"
+                              size="xs"
                             >
                               {product.qte_stock || 0}
                             </Badge>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} c="blue">{formatPrice(product.prix_vente_detail)} F</Text>
+                            {hasPrix ? (
+                              <Text fw={600} c="blue" size="xs">{formatPrice(prix)}</Text>
+                            ) : (
+                              <Text size="xs" c="red">Prix non défini</Text>
+                            )}
                           </Table.Td>
                           <Table.Td ta="center">
                             {isRupture ? (
-                              <Button
-                                size="xs"
-                                variant="light"
-                                color="grape"
-                                leftSection={<IconPlus size={14} />}
-                                onClick={() => handleOpenProduitModal(product)}
-                              >
-                                Ajouter produit
+                              <Button size="xs" variant="subtle" color="grape" onClick={() => handleOpenProduitModal(product)}>
+                                Ajouter
+                              </Button>
+                            ) : !hasPrix ? (
+                              <Button size="xs" variant="subtle" color="orange" onClick={() => handleOpenProduitModal(product)}>
+                                Définir prix
                               </Button>
                             ) : (
                               <Group gap="xs" justify="center" wrap="nowrap">
@@ -668,22 +817,25 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                                   max={product.qte_stock || 0}
                                   value={quantiteInput[product.idProduit] || 0}
                                   onChange={(val) => setQuantiteInput({ ...quantiteInput, [product.idProduit]: Number(val) || 0 })}
-                                  style={{ width: 80 }}
+                                  style={{ width: 60 }}
                                   placeholder="Qté"
                                 />
-                                <Tooltip label="Ajouter au panier">
-                                  <ActionIcon
-                                    size="md"
-                                    variant="light"
-                                    color="green"
-                                    onClick={() => addToCart(product, quantiteInput[product.idProduit] || 0)}
-                                    disabled={!quantiteInput[product.idProduit] || quantiteInput[product.idProduit] <= 0}
-                                  >
-                                    <IconPlus size={16} />
-                                  </ActionIcon>
-                                </Tooltip>
+                                <ActionIcon
+                                  size="sm"
+                                  variant="light"
+                                  color="green"
+                                  onClick={() => addToCart(product, quantiteInput[product.idProduit] || 0)}
+                                  disabled={!quantiteInput[product.idProduit] || quantiteInput[product.idProduit] <= 0}
+                                >
+                                  <IconPlus size={12} />
+                                </ActionIcon>
                               </Group>
                             )}
+                          </Table.Td>
+                          <Table.Td ta="center">
+                            <Badge size="xs" variant="outline" color="gray">
+                              {product.unite_base || 'pc'}
+                            </Badge>
                           </Table.Td>
                         </Table.Tr>
                       );
@@ -693,55 +845,72 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               </ScrollArea>
 
               {filteredProducts.length === 0 && (
-                <Center py="xl">
-                  <Stack align="center">
-                    <IconSearch size={40} color="#ccc" />
-                    <Text c="dimmed">Aucun produit trouvé</Text>
-                    <Button 
-                      variant="light" 
-                      leftSection={<IconPlus size={16} />}
-                      onClick={() => handleOpenProduitModal()}
-                    >
-                      Ajouter un produit
-                    </Button>
+                <Center py="md">
+                  <Stack align="center" gap="xs">
+                    <IconSearch size={24} color="#ccc" />
+                    <Text c="dimmed" size="xs">Aucun produit trouvé</Text>
                   </Stack>
                 </Center>
               )}
 
               {totalPages > 1 && (
-                <Group justify="center" mt="md">
-                  <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="sm" />
+                <Group justify="center" mt="xs">
+                  <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} size="xs" />
                 </Group>
               )}
             </Card>
 
-            {/* Panier */}
+            {/* ============================================ */}
+            {/* LIGNE 4: Panier - Compactée avec prix modifiables */}
+            {/* ============================================ */}
             {cart.length > 0 && (
-              <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
-                <Group gap="xs" mb="md">
-                  <ThemeIcon color="orange" variant="light" radius="md">
-                    <IconShoppingCart size={18} />
-                  </ThemeIcon>
-                  <Text fw={600} size="md" c="#1b365d">Liste des produits sélectionnés pour la commande</Text>
+              <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
+                <Group gap="xs" mb="xs" justify="space-between">
+                  <Group gap="xs">
+                    <ThemeIcon color="orange" variant="light" radius="md" size="sm">
+                      <IconShoppingCart size={14} />
+                    </ThemeIcon>
+                    <Text fw={600} size="sm" c="#1b365d">Panier</Text>
+                    <Badge color="orange" variant="light" size="xs">{cart.length} produits</Badge>
+                    <Badge color={prixType === 'DETAIL' ? 'blue' : 'green'} variant="light" size="xs">
+                      {prixType === 'DETAIL' ? 'Prix détail' : 'Prix gros'}
+                    </Badge>
+                  </Group>
+                  <Group gap="xs">
+                    <Text size="xs" c="dimmed">Prix moyen: {formatPrice(getPrixMoyen())} F</Text>
+                    <Tooltip label="Réinitialiser les prix modifiés">
+                      <ActionIcon 
+                        size="sm" 
+                        variant="subtle" 
+                        color="blue"
+                        onClick={resetPrixModifies}
+                      >
+                        <IconRefresh size={12} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Group>
                 </Group>
 
-                <ScrollArea h={200}>
-                  <Table striped highlightOnHover>
+                <ScrollArea h={150}>
+                  <Table striped highlightOnHover verticalSpacing="xs">
                     <Table.Thead>
                       <Table.Tr>
-                        <Table.Th>Désignation</Table.Th>
-                        <Table.Th ta="center" w={80}>Qté</Table.Th>
-                        <Table.Th ta="right" w={120}>Prix unit.</Table.Th>
-                        <Table.Th ta="right" w={120}>Total</Table.Th>
-                        <Table.Th ta="center" w={50}></Table.Th>
+                        <Table.Th style={{ width: '30%' }}>Produit</Table.Th>
+                        <Table.Th ta="center" style={{ width: '12%' }}>Qté</Table.Th>
+                        <Table.Th ta="right" style={{ width: '18%' }}>Prix unit.</Table.Th>
+                        <Table.Th ta="right" style={{ width: '18%' }}>Total</Table.Th>
+                        <Table.Th ta="center" style={{ width: '12%' }}>Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
                       {cart.map((item, index) => (
                         <Table.Tr key={index}>
                           <Table.Td>
-                            <Text size="sm" fw={500}>{item.designation}</Text>
+                            <Text size="xs" fw={500}>{item.designation}</Text>
                             <Text size="xs" c="dimmed">{item.code_produit}</Text>
+                            {prixModifies[item.idProduit] && (
+                              <Badge size="xs" color="orange" variant="light">Modifié</Badge>
+                            )}
                           </Table.Td>
                           <Table.Td ta="center">
                             <NumberInput
@@ -750,18 +919,39 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                               min={1}
                               max={item.quantite_stock}
                               size="xs"
-                              w={70}
+                              w={60}
                             />
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text size="sm">{formatPrice(item.prix_vente)} F</Text>
+                            <Group gap="4px" justify="flex-end" wrap="nowrap">
+                              {editingPrix[item.idProduit] ? (
+                                <NumberInput
+                                  value={item.prix_vente}
+                                  onChange={(val) => updatePrix(index, Number(val) || 0)}
+                                  size="xs"
+                                  w={80}
+                                  min={0}
+                                  step={100}
+                                />
+                              ) : (
+                                <Text size="xs" fw={600}>{formatPrice(item.prix_vente)}</Text>
+                              )}
+                              <ActionIcon
+                                size="sm"
+                                variant="subtle"
+                                color={editingPrix[item.idProduit] ? 'green' : 'blue'}
+                                onClick={() => toggleEditPrix(item.idProduit)}
+                              >
+                                <IconEdit size={12} />
+                              </ActionIcon>
+                            </Group>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} c="blue">{formatPrice(item.total)} F</Text>
+                            <Text fw={600} c="blue" size="xs">{formatPrice(item.total)}</Text>
                           </Table.Td>
                           <Table.Td ta="center">
                             <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
-                              <IconTrash size={16} />
+                              <IconTrash size={12} />
                             </ActionIcon>
                           </Table.Td>
                         </Table.Tr>
@@ -770,44 +960,29 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                   </Table>
                 </ScrollArea>
 
-                <Divider my="md" />
+                <Divider my="xs" />
 
-                <Grid>
-                  <Grid.Col span={3}>
-                    <Card withBorder p="sm" bg="gray.0">
-                      <Text size="xs" c="dimmed">Nb d'articles</Text>
-                      <Text size="xl" fw={700} c="#1b365d">{totalArticles}</Text>
-                    </Card>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Card withBorder p="sm" bg="gray.0">
-                      <Text size="xs" c="dimmed">Nb de pièces</Text>
-                      <Text size="xl" fw={700} c="#1b365d">{totalPieces}</Text>
-                    </Card>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Card withBorder p="sm" bg="gray.0">
-                      <Text size="xs" c="dimmed">Montant Total</Text>
-                      <Text size="xl" fw={700} c="#1b365d">{formatPrice(montantTotal)} F</Text>
-                    </Card>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Card withBorder p="sm" bg="gray.0">
-                      <Text size="xs" c="dimmed">Date de commande</Text>
-                      <Text size="md" fw={600} c="#1b365d">{new Date().toLocaleDateString('fr-FR')}</Text>
-                    </Card>
-                  </Grid.Col>
-                </Grid>
+                <Group justify="space-between" gap="xs">
+                  <Group gap="xs">
+                    <Badge size="sm" variant="light" color="blue">Articles: {totalArticles}</Badge>
+                    <Badge size="sm" variant="light" color="gray">Pièces: {totalPieces}</Badge>
+                  </Group>
+                  <Text fw={700} size="md" c="#1b365d">
+                    Total: {formatPrice(montantTotal)} FCFA
+                  </Text>
+                </Group>
               </Card>
             )}
 
-            {/* Boutons d'action */}
-            <Group justify="flex-end" mt="md" pb="md">
+            {/* ============================================ */}
+            {/* Boutons d'action - Compactés */}
+            {/* ============================================ */}
+            <Group justify="flex-end" gap="xs" pb="xs">
               <Button
                 variant="outline"
                 onClick={onClose}
-                size="md"
-                leftSection={<IconTrash size={16} />}
+                size="xs"
+                leftSection={<IconTrash size={14} />}
               >
                 Annuler
               </Button>
@@ -815,11 +990,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 onClick={handleSubmit}
                 loading={submitting || loading}
                 disabled={cart.length === 0 || !selectedClientId}
-                size="md"
+                size="xs"
                 color="green"
-                leftSection={<IconShoppingBag size={16} />}
+                leftSection={<IconShoppingBag size={14} />}
               >
-                Enregistrer la commande
+                Enregistrer
               </Button>
             </Group>
           </Stack>

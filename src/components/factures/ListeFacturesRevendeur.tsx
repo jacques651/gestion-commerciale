@@ -29,6 +29,18 @@ interface FactureRevendeur {
   client_societe?: string;
 }
 
+interface DetailFacture {
+  idDetailFactureRevendeur: number;
+  idProduit: number;
+  qte_commande: number;
+  prix_achat_base: number;
+  prix_unitaire_vente: number;
+  designation: string;
+  code_produit: string;
+  categorie: string;
+  unite_base: string;
+}
+
 export const ListeFacturesRevendeur: React.FC = () => {
   const navigate = useNavigate();
   const [factures, setFactures] = useState<FactureRevendeur[]>([]);
@@ -38,6 +50,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [decompteModalOpened, setDecompteModalOpened] = useState(false);
   const [selectedFacture, setSelectedFacture] = useState<FactureRevendeur | null>(null);
+  const [selectedDetails, setSelectedDetails] = useState<DetailFacture[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   
   const itemsPerPage = 10;
@@ -110,7 +123,8 @@ export const ListeFacturesRevendeur: React.FC = () => {
     chargerFactures();
   }, []);
 
-  const chargerDetailsFacture = async (idFactureRevendeur: number): Promise<any[]> => {
+  // 🔥 Charger les détails d'une facture avec catégorie et unité
+  const chargerDetailsFacture = async (idFactureRevendeur: number): Promise<DetailFacture[]> => {
     try {
       const db = await getDb();
       
@@ -122,9 +136,9 @@ export const ListeFacturesRevendeur: React.FC = () => {
         return [];
       }
       
-      const details = await db.select<any[]>(`
+      const details = await db.select<DetailFacture[]>(`
         SELECT 
-          frd.idDetailFactureRevendeur as idDetail,
+          frd.idDetailFactureRevendeur,
           frd.idProduit,
           frd.qte_commande,
           frd.prix_achat_base,
@@ -173,7 +187,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
     }
   };
 
-  // 🔥 Créer le décompte - avec vérification/génération du code facture
+  // 🔥 Créer le décompte avec catégorie et unité
   const handleCreerDecompte = async (facture: FactureRevendeur) => {
     setLoadingDetails(true);
     try {
@@ -185,12 +199,11 @@ export const ListeFacturesRevendeur: React.FC = () => {
         factureAvecDetails.code_facture = newCode;
       }
       
+      // 🔥 Charger les détails avec catégorie et unité
       const details = await chargerDetailsFacture(facture.idFactureRevendeur);
+      setSelectedDetails(details);
       
-      setSelectedFacture({
-        ...factureAvecDetails,
-        details: details
-      } as any);
+      setSelectedFacture(factureAvecDetails);
       setDecompteModalOpened(true);
     } catch (error) {
       console.error('Erreur:', error);
@@ -458,6 +471,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
         onClose={() => {
           setDecompteModalOpened(false);
           setSelectedFacture(null);
+          setSelectedDetails([]);
           chargerFactures();
         }}
         size="95%"
@@ -476,6 +490,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
               onSuccess={() => {
                 setDecompteModalOpened(false);
                 setSelectedFacture(null);
+                setSelectedDetails([]);
                 chargerFactures();
                 notifications.show({
                   title: '✅ Succès',
@@ -486,6 +501,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
               onCancel={() => {
                 setDecompteModalOpened(false);
                 setSelectedFacture(null);
+                setSelectedDetails([]);
               }}
               facturePredefinie={{
                 idFactureRevendeur: selectedFacture.idFactureRevendeur,
@@ -498,7 +514,16 @@ export const ListeFacturesRevendeur: React.FC = () => {
                 statut: selectedFacture.statut,
                 client_nom: selectedFacture.client_nom,
                 client_societe: selectedFacture.client_societe,
-                details: (selectedFacture as any).details || []
+                details: selectedDetails.map(d => ({
+                  idProduit: d.idProduit,
+                  designation: d.designation,
+                  code_produit: d.code_produit,
+                  categorie: d.categorie,
+                  unite_base: d.unite_base,
+                  qte_commande: d.qte_commande,
+                  prix_achat_base: d.prix_achat_base,
+                  prix_unitaire_vente: d.prix_unitaire_vente
+                }))
               }}
             />
           )

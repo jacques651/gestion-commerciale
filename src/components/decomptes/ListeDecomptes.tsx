@@ -5,20 +5,20 @@ import {
   Button, Group, Stack, Title, Card, Text,
   Modal, TextInput, Paper,
   Loader, ThemeIcon, Flex, ActionIcon,
-  ScrollArea, Pagination, Tooltip, Select, Badge, Table, SimpleGrid
+  ScrollArea, Pagination, Tooltip, Select, Badge, Table, SimpleGrid,
+  Alert, Divider
 } from '@mantine/core';
 import {
   IconSearch, IconRefresh, IconReceipt,
   IconX, IconEye,
   IconPrinter, IconFilter, IconList, IconPlus, IconArrowBackUp, IconFileInvoice,
-  IconCalendar, IconPackage
+  IconCalendar, IconPackage, IconTrash, IconAlertCircle
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import NouveauDecompte from './NouveauDecompte';
 import ListeCommandesRevendeur from '../commandes/ListeCommandesRevendeur';
 import RecuDecompte from './RecuDecompte';
-
 interface DetailDecompte {
   idDecompte: number;
   code_decompte: string;
@@ -75,6 +75,9 @@ export const ListeDecomptes: React.FC = () => {
   const [printModalOpen, setPrintModalOpen] = useState(false);
   const [showNonVendus, setShowNonVendus] = useState(false);
   const [nonVendusData, setNonVendusData] = useState<any[]>([]);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [decompteToDelete, setDecompteToDelete] = useState<GroupedDecompte | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const itemsPerPage = 10;
 
@@ -88,9 +91,7 @@ export const ListeDecomptes: React.FC = () => {
       const factureColumns = await db.select<any[]>(`
         PRAGMA table_info(factures_revendeur)
       `);
-      console.log("Colonnes de factures_revendeur:", factureColumns);
       
-      // Trouver le nom de la colonne code facture
       const codeFactureColumn = factureColumns.find(col => 
         col.name === 'code_facture' || 
         col.name === 'code' || 
@@ -125,11 +126,6 @@ export const ListeDecomptes: React.FC = () => {
         LEFT JOIN products p ON p.idProduit = dd.idProduit
         ORDER BY d.date_decompte DESC
       `);
-
-      console.log("Résultat avec code_facture:", result.map(r => ({ 
-        idDecompte: r.idDecompte, 
-        code_facture: r.code_facture 
-      })));
 
       // Grouper par décompte
       const grouped = new Map<number, GroupedDecompte>();
@@ -229,6 +225,94 @@ export const ListeDecomptes: React.FC = () => {
     } catch (error) {
       console.error('Erreur chargement produits non vendus:', error);
       notifications.show({ title: 'Erreur', message: 'Erreur de chargement', color: 'red' });
+    }
+  };
+
+  // ✅ Vérifier si un décompte peut être supprimé
+  const peutSupprimerDecompte = async (idDecompte: number): Promise<{ peut: boolean; raison: string }> => {
+    const db = await getDb();
+
+    // Vérifier s'il y a des règlements associés à ce décompte
+    const reglements = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM reglements
+      WHERE idDecompte = ?
+    `, [idDecompte]);
+
+    if (reglements[0]?.count > 0) {
+      return { peut: false, raison: 'Des règlements ont déjà été effectués sur ce décompte' };
+    }
+
+    return { peut: true, raison: '' };
+  };
+
+  // ✅ Supprimer un décompte avec restauration du stock
+  const supprimerDecompte = async () => {
+    if (!decompteToDelete) return;
+
+    // Vérifier si le décompte peut être supprimé
+    const { peut, raison } = await peutSupprimerDecompte(decompteToDelete.idDecompte);
+    
+    if (!peut) {
+      notifications.show({
+        title: '❌ Suppression impossible',
+        message: raison,
+        color: 'red',
+        autoClose: 8000
+      });
+      setDeleteModalOpen(false);
+      setDecompteToDelete(null);
+      return;
+    }
+
+    setDeleteLoading(true);
+    
+    try {
+      const db = await getDb();
+
+      // 1. Récupérer les détails du décompte pour restaurer le stock
+      const details = await db.select<any[]>(`
+        SELECT idProduit, qte_decompte FROM decompte_details WHERE idDecompte = ?
+      `, [decompteToDelete.idDecompte]);
+
+      // 2. Restaurer le stock pour chaque produit
+      for (const detail of details) {
+        await db.execute(`
+          UPDATE stock_revendeur 
+          SET qte_stock = qte_stock + ? 
+          WHERE idProduit = ? AND idRevendeur = ?
+        `, [
+          detail.qte_decompte, 
+          detail.idProduit, 
+          decompteToDelete.idDecompte
+        ]);
+      }
+
+      // 3. Supprimer les détails du décompte
+      await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [decompteToDelete.idDecompte]);
+
+      // 4. Supprimer le décompte
+      await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [decompteToDelete.idDecompte]);
+
+      notifications.show({
+        title: '✅ Succès',
+        message: `Décompte ${decompteToDelete.code_decompte} supprimé avec succès - Stock restauré (${details.length} produit(s))`,
+        color: 'green',
+      });
+      
+      setDeleteModalOpen(false);
+      setDecompteToDelete(null);
+      chargerDecomptes();
+      
+    } catch (error) {
+      console.error("Erreur suppression:", error);
+      notifications.show({
+        title: '❌ Erreur',
+        message: 'Erreur lors de la suppression du décompte',
+        color: 'red',
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -545,6 +629,14 @@ export const ListeDecomptes: React.FC = () => {
                                 <IconPrinter size={16} />
                               </ActionIcon>
                             </Tooltip>
+                            <Tooltip label="Supprimer">
+                              <ActionIcon variant="light" color="red" size="md" onClick={() => {
+                                setDecompteToDelete(decompte);
+                                setDeleteModalOpen(true);
+                              }}>
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Tooltip>
                           </Group>
                         </Table.Td>
                       </Table.Tr>
@@ -662,6 +754,59 @@ export const ListeDecomptes: React.FC = () => {
         <Group justify="flex-end" mt="md">
           <Button onClick={() => setPrintModalOpen(false)}>Fermer</Button>
         </Group>
+      </Modal>
+
+      {/* ✅ MODAL CONFIRMATION SUPPRESSION */}
+      <Modal
+        opened={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setDecompteToDelete(null);
+        }}
+        title="⚠️ Suppression du décompte"
+        size="md"
+        centered
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 600 },
+          body: { padding: '20px' }
+        }}
+      >
+        <Stack gap="md">
+          <Alert icon={<IconAlertCircle size={16} />} color="red" title="⚠️ Attention !">
+            <Text size="sm">
+              Êtes-vous sûr de vouloir supprimer ce décompte ?
+            </Text>
+            <Text size="sm" mt="md" c="red">
+              <strong>Action irréversible !</strong>
+            </Text>
+            <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+              <li>Le décompte sera définitivement supprimé</li>
+              <li>Les stocks revendeur seront restaurés</li>
+              <li>Les commissions associées seront supprimées</li>
+            </ul>
+          </Alert>
+
+          <Text size="sm" c="dimmed" ta="center">
+            {decompteToDelete && `Décompte ${decompteToDelete.code_decompte} du ${new Date(decompteToDelete.date_decompte).toLocaleDateString('fr-FR')}`}
+          </Text>
+
+          <Divider />
+
+          <Group justify="flex-end">
+            <Button variant="outline" onClick={() => setDeleteModalOpen(false)} disabled={deleteLoading}>
+              Annuler
+            </Button>
+            <Button 
+              color="red" 
+              onClick={supprimerDecompte} 
+              loading={deleteLoading}
+              leftSection={<IconTrash size={16} />}
+            >
+              Supprimer
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </>
   );

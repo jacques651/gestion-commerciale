@@ -4,16 +4,17 @@ import {
   Modal, TextInput, Select, Button, Group, Stack,
   NumberInput, Table, ActionIcon, Text, Card,
   Divider, Title, LoadingOverlay, ScrollArea, Badge, Tooltip,
-  Checkbox
+  Checkbox, Alert
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconTrash, IconPlus, IconShoppingCart, IconSearch, IconRefresh, IconUserPlus } from '@tabler/icons-react';
+import { IconTrash, IconPlus, IconShoppingCart, IconSearch, IconRefresh, IconUserPlus, IconAlertCircle } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
 import { useSales } from '../../hooks/useSales';
 
 import { FormulaireClient } from '../clients/FormulaireClient';
 import { stockService } from '../../database/repositories/stockService';
+import { journalCaisseService } from '../../services/journalCaisseService';
 
 
 interface FormulaireVenteProps {
@@ -25,6 +26,8 @@ interface CartItem {
   idProduit: number;
   designation: string;
   code_produit: string;
+  categorie?: string;
+  unite_base?: string;
   quantite_stock: number;
   prix_vente: number;
   prix_achat_base?: number;
@@ -77,12 +80,14 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
   }, [selectedClientId, clients, ajouterClient]);
 
-  // Filtrer les produits
+  // Filtrer les produits pour n'afficher que ceux avec du stock
   const filteredProducts = products.filter(product => {
+    const stockDisponible = (product.qte_stock || 0) > 0;
     const matchesSearch = searchTerm === '' || 
       product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
+      product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.categorie?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch && stockDisponible;
   });
 
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -107,6 +112,15 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       notifications.show({
         title: 'Erreur',
         message: `Le prix du produit "${product.designation}" n'est pas défini`,
+        color: 'red',
+      });
+      return;
+    }
+
+    if (stock <= 0) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Le produit "${product.designation}" est en rupture de stock`,
         color: 'red',
       });
       return;
@@ -146,6 +160,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
           idProduit: product.idProduit,
           designation: product.designation,
           code_produit: product.code_produit,
+          categorie: product.categorie || 'Non catégorisé',
+          unite_base: product.unite_base || 'pièce',
           quantite_stock: stock,
           prix_vente: prix,
           prix_achat_base: product.prix_achat_base || 0,
@@ -219,8 +235,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         remise_percent: 0
       }));
 
-      // Créer la vente
-      await createSale(sale, details);
+      // Créer la vente et récupérer l'ID
+      const createdSaleId = await createSale(sale, details);
 
       // 2. Pour chaque produit, enregistrer la sortie de stock avec logique FIFO
       const results = [];
@@ -243,7 +259,21 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       // 3. Calculer le bénéfice total
       const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
 
-      // 4. Afficher le récapitulatif
+      // 4. ✅ AJOUTER AU JOURNAL DE CAISSE
+      try {
+        await journalCaisseService.ajouterVenteComptoir({
+          montant: totalTTC,
+          idVente: createdSaleId,
+          codeVente: codeVente,
+          clientNom: sale.nom_prenom
+        });
+        console.log('✅ Journal de caisse mis à jour pour la vente', codeVente);
+      } catch (journalError) {
+        console.error('Erreur journal de caisse:', journalError);
+        // Ne pas bloquer la vente si le journal échoue
+      }
+
+      // 5. Afficher le récapitulatif
       notifications.show({
         title: '✅ Vente enregistrée avec succès',
         message: `${cart.length} produit(s) vendu(s) - Chiffre d'affaires: ${totalTTC.toLocaleString()} F - Bénéfice: ${beneficeTotal.toLocaleString()} F`,
@@ -251,10 +281,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         autoClose: 5000
       });
 
-      // 5. Rafraîchir la liste des produits
+      // 6. Rafraîchir la liste des produits
       await refreshProducts();
       
-      // 6. Fermer le modal
+      // 7. Fermer le modal
       onSuccess();
 
     } catch (error: any) {
@@ -374,13 +404,13 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
               )}
             </Card>
 
-            {/* Produits */}
+            {/* Produits - Uniquement avec stock > 0 + Catégorie + Unité */}
             <Card withBorder p="sm" radius="md">
-              <Title order={5} mb="sm">Produits</Title>
+              <Title order={5} mb="sm">Produits disponibles en stock</Title>
 
               <Group mb="sm" gap="xs">
                 <TextInput
-                  placeholder="Rechercher un produit"
+                  placeholder="Rechercher un produit..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   style={{ flex: 1 }}
@@ -394,56 +424,75 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                 </Tooltip>
               </Group>
 
-              <ScrollArea h={250}>
-                <Table striped highlightOnHover>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Désignation</Table.Th>
-                      <Table.Th>Prix vente</Table.Th>
-                      <Table.Th>Prix achat (PMP)</Table.Th>
-                      <Table.Th>Stock</Table.Th>
-                      <Table.Th></Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {paginatedProducts.map((product) => (
-                      <Table.Tr key={product.idProduit}>
-                        <Table.Td>
-                          <Text size="sm" fw={500}>{product.designation}</Text>
-                          <Text size="xs" c="dimmed">{product.code_produit}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text fw={600} c="blue">{formatMontant(product.prix_vente_detail)} F</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" c="dimmed">{formatMontant(product.prix_achat_base)} F</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge 
-                            color={product.qte_stock <= 0 ? 'red' : (product.qte_stock < (product.seuil_alerte || 10) ? 'orange' : 'green')} 
-                            variant="light" 
-                            size="sm"
-                          >
-                            {product.qte_stock || 0} unités
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Button
-                            size="xs"
-                            leftSection={<IconPlus size={12} />}
-                            onClick={() => addToCart(product)}
-                            disabled={(product.qte_stock || 0) === 0}
-                            variant="light"
-                            color="blue"
-                          >
-                            Ajouter
-                          </Button>
-                        </Table.Td>
+              {filteredProducts.length === 0 && (
+                <Alert color="yellow" variant="light" icon={<IconAlertCircle size={16} />}>
+                  <Text size="sm">
+                    {searchTerm ? 'Aucun produit ne correspond à votre recherche' : 'Aucun produit en stock disponible pour la vente'}
+                  </Text>
+                </Alert>
+              )}
+
+              {filteredProducts.length > 0 && (
+                <ScrollArea h={250}>
+                  <Table striped highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Désignation</Table.Th>
+                        <Table.Th>Catégorie</Table.Th>
+                        <Table.Th>Unité</Table.Th>
+                        <Table.Th>Prix vente</Table.Th>
+                        <Table.Th>Prix achat (PMP)</Table.Th>
+                        <Table.Th>Stock</Table.Th>
+                        <Table.Th></Table.Th>
                       </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {paginatedProducts.map((product) => (
+                        <Table.Tr key={product.idProduit}>
+                          <Table.Td>
+                            <Text size="sm" fw={500}>{product.designation}</Text>
+                            <Text size="xs" c="dimmed">{product.code_produit}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="light" size="xs" color="grape">
+                              {product.categorie || 'Non catégorisé'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs" c="dimmed">{product.unite_base || 'pièce'}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text fw={600} c="blue">{formatMontant(product.prix_vente_detail)} F</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs" c="dimmed">{formatMontant(product.prix_achat_base)} F</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge 
+                              color={product.qte_stock <= 5 ? 'orange' : 'green'} 
+                              variant="light" 
+                              size="sm"
+                            >
+                              {product.qte_stock || 0} unités
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Button
+                              size="xs"
+                              leftSection={<IconPlus size={12} />}
+                              onClick={() => addToCart(product)}
+                              variant="light"
+                              color="blue"
+                            >
+                              Ajouter
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              )}
 
               {totalPages > 1 && (
                 <Group justify="center" mt="md">
@@ -472,7 +521,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
               )}
             </Card>
 
-            {/* Panier */}
+            {/* Panier avec Catégorie et Unité */}
             {cart.length > 0 && (
               <Card withBorder p="sm" radius="md" style={{ backgroundColor: '#fafafa' }}>
                 <Title order={5} mb="sm">Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
@@ -482,6 +531,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th>Produit</Table.Th>
+                        <Table.Th>Catégorie</Table.Th>
+                        <Table.Th>Unité</Table.Th>
                         <Table.Th>Qté</Table.Th>
                         <Table.Th>Prix unit.</Table.Th>
                         <Table.Th>Total</Table.Th>
@@ -495,7 +546,15 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                             <Text size="sm" fw={500}>{item.designation}</Text>
                             <Text size="xs" c="dimmed">{item.code_produit}</Text>
                           </Table.Td>
-                          <Table.Td style={{ width: 100 }}>
+                          <Table.Td>
+                            <Badge variant="light" size="xs" color="grape">
+                              {item.categorie || 'Non catégorisé'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs" c="dimmed">{item.unite_base || 'pièce'}</Text>
+                          </Table.Td>
+                          <Table.Td style={{ width: 80 }}>
                             <NumberInput
                               value={item.quantite}
                               onChange={(val) => updateQuantity(index, Number(val) || 1)}
@@ -565,7 +624,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 export default FormulaireVente;
 
 async function getNextVenteCode(): Promise<string> {
-  // Simple code generation fallback. Replace with backend logic if needed.
   const timestamp = Date.now();
   return `VENTE-${timestamp}`;
 }

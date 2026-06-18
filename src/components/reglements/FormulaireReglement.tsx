@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Modal, Select, NumberInput, TextInput, Button, Group, Stack,
   LoadingOverlay, Paper, Text, SimpleGrid, Badge,
-  Table, ScrollArea, Card, Radio} from '@mantine/core';
+  Table, ScrollArea, Card, Radio
+} from '@mantine/core';
 import { useReglements } from '../../hooks/useReglements';
 import { notifications } from '@mantine/notifications';
 
@@ -11,6 +12,7 @@ import {
   IconCash, IconFileInvoice
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
+import { journalCaisseService } from '../../services/journalCaisseService';
 
 interface FormulaireReglementProps {
   opened: boolean;
@@ -76,7 +78,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   };
 
-  // ✅ Fonction pour calculer le montant réellement réglé d'une facture
+  // Fonction pour calculer le montant réellement réglé d'une facture
   const getTotalRegleFacture = async (idFacture: number): Promise<number> => {
     const db = await getDb();
     const result = await db.select<any[]>(`
@@ -87,7 +89,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     return result[0]?.total || 0;
   };
 
-  // ✅ Charger les factures d'un client avec calcul réel du reste
+  // Charger les factures d'un client avec calcul réel du reste
   const loadFactures = async (clientId: number) => {
     try {
       const db = await getDb();
@@ -109,7 +111,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       const facturesAvecReste = [];
 
       for (const facture of facturesData) {
-        // ✅ Calculer le vrai montant réglé depuis la table reglements
+        // Calculer le vrai montant réglé depuis la table reglements
         const totalRegle = await getTotalRegleFacture(facture.idFacture);
         const montantRestant = facture.montant_ttc - totalRegle;
 
@@ -154,7 +156,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     loadClients();
   }, [opened]);
 
-  // ✅ Si idFacture est passé en prop, charger directement la facture avec calcul du vrai reste
+  // Si idFacture est passé en prop, charger directement la facture avec calcul du vrai reste
   useEffect(() => {
     if (propIdFacture && opened) {
       const loadFactureDirect = async () => {
@@ -181,7 +183,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         if (factureData.length > 0) {
           const row = factureData[0];
 
-          // ✅ Calculer le vrai montant réglé depuis la table reglements
+          // Calculer le vrai montant réglé depuis la table reglements
           const totalRegle = await getTotalRegleFacture(propIdFacture);
           const montantRestant = row.montant_ttc - totalRegle;
 
@@ -265,6 +267,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     setLoading(true);
 
     try {
+      // 1. Créer le règlement
       await createReglement({
         idClient: selectedClient.idClient,
         idFacture: selectedFacture.idFacture,
@@ -275,9 +278,23 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         observation: observation || null,
       });
 
+      // 2. ✅ AJOUTER AU JOURNAL DE CAISSE
+      try {
+        await journalCaisseService.ajouterReglementFacture({
+          montant: montantAPayer,
+          idFacture: selectedFacture.idFacture,
+          codeFacture: selectedFacture.code_facture,
+          clientNom: selectedClient.NomComplet
+        });
+        console.log('✅ Journal de caisse mis à jour pour le règlement', codeReglement);
+      } catch (journalError) {
+        console.error('Erreur journal de caisse:', journalError);
+        // Ne pas bloquer le règlement si le journal échoue
+      }
+
       notifications.show({
-        title: 'Succès',
-        message: `Règlement ${codeReglement} enregistré`,
+        title: '✅ Succès',
+        message: `Règlement ${codeReglement} enregistré avec succès`,
         color: 'green',
       });
 
@@ -286,8 +303,8 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     } catch (error) {
       console.error(error);
       notifications.show({
-        title: 'Erreur',
-        message: 'Erreur lors de l\'enregistrement',
+        title: '❌ Erreur',
+        message: 'Erreur lors de l\'enregistrement du règlement',
         color: 'red',
       });
     } finally {

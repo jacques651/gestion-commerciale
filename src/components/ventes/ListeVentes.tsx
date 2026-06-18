@@ -59,6 +59,7 @@ const ListeVentes: React.FC = () => {
   const [selectedVenteDetails, setSelectedVenteDetails] = useState<any>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [venteToDelete, setVenteToDelete] = useState<Vente | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [venteToEdit, setVenteToEdit] = useState<Vente | null>(null);
@@ -98,6 +99,24 @@ const ListeVentes: React.FC = () => {
   useEffect(() => {
     chargerVentes();
   }, []);
+
+  // ✅ Vérifier si une vente peut être supprimée
+  const peutSupprimerVente = async (idVente: number): Promise<{ peut: boolean; raison: string }> => {
+    const db = await getDb();
+
+    // Vérifier s'il y a des règlements associés à cette vente
+    const reglements = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM reglements
+      WHERE idVente = ?
+    `, [idVente]);
+
+    if (reglements[0]?.count > 0) {
+      return { peut: false, raison: 'Des règlements ont déjà été effectués sur cette vente' };
+    }
+
+    return { peut: true, raison: '' };
+  };
 
   const handleEditVente = async (vente: Vente) => {
     setEditLoading(true);
@@ -219,40 +238,69 @@ const ListeVentes: React.FC = () => {
     }
   };
 
+  // ✅ Supprimer une vente avec restauration du stock
   const supprimerVente = async () => {
     if (!venteToDelete) return;
+
+    // ✅ Vérifier si la vente peut être supprimée
+    const { peut, raison } = await peutSupprimerVente(venteToDelete.idVente);
+    
+    if (!peut) {
+      notifications.show({
+        title: '❌ Suppression impossible',
+        message: raison,
+        color: 'red',
+        autoClose: 8000
+      });
+      setDeleteModalOpen(false);
+      setVenteToDelete(null);
+      return;
+    }
+
+    setDeleteLoading(true);
     
     try {
       const db = await getDb();
 
+      // 1. Récupérer les détails de la vente pour restaurer le stock
       const details = await db.select<any[]>(`
         SELECT idProduit, quantite FROM vente_details WHERE idVente = ?
       `, [venteToDelete.idVente]);
 
+      // 2. Restaurer le stock pour chaque produit
       for (const detail of details) {
         await db.execute(`
-          UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?
+          UPDATE products 
+          SET qte_stock = qte_stock + ? 
+          WHERE idProduit = ?
         `, [detail.quantite, detail.idProduit]);
       }
 
+      // 3. Supprimer les détails de la vente
       await db.execute("DELETE FROM vente_details WHERE idVente = ?", [venteToDelete.idVente]);
+
+      // 4. Supprimer la vente
       await db.execute("DELETE FROM ventes WHERE idVente = ?", [venteToDelete.idVente]);
 
       notifications.show({
-        title: 'Succès',
-        message: `Vente ${venteToDelete.code_vente} supprimée avec succès`,
+        title: '✅ Succès',
+        message: `Vente ${venteToDelete.code_vente} supprimée avec succès - Stock restauré (${details.length} produit(s))`,
         color: 'green',
       });
+      
       setDeleteModalOpen(false);
       setVenteToDelete(null);
       chargerVentes();
+      
     } catch (error) {
       console.error("Erreur suppression:", error);
       notifications.show({
-        title: 'Erreur',
-        message: 'Erreur lors de la suppression',
+        title: '❌ Erreur',
+        message: 'Erreur lors de la suppression de la vente',
         color: 'red',
       });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -695,7 +743,7 @@ const ListeVentes: React.FC = () => {
           )}
         </Modal>
 
-        {/* Modal des détails (inchangé) */}
+        {/* Modal des détails */}
         <Modal
           opened={detailsModalOpen}
           onClose={() => {
@@ -776,34 +824,56 @@ const ListeVentes: React.FC = () => {
           )}
         </Modal>
 
-        {/* Modal confirmation suppression (inchangé) */}
+        {/* ✅ Modal confirmation suppression avec vérification */}
         <Modal
           opened={deleteModalOpen}
           onClose={() => setDeleteModalOpen(false)}
           title="Supprimer la vente"
           centered
+          styles={{
+            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            title: { color: 'white', fontWeight: 600 },
+            body: { padding: '20px' }
+          }}
         >
           <Stack>
-            <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
-              Êtes-vous sûr de vouloir supprimer cette vente ?
-              <Text size="sm" mt="md" c="red">
-                Action irréversible !<br />
-                - La vente sera supprimée<br />
-                - Les stocks seront restaurés
+            <Alert icon={<IconAlertCircle size={16} />} color="red" title="⚠️ Attention !">
+              <Text size="sm">
+                Êtes-vous sûr de vouloir supprimer cette vente ?
               </Text>
+              <Text size="sm" mt="md" c="red">
+                <strong>Action irréversible !</strong>
+              </Text>
+              <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+                <li>La vente sera définitivement supprimée</li>
+                <li>Les stocks seront automatiquement restaurés</li>
+                <li>Les règlements associés seront supprimés</li>
+              </ul>
             </Alert>
-            <Group justify="flex-end" mt="md">
-              <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>
+
+            <Text size="sm" c="dimmed" ta="center">
+              {venteToDelete && `Vente ${venteToDelete.code_vente} du ${new Date(venteToDelete.date_vente).toLocaleDateString('fr-FR')}`}
+            </Text>
+
+            <Divider />
+
+            <Group justify="flex-end">
+              <Button variant="outline" onClick={() => setDeleteModalOpen(false)} disabled={deleteLoading}>
                 Annuler
               </Button>
-              <Button color="red" onClick={supprimerVente}>
+              <Button 
+                color="red" 
+                onClick={supprimerVente} 
+                loading={deleteLoading}
+                leftSection={<IconTrash size={16} />}
+              >
                 Supprimer
               </Button>
             </Group>
           </Stack>
         </Modal>
 
-        {/* Modal Instructions (inchangé) */}
+        {/* Modal Instructions */}
         <Modal
           opened={infoModalOpen}
           onClose={() => setInfoModalOpen(false)}

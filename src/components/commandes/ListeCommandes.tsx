@@ -23,7 +23,9 @@ import {
   Loader,
   Pagination,
   TextInput,
-  Box
+  Box,
+  Alert,
+  Divider
 } from '@mantine/core';
 import '@mantine/dates/styles.css';
 import { useDisclosure } from '@mantine/hooks';
@@ -52,6 +54,7 @@ import {
 import { useCommandes } from '../../hooks/useCommandes';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { getDb } from '../../database/db';
 
 interface CommandeDetail {
   idDetail: number;
@@ -94,6 +97,9 @@ export function ListeCommande() {
   const [selectedCommande, setSelectedCommande] = useState<CommandeComplete | null>(null);
   const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false);
   const [formulaireOpened, setFormulaireOpened] = useState(false);
+  const [deleteConfirmOpened, setDeleteConfirmOpened] = useState(false);
+  const [commandeToDelete, setCommandeToDelete] = useState<number | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [reglementModalOpened, setReglementModalOpened] = useState(false);
   const [reglementData, setReglementData] = useState({
@@ -290,24 +296,129 @@ export function ListeCommande() {
     }
   };
 
+  // ✅ Vérifier si une commande peut être supprimée
+  const peutSupprimerCommande = async (idCommande: number): Promise<{ peut: boolean; raison: string }> => {
+    const db = await getDb();
+
+    // Vérifier s'il y a des règlements associés
+    const reglements = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM reglements r
+      INNER JOIN factures f ON f.idFacture = r.idFacture
+      WHERE f.idCommande = ?
+    `, [idCommande]);
+
+    if (reglements[0]?.count > 0) {
+      return { peut: false, raison: 'Des règlements ont déjà été effectués sur les factures de cette commande' };
+    }
+
+    // Vérifier s'il y a des décomptes associés (pour les commandes revendeur)
+    const decomptes = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM decomptes
+      WHERE idFactureRevendeur IN (
+        SELECT idFactureRevendeur FROM factures_revendeur WHERE idCommande = ?
+      )
+    `, [idCommande]);
+
+    if (decomptes[0]?.count > 0) {
+      return { peut: false, raison: 'Des décomptes ont déjà été créés pour cette commande revendeur' };
+    }
+
+    // Vérifier s'il y a des factures
+    const factures = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM factures
+      WHERE idCommande = ?
+    `, [idCommande]);
+
+    if (factures[0]?.count > 0) {
+      return { peut: false, raison: 'Des factures ont déjà été générées pour cette commande' };
+    }
+
+    // Vérifier s'il y a des factures revendeur
+    const facturesRev = await db.select<any[]>(`
+      SELECT COUNT(*) as count
+      FROM factures_revendeur
+      WHERE idCommande = ?
+    `, [idCommande]);
+
+    if (facturesRev[0]?.count > 0) {
+      return { peut: false, raison: 'Des factures revendeur ont déjà été générées pour cette commande' };
+    }
+
+    return { peut: true, raison: '' };
+  };
+
+  // ✅ Supprimer une commande avec restauration du stock
   const handleDelete = async (idCommande: number) => {
-    if (!window.confirm('Supprimer cette commande ?')) return;
-    try {
-      const { getDb } = await import('../../database/db');
-      const db = await getDb();
-      await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [idCommande]);
+    setCommandeToDelete(idCommande);
+    
+    // Vérifier si la commande peut être supprimée
+    const { peut, raison } = await peutSupprimerCommande(idCommande);
+    
+    if (!peut) {
       notifications.show({
-        title: 'Succès',
-        message: 'Commande supprimée',
+        title: '❌ Suppression impossible',
+        message: raison,
+        color: 'red',
+        autoClose: 8000
+      });
+      return;
+    }
+
+    setDeleteConfirmOpened(true);
+  };
+
+  // ✅ Confirmer la suppression
+  const confirmDelete = async () => {
+    if (!commandeToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      const db = await getDb();
+
+      // 1. Récupérer les détails de la commande pour restaurer le stock
+      const details = await db.select<any[]>(`
+        SELECT idProduit, qte_commande
+        FROM commande_details
+        WHERE idCommande = ?
+      `, [commandeToDelete]);
+
+      // 2. Restaurer le stock pour chaque produit
+      for (const detail of details) {
+        await db.execute(`
+          UPDATE products
+          SET qte_stock = qte_stock + ?
+          WHERE idProduit = ?
+        `, [detail.qte_commande, detail.idProduit]);
+      }
+
+      // 3. Supprimer les détails de la commande
+      await db.execute(`DELETE FROM commande_details WHERE idCommande = ?`, [commandeToDelete]);
+
+      // 4. Supprimer la commande
+      await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [commandeToDelete]);
+
+      notifications.show({
+        title: '✅ Succès',
+        message: `Commande supprimée et stock restauré (${details.length} produit(s))`,
         color: 'green'
       });
+
+      setDeleteConfirmOpened(false);
+      setCommandeToDelete(null);
       await refresh();
+
     } catch (error) {
+      console.error('Erreur suppression:', error);
       notifications.show({
-        title: 'Erreur',
-        message: 'Suppression impossible',
+        title: '❌ Erreur',
+        message: 'Impossible de supprimer la commande',
         color: 'red'
       });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -387,375 +498,383 @@ export function ListeCommande() {
   }
 
   return (
-    <Stack gap="lg" p="md">
-      {/* En-tête avec gradient */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-        <Flex justify="space-between" align="center" wrap="wrap">
-          <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
-              <IconShoppingBag size={30} />
-            </ThemeIcon>
-            <div>
-              <Title order={1} c="white">Gestion des Commandes</Title>
-              <Text c="gray.3" size="sm">Suivez et gérez toutes vos commandes</Text>
-            </div>
-          </Group>
-          <Group>
-            <Button
-              variant="light"
-              color="white"
-              leftSection={<IconPlus size={18} />}
-              onClick={() => setFormulaireOpened(true)}
-            >
-              Nouvelle commande
-            </Button>
-            <Button
-              variant="light"
-              color="white"
-              leftSection={<IconRefresh size={18} />}
-              onClick={handleRefresh}
-            >
-              Actualiser
-            </Button>
-          </Group>
-        </Flex>
+    <>
+      <Stack gap="lg" p="md">
+        {/* En-tête avec gradient */}
+        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+          <Flex justify="space-between" align="center" wrap="wrap">
+            <Group gap="md">
+              <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <IconShoppingBag size={30} />
+              </ThemeIcon>
+              <div>
+                <Title order={1} c="white">Gestion des Commandes</Title>
+                <Text c="gray.3" size="sm">Suivez et gérez toutes vos commandes</Text>
+              </div>
+            </Group>
+            <Group>
+              <Button
+                variant="light"
+                color="white"
+                leftSection={<IconPlus size={18} />}
+                onClick={() => setFormulaireOpened(true)}
+              >
+                Nouvelle commande
+              </Button>
+              <Button
+                variant="light"
+                color="white"
+                leftSection={<IconRefresh size={18} />}
+                onClick={handleRefresh}
+              >
+                Actualiser
+              </Button>
+            </Group>
+          </Flex>
 
-        {/* Cartes statistiques */}
-        <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="white" variant="light" size="lg"><IconShoppingBag size={20} /></ThemeIcon>
-              <div><Text c="white" size="xs">Total</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="green" variant="light" size="lg"><IconCheck size={20} /></ThemeIcon>
-              <div><Text c="white" size="xs">Confirmées</Text><Text c="white" fw={700} size="xl">{stats.confirmees}</Text></div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconAlertCircle size={20} /></ThemeIcon>
-              <div><Text c="white" size="xs">En cours</Text><Text c="white" fw={700} size="xl">{stats.enCours}</Text></div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="blue" variant="light" size="lg"><IconTruck size={20} /></ThemeIcon>
-              <div><Text c="white" size="xs">Livrées</Text><Text c="white" fw={700} size="xl">{stats.livrees}</Text></div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconReceipt size={20} /></ThemeIcon>
-              <div><Text c="white" size="xs">Montant total</Text><Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text></div>
-            </Group>
-          </Card>
-        </SimpleGrid>
-      </Paper>
+          {/* Cartes statistiques */}
+          <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group><ThemeIcon color="white" variant="light" size="lg"><IconShoppingBag size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Total</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group><ThemeIcon color="green" variant="light" size="lg"><IconCheck size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Confirmées</Text><Text c="white" fw={700} size="xl">{stats.confirmees}</Text></div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconAlertCircle size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">En cours</Text><Text c="white" fw={700} size="xl">{stats.enCours}</Text></div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group><ThemeIcon color="blue" variant="light" size="lg"><IconTruck size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Livrées</Text><Text c="white" fw={700} size="xl">{stats.livrees}</Text></div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconReceipt size={20} /></ThemeIcon>
+                <div><Text c="white" size="xs">Montant total</Text><Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text></div>
+              </Group>
+            </Card>
+          </SimpleGrid>
+        </Paper>
 
-      {/* Filtres + Boutons sur une seule ligne */}
-      <Card withBorder radius="lg" shadow="sm" p="xs">
-        <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
-          {/* Recherche */}
-          <Box style={{ width: 130 }}>
-            <TextInput
-              placeholder="Rechercher..."
-              leftSection={<IconSearch size={12} />}
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              size="xs"
-              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-            />
-          </Box>
-          
-          {/* Statut */}
-          <Box style={{ width: 100 }}>
-            <Select
-              placeholder="Statut"
-              value={statusFilter}
-              onChange={(value) => {
-                setStatusFilter(value);
-                setCurrentPage(1);
-              }}
-              data={[
-                { value: 'all', label: 'Tous' },
-                { value: 'CONFIRMEE', label: 'Confirmée' },
-                { value: 'EN_COURS', label: 'En cours' },
-                { value: 'LIVREE', label: 'Livrée' },
-                { value: 'ANNULEE', label: 'Annulée' }
-              ]}
-              size="xs"
-              clearable
-              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-            />
-          </Box>
-          
-          {/* Type */}
-          <Box style={{ width: 100 }}>
-            <Select
-              placeholder="Type"
-              value={typeFilter}
-              onChange={(value) => {
-                setTypeFilter(value);
-                setCurrentPage(1);
-              }}
-              data={[
-                { value: 'all', label: 'Tous' },
-                { value: 'STANDARD', label: 'Standard' },
-                { value: 'REVENDEUR', label: 'Revendeur' }
-              ]}
-              size="xs"
-              clearable
-              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-            />
-          </Box>
-          
-          {/* Date début */}
-          <Box style={{ width: 110 }}>
-            <TextInput
-              placeholder="Début"
-              type="date"
-              value={dateDebut instanceof Date ? dateDebut.toISOString().split('T')[0] : ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                setDateDebut(val ? new Date(val) : null);
-              }}
-              size="xs"
-              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-            />
-          </Box>
-          
-          {/* Date fin */}
-          <Box style={{ width: 110 }}>
-            <TextInput
-              placeholder="Fin"
-              type="date"
-              value={dateFin instanceof Date ? dateFin.toISOString().split('T')[0] : ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                setDateFin(val ? new Date(val) : null);
-              }}
-              size="xs"
-              styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-            />
-          </Box>
-          
-          {/* BOUTONS D'ACTION */}
-          <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
-            <Button 
-              leftSection={<IconList size={12} />} 
-              variant="filled" 
-              color="blue" 
-              onClick={() => navigate('/commandes')} 
-              size="xs"
-              style={{ fontSize: '10px', padding: '4px 8px' }}
-            >
-              Toutes
-            </Button>
-            <Button 
-              leftSection={<IconBuildingStore size={12} />} 
-              variant="light" 
-              color="cyan" 
-              onClick={() => navigate('/commandes/standard')} 
-              size="xs"
-              style={{ fontSize: '10px', padding: '4px 8px' }}
-            >
-              Standard
-            </Button>
-            <Button 
-              leftSection={<IconTruck size={12} />} 
-              variant="light" 
-              color="green" 
-              onClick={() => navigate('/commandes/revendeur')} 
-              size="xs"
-              style={{ fontSize: '10px', padding: '4px 8px' }}
-            >
-              Revendeurs
-            </Button>
-            <Button 
-              leftSection={<IconMoneybag size={12} />} 
-              variant="light" 
-              color="teal" 
-              onClick={() => navigate('/reglements')} 
-              size="xs"
-              style={{ fontSize: '10px', padding: '4px 8px' }}
-            >
-              Règlements
-            </Button>
-            <Button 
-              variant="light" 
-              color="red" 
-              onClick={resetFilters} 
-              size="xs" 
-              leftSection={<IconX size={12} />}
-              style={{ fontSize: '10px', padding: '4px 8px' }}
-            >
-              Effacer
-            </Button>
+        {/* Filtres + Boutons sur une seule ligne */}
+        <Card withBorder radius="lg" shadow="sm" p="xs">
+          <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
+            {/* Recherche */}
+            <Box style={{ width: 130 }}>
+              <TextInput
+                placeholder="Rechercher..."
+                leftSection={<IconSearch size={12} />}
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Statut */}
+            <Box style={{ width: 100 }}>
+              <Select
+                placeholder="Statut"
+                value={statusFilter}
+                onChange={(value) => {
+                  setStatusFilter(value);
+                  setCurrentPage(1);
+                }}
+                data={[
+                  { value: 'all', label: 'Tous' },
+                  { value: 'CONFIRMEE', label: 'Confirmée' },
+                  { value: 'EN_COURS', label: 'En cours' },
+                  { value: 'LIVREE', label: 'Livrée' },
+                  { value: 'ANNULEE', label: 'Annulée' }
+                ]}
+                size="xs"
+                clearable
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Type */}
+            <Box style={{ width: 100 }}>
+              <Select
+                placeholder="Type"
+                value={typeFilter}
+                onChange={(value) => {
+                  setTypeFilter(value);
+                  setCurrentPage(1);
+                }}
+                data={[
+                  { value: 'all', label: 'Tous' },
+                  { value: 'STANDARD', label: 'Standard' },
+                  { value: 'REVENDEUR', label: 'Revendeur' }
+                ]}
+                size="xs"
+                clearable
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Date début */}
+            <Box style={{ width: 110 }}>
+              <TextInput
+                placeholder="Début"
+                type="date"
+                value={dateDebut instanceof Date ? dateDebut.toISOString().split('T')[0] : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDateDebut(val ? new Date(val) : null);
+                }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* Date fin */}
+            <Box style={{ width: 110 }}>
+              <TextInput
+                placeholder="Fin"
+                type="date"
+                value={dateFin instanceof Date ? dateFin.toISOString().split('T')[0] : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDateFin(val ? new Date(val) : null);
+                }}
+                size="xs"
+                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+              />
+            </Box>
+
+            {/* BOUTONS D'ACTION */}
+            <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
+              <Button
+                leftSection={<IconList size={12} />}
+                variant="filled"
+                color="blue"
+                onClick={() => navigate('/commandes')}
+                size="xs"
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Toutes
+              </Button>
+              <Button
+                leftSection={<IconBuildingStore size={12} />}
+                variant="light"
+                color="cyan"
+                onClick={() => navigate('/commandes/standard')}
+                size="xs"
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Standard
+              </Button>
+              <Button
+                leftSection={<IconTruck size={12} />}
+                variant="light"
+                color="green"
+                onClick={() => navigate('/commandes/revendeur')}
+                size="xs"
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Revendeurs
+              </Button>
+              <Button
+                leftSection={<IconMoneybag size={12} />}
+                variant="light"
+                color="teal"
+                onClick={() => navigate('/reglements')}
+                size="xs"
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Règlements
+              </Button>
+              <Button
+                variant="light"
+                color="red"
+                onClick={resetFilters}
+                size="xs"
+                leftSection={<IconX size={12} />}
+                style={{ fontSize: '10px', padding: '4px 8px' }}
+              >
+                Effacer
+              </Button>
+            </Group>
           </Group>
-        </Group>
-      </Card>
+        </Card>
 
-      {/* Tableau des commandes */}
-      <Card withBorder radius="lg" shadow="sm" p={0}>
-        <ScrollArea h="calc(100vh - 480px)">
-          <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
-            <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-              <Table.Tr>
-                <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>N°</Table.Th>
-                <Table.Th c="white" style={{ width: 220, fontSize: '13px', fontWeight: 600 }}>Client</Table.Th>
-                <Table.Th c="white" style={{ width: 110, fontSize: '13px', fontWeight: 600 }}>Date</Table.Th>
-                <Table.Th c="white" style={{ width: 90, fontSize: '13px', fontWeight: 600 }}>Type</Table.Th>
-                <Table.Th c="white" style={{ width: 130, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>Montant HT</Table.Th>
-                <Table.Th c="white" style={{ width: 140, fontSize: '13px', fontWeight: 600 }}>Code Facture</Table.Th>
-                <Table.Th c="white" style={{ width: 110, fontSize: '13px', fontWeight: 600 }}>Date Facture</Table.Th>
-                <Table.Th c="white" style={{ width: 250, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {paginatedCommandes.length === 0 ? (
+        {/* Tableau des commandes */}
+        <Card withBorder radius="lg" shadow="sm" p={0}>
+          <ScrollArea h="calc(100vh - 480px)">
+            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+              <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
                 <Table.Tr>
-                  <Table.Td colSpan={8} align="center">
-                    <Stack align="center" py={50}>
-                      <IconShoppingBag size={50} color="gray" />
-                      <Text c="dimmed">Aucune commande trouvée</Text>
-                      <Button variant="light" onClick={resetFilters} size="xs">
-                        Réinitialiser les filtres
-                      </Button>
-                    </Stack>
-                  </Table.Td>
+                  <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>N°</Table.Th>
+                  <Table.Th c="white" style={{ width: 150, fontSize: '13px', fontWeight: 600 }}>Code</Table.Th>
+                  <Table.Th c="white" style={{ width: 180, fontSize: '13px', fontWeight: 600 }}>Client</Table.Th>
+                  <Table.Th c="white" style={{ width: 100, fontSize: '13px', fontWeight: 600 }}>Date</Table.Th>
+                  <Table.Th c="white" style={{ width: 90, fontSize: '13px', fontWeight: 600 }}>Type</Table.Th>
+                  <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>Montant HT</Table.Th>
+                  <Table.Th c="white" style={{ width: 130, fontSize: '13px', fontWeight: 600 }}>Code Facture</Table.Th>
+                  <Table.Th c="white" style={{ width: 100, fontSize: '13px', fontWeight: 600 }}>Date Facture</Table.Th>
+                  <Table.Th c="white" style={{ width: 220, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
                 </Table.Tr>
-              ) : (
-                paginatedCommandes.map((commande, index) => (
-                  <Table.Tr key={commande.idCommande}>
-                    <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                      <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
-                    </Table.Td>
-                    <Table.Td style={{ verticalAlign: 'middle' }}>
-                      <Group gap="sm" wrap="nowrap">
-                        <Avatar size="sm" radius="xl" color="blue">
-                          {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
-                        </Avatar>
-                        <div>
-                          <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
-                          {commande.Societe && (
-                            <Text size="xs" c="dimmed">{commande.Societe}</Text>
-                          )}
-                        </div>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td style={{ verticalAlign: 'middle' }}>
-                      <Text size="sm">
-                        {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td style={{ verticalAlign: 'middle' }}>
-                      <Badge
-                        color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
-                        variant="light"
-                        size="sm"
-                        leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
-                      >
-                        {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                      <Text fw={600} size="sm" c="blue">
-                        {commande.montant_ht.toLocaleString('fr-FR')} FCFA
-                      </Text>
-                    </Table.Td>
-                    <Table.Td style={{ verticalAlign: 'middle' }}>
-                      <Text fw={500} size="sm" c={commande.code_facture ? 'green' : 'dimmed'}>
-                        {commande.code_facture || '-'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td style={{ verticalAlign: 'middle' }}>
-                      <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
-                        {commande.date_facture
-                          ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
-                          : '-'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                      <Group gap="xs" justify="center" wrap="nowrap">
-                        <Tooltip label="Voir détails">
-                          <ActionIcon
-                            variant="subtle"
-                            color="blue"
-                            size="md"
-                            onClick={() => handleViewDetails(commande.idCommande)}
-                          >
-                            <IconEye size={18} />
-                          </ActionIcon>
-                        </Tooltip>
-
-                        {(commande.code_facture || commande.idFacture || commande.idFactureRevendeur) && (
-                          <Tooltip label="Voir facture">
-                            <ActionIcon
-                              variant="subtle"
-                              color="grape"
-                              size="md"
-                              onClick={() => handleVoirFacture(commande)}
-                            >
-                              <IconFileInvoice size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
-
-                        <Tooltip label="Régler">
-                          <ActionIcon
-                            variant="subtle"
-                            color="green"
-                            size="md"
-                            onClick={() => handleRegler(commande)}
-                          >
-                            <IconCash size={18} />
-                          </ActionIcon>
-                        </Tooltip>
-
-                        <Tooltip label="Supprimer">
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            size="md"
-                            onClick={() => handleDelete(commande.idCommande)}
-                          >
-                            <IconTrash size={18} />
-                          </ActionIcon>
-                        </Tooltip>
-
-                        {!commande.code_facture && !commande.idFacture && !commande.idFactureRevendeur && (
-                          <Tooltip label="Générer facture">
-                            <ActionIcon
-                              variant="subtle"
-                              color="grape"
-                              size="md"
-                              onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
-                            >
-                              <IconReceipt size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
-                      </Group>
+              </Table.Thead>
+              <Table.Tbody>
+                {paginatedCommandes.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={9} align="center">
+                      <Stack align="center" py={50}>
+                        <IconShoppingBag size={50} color="gray" />
+                        <Text c="dimmed">Aucune commande trouvée</Text>
+                        <Button variant="light" onClick={resetFilters} size="xs">
+                          Réinitialiser les filtres
+                        </Button>
+                      </Stack>
                     </Table.Td>
                   </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+                ) : (
+                  paginatedCommandes.map((commande, index) => (
+                    <Table.Tr key={commande.idCommande}>
+                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                        <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Badge color="blue" variant="light" size="sm">
+                          {commande.code_commande || '-'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Group gap="sm" wrap="nowrap">
+                          <Avatar size="sm" radius="xl" color="blue">
+                            {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
+                          </Avatar>
+                          <div>
+                            <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
+                            {commande.Societe && (
+                              <Text size="xs" c="dimmed">{commande.Societe}</Text>
+                            )}
+                          </div>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Text size="sm">
+                          {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Badge
+                          color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
+                          variant="light"
+                          size="sm"
+                          leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
+                        >
+                          {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                        <Text fw={600} size="sm" c="blue">
+                          {commande.montant_ht.toLocaleString('fr-FR')} FCFA
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Text fw={500} size="sm" c={commande.code_facture ? 'green' : 'dimmed'}>
+                          {commande.code_facture || '-'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
+                          {commande.date_facture
+                            ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
+                            : '-'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                        <Group gap="xs" justify="center" wrap="nowrap">
+                          <Tooltip label="Voir détails">
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="md"
+                              onClick={() => handleViewDetails(commande.idCommande)}
+                            >
+                              <IconEye size={18} />
+                            </ActionIcon>
+                          </Tooltip>
 
-        {totalPages > 1 && (
-          <Group justify="center" p="md">
-            <Pagination
-              total={totalPages}
-              value={currentPage}
-              onChange={setCurrentPage}
-              size="md"
-            />
-          </Group>
-        )}
-      </Card>
+                          {(commande.code_facture || commande.idFacture || commande.idFactureRevendeur) && (
+                            <Tooltip label="Voir facture">
+                              <ActionIcon
+                                variant="subtle"
+                                color="grape"
+                                size="md"
+                                onClick={() => handleVoirFacture(commande)}
+                              >
+                                <IconFileInvoice size={18} />
+                              </ActionIcon>
+                            </Tooltip>
+                          )}
+
+                          <Tooltip label="Régler">
+                            <ActionIcon
+                              variant="subtle"
+                              color="green"
+                              size="md"
+                              onClick={() => handleRegler(commande)}
+                            >
+                              <IconCash size={18} />
+                            </ActionIcon>
+                          </Tooltip>
+
+                          <Tooltip label="Supprimer">
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="md"
+                              onClick={() => handleDelete(commande.idCommande)}
+                            >
+                              <IconTrash size={18} />
+                            </ActionIcon>
+                          </Tooltip>
+
+                          {!commande.code_facture && !commande.idFacture && !commande.idFactureRevendeur && (
+                            <Tooltip label="Générer facture">
+                              <ActionIcon
+                                variant="subtle"
+                                color="grape"
+                                size="md"
+                                onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
+                              >
+                                <IconReceipt size={18} />
+                              </ActionIcon>
+                            </Tooltip>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+
+          {totalPages > 1 && (
+            <Group justify="center" p="md">
+              <Pagination
+                total={totalPages}
+                value={currentPage}
+                onChange={setCurrentPage}
+                size="md"
+              />
+            </Group>
+          )}
+        </Card>
+      </Stack>
 
       {/* Modal Détails Commande */}
       <Modal
@@ -895,7 +1014,65 @@ export function ListeCommande() {
           refresh();
         }}
       />
-    </Stack>
+
+      {/* Modal de confirmation de suppression */}
+      <Modal
+        opened={deleteConfirmOpened}
+        onClose={() => {
+          setDeleteConfirmOpened(false);
+          setCommandeToDelete(null);
+        }}
+        title="⚠️ Confirmation de suppression"
+        size="md"
+        centered
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 600 },
+          body: { padding: '20px' }
+        }}
+      >
+        <Stack gap="md">
+          <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
+            <Text fw={600}>Attention !</Text>
+            <Text size="sm">
+              Cette action est irréversible. La suppression de cette commande :
+            </Text>
+            <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+              <li>Supprimera définitivement la commande</li>
+              <li>Restaurera les quantités en stock</li>
+              <li>Supprimera les détails de la commande</li>
+            </ul>
+          </Alert>
+
+          <Text size="sm" c="dimmed">
+            Êtes-vous sûr de vouloir continuer ?
+          </Text>
+
+          <Divider />
+
+          <Group justify="flex-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteConfirmOpened(false);
+                setCommandeToDelete(null);
+              }}
+              disabled={deleteLoading}
+            >
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={confirmDelete}
+              loading={deleteLoading}
+              leftSection={<IconTrash size={16} />}
+            >
+              Confirmer la suppression
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   );
 }
 

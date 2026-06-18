@@ -10,14 +10,13 @@ import {
 import {
   IconCash, IconSearch, IconRefresh, IconPrinter,
   IconPlus, IconCalendar, IconMoneybag,
-  
   IconArrowUpRight, IconArrowDownRight,
-  IconFileText, IconAlertCircle
-  } from '@tabler/icons-react';
-import { getDb } from '../../database/db';
+  IconFileText, IconAlertCircle, IconDownload
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { journalCaisseService } from '../../services/journalCaisseService';
 
 interface JournalEntry {
   idJournal: number;
@@ -101,7 +100,6 @@ export const JournalCaisse: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Formulaire charge
   const [chargeForm, setChargeForm] = useState({
     designation: '',
     montant: 0,
@@ -116,104 +114,17 @@ export const JournalCaisse: React.FC = () => {
   const chargerDonnees = async () => {
     setLoading(true);
     try {
-      const db = await getDb();
+      const solde = await journalCaisseService.getSoldeActuel();
+      setSoldeActuel(solde);
       
-      // Récupérer le solde actuel
-      const soldeResult = await db.select<{ solde: number }[]>(`
-        SELECT solde_apres as solde 
-        FROM journal_caisse 
-        ORDER BY idJournal DESC 
-        LIMIT 1
-      `);
-      setSoldeActuel(soldeResult[0]?.solde || 0);
+      const entries = await journalCaisseService.getMouvementsDuJour(selectedDate);
+      setJournalEntries(entries);
       
-      // Récupérer le journal du jour
-      const entries = await db.select<JournalEntry[]>(`
-        SELECT * FROM journal_caisse 
-        WHERE date(date_journal) = date(?)
-        ORDER BY idJournal ASC
-      `, [selectedDate]);
-      setJournalEntries(entries || []);
+      const chargesData = await journalCaisseService.getChargesDuJour(selectedDate);
+      setCharges(chargesData);
       
-      // Récupérer les charges du jour
-      const chargesData = await db.select<ChargeFonctionnement[]>(`
-        SELECT * FROM charges_fonctionnement 
-        WHERE date(date_charge) = date(?)
-        ORDER BY date_charge DESC
-      `, [selectedDate]);
-      setCharges(chargesData || []);
-      
-      // Récupérer ou générer le récapitulatif
-      const recapResult = await db.select<RecapJournalier[]>(`
-        SELECT * FROM recapitulatif_journalier 
-        WHERE date_recap = date(?)
-      `, [selectedDate]);
-      
-      if (recapResult.length > 0) {
-        // Utiliser le récapitulatif existant
-        setRecap(recapResult[0]);
-      } else {
-        // Calculer le récapitulatif
-        const initial = await db.select<{ solde: number }[]>(`
-          SELECT solde_apres as solde 
-          FROM journal_caisse 
-          WHERE date(date_journal) < date(?)
-          ORDER BY idJournal DESC 
-          LIMIT 1
-        `, [selectedDate]);
-        
-        const initSolde = initial[0]?.solde || 0;
-        
-        const mouvements = await db.select<any[]>(`
-          SELECT type_mouvement, categorie, SUM(montant) as total
-          FROM journal_caisse
-          WHERE date(date_journal) = date(?)
-          GROUP BY type_mouvement, categorie
-        `, [selectedDate]);
-        
-        let totalEntrees = 0, totalSorties = 0;
-        let totalVentesComptoir = 0, totalReglementsFactures = 0;
-        let totalDecomptesRevendeurs = 0, totalCharges = 0;
-        
-        for (const m of mouvements) {
-          if (m.type_mouvement === 'ENTREE') {
-            totalEntrees += m.total;
-            if (m.categorie === 'VENTE_COMPTOIR') totalVentesComptoir += m.total;
-            if (m.categorie === 'REGLEMENT_FACTURE') totalReglementsFactures += m.total;
-            if (m.categorie === 'DECOMPTE_REVENDEUR') totalDecomptesRevendeurs += m.total;
-          } else if (m.type_mouvement === 'SORTIE') {
-            totalSorties += m.total;
-            if (m.categorie === 'CHARGE_FONCTIONNEMENT') totalCharges += m.total;
-          }
-        }
-        
-        const soldeFinal = initSolde + totalEntrees - totalSorties;
-        
-        const newRecap = {
-          date_recap: selectedDate,
-          solde_initial: initSolde,
-          total_entrees: totalEntrees,
-          total_sorties: totalSorties,
-          solde_final: soldeFinal,
-          total_ventes_comptoir: totalVentesComptoir,
-          total_reglements_factures: totalReglementsFactures,
-          total_decomptes_revendeurs: totalDecomptesRevendeurs,
-          total_charges: totalCharges
-        };
-        
-        // Utiliser INSERT OR REPLACE pour éviter l'erreur UNIQUE
-        await db.execute(`
-          INSERT OR REPLACE INTO recapitulatif_journalier (
-            date_recap, solde_initial, total_entrees, total_sorties, solde_final,
-            total_ventes_comptoir, total_reglements_factures, total_decomptes_revendeurs, total_charges
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          selectedDate, initSolde, totalEntrees, totalSorties, soldeFinal,
-          totalVentesComptoir, totalReglementsFactures, totalDecomptesRevendeurs, totalCharges
-        ]);
-        
-        setRecap(newRecap);
-      }
+      const recapData = await journalCaisseService.getRecapJournalier(selectedDate);
+      setRecap(recapData);
       
     } catch (error) {
       console.error('Erreur chargement:', error);
@@ -242,79 +153,16 @@ export const JournalCaisse: React.FC = () => {
     }
 
     setSaving(true);
-    const db = await getDb();
     
     try {
-      // Générer le code charge
-      const chargeCount = await db.select<{ count: number }[]>(`
-        SELECT COUNT(*) as count FROM charges_fonctionnement
-      `);
-      const codeCharge = `CHG-${String((chargeCount[0]?.count || 0) + 1).padStart(4, '0')}`;
-      
-      // Calculer le nouveau solde
-      const soldeActuel = await db.select<{ solde: number }[]>(`
-        SELECT solde_apres as solde 
-        FROM journal_caisse 
-        ORDER BY idJournal DESC 
-        LIMIT 1
-      `);
-      const currentSolde = soldeActuel[0]?.solde || 0;
-      
-      if (chargeForm.montant > currentSolde) {
-        notifications.show({
-          title: 'Erreur',
-          message: `Solde insuffisant. Solde actuel: ${currentSolde.toLocaleString()} FCFA`,
-          color: 'red'
-        });
-        setSaving(false);
-        return;
-      }
-      
-      const nouveauSolde = currentSolde - chargeForm.montant;
-      
-      // Générer le code journal
-      const journalCount = await db.select<{ count: number }[]>(`
-        SELECT COUNT(*) as count FROM journal_caisse
-      `);
-      const codeJournal = `JRN-${String((journalCount[0]?.count || 0) + 1).padStart(4, '0')}`;
-      
-      // Insérer dans le journal de caisse
-      const journalResult = await db.execute(`
-        INSERT INTO journal_caisse (
-          code_journal, date_journal, type_mouvement, categorie,
-          designation, montant, solde_apres, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        codeJournal,
-        new Date().toISOString(),
-        'SORTIE',
-        'CHARGE_FONCTIONNEMENT',
-        chargeForm.designation,
-        chargeForm.montant,
-        nouveauSolde,
-        chargeForm.notes || null
-      ]);
-      
-      const idJournal = Number(journalResult.lastInsertId);
-      
-      // Insérer la charge
-      await db.execute(`
-        INSERT INTO charges_fonctionnement (
-          code_charge, date_charge, designation, montant,
-          beneficiaire, categorie_charge, reference_paiement,
-          idJournal, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        codeCharge,
-        new Date().toISOString(),
-        chargeForm.designation,
-        chargeForm.montant,
-        chargeForm.beneficiaire,
-        chargeForm.categorie_charge,
-        chargeForm.reference_paiement || null,
-        idJournal,
-        chargeForm.notes || null
-      ]);
+      await journalCaisseService.ajouterCharge({
+        designation: chargeForm.designation,
+        montant: chargeForm.montant,
+        beneficiaire: chargeForm.beneficiaire,
+        categorie_charge: chargeForm.categorie_charge,
+        reference_paiement: chargeForm.reference_paiement,
+        notes: chargeForm.notes
+      });
 
       notifications.show({
         title: '✅ Succès',
@@ -340,6 +188,652 @@ export const JournalCaisse: React.FC = () => {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+// ✅ Remplacer la fonction handlePrint par celle-ci :
+
+const handlePrint = () => {
+  try {
+    const dateStr = format(new Date(selectedDate), 'dd/MM/yyyy', { locale: fr });
+    const title = activeTab === 'journal' ? 'JOURNAL DE CAISSE' : 'CHARGES DE FONCTIONNEMENT';
+    
+    // Calcul des totaux
+    let totalEntrees = 0;
+    let totalSorties = 0;
+    
+    if (activeTab === 'journal') {
+      journalEntries.forEach((entry: JournalEntry) => {
+        if (entry.type_mouvement === 'ENTREE') {
+          totalEntrees += entry.montant;
+        } else {
+          totalSorties += entry.montant;
+        }
+      });
+    }
+    
+    const soldeFinal = totalEntrees - totalSorties;
+    const totalCharges = charges.reduce((sum, c) => sum + c.montant, 0);
+    
+    // Génération des lignes du tableau
+    let tableRows = '';
+    
+    if (activeTab === 'journal') {
+      journalEntries.forEach((entry: JournalEntry, idx: number) => {
+        const isEntree = entry.type_mouvement === 'ENTREE';
+        tableRows += `
+          <tr>
+            <td style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${idx + 1}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDate(entry.date_journal)}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1;">
+              <div style="font-weight: 500; color: #1a1a2e;">${entry.designation}</div>
+              ${entry.reference ? `<div style="font-size: 10px; color: #8a8aa0; margin-top: 2px;">Réf: ${entry.reference}</div>` : ''}
+            </td>
+            <td style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #e8ecf1;">
+              <span style="display: inline-block; padding: 3px 14px; border-radius: 20px; font-size: 10px; font-weight: 600; background: ${isEntree ? '#e6f7e6' : '#fde8e8'}; color: ${isEntree ? '#1a8a1a' : '#c0392b'};">
+                ${isEntree ? 'ENTRÉE' : 'SORTIE'}
+              </span>
+            </td>
+            <td style="padding: 10px 12px; text-align: right; border-bottom: 1px solid #e8ecf1; font-weight: 600; color: ${isEntree ? '#1a8a1a' : '#c0392b'};">
+              ${isEntree ? '+' : '−'} ${formatMontant(entry.montant)}
+            </td>
+            <td style="padding: 10px 12px; text-align: right; border-bottom: 1px solid #e8ecf1; font-weight: 700; color: #1b365d; font-size: 12px;">
+              ${formatMontant(entry.solde_apres)}
+            </td>
+          </tr>
+        `;
+      });
+    } else {
+      charges.forEach((charge: ChargeFonctionnement, idx: number) => {
+        const catInfo = categoriesCharges.find(c => c.value === charge.categorie_charge);
+        tableRows += `
+          <tr>
+            <td style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${idx + 1}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDate(charge.date_charge)}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; font-weight: 500; color: #1a1a2e;">${charge.designation}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${charge.beneficiaire}</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1;">
+              <span style="display: inline-block; padding: 2px 12px; border-radius: 20px; font-size: 10px; background: #f0ecf9; color: #6c5ce7;">${catInfo?.label || charge.categorie_charge}</span>
+            </td>
+            <td style="padding: 10px 12px; text-align: right; border-bottom: 1px solid #e8ecf1; font-weight: 600; color: #c0392b;">
+              − ${formatMontant(charge.montant)}
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    // ✅ Fonction de conversion en lettres CORRIGÉE
+    const convertirEnLettres = (montant: number): string => {
+      if (montant === 0) return 'ZÉRO';
+      
+      
+      const nombre = Math.round(montant);
+      if (nombre === 0) return 'ZÉRO';
+      
+      const parties = [];
+      
+      // Milliers
+      const milliers = Math.floor(nombre / 1000);
+      const reste = nombre % 1000;
+      
+      if (milliers > 0) {
+        if (milliers === 1) {
+          parties.push('MILLE');
+        } else {
+          parties.push(convertirMoinsMille(milliers) + ' MILLE');
+        }
+      }
+      
+      // Centaines, dizaines, unités
+      if (reste > 0) {
+        parties.push(convertirMoinsMille(reste));
+      }
+      
+      return parties.join(' ');
+    };
+    
+    // Fonction auxiliaire pour convertir les nombres < 1000
+    const convertirMoinsMille = (n: number): string => {
+      if (n === 0) return '';
+      
+      const unite = ['', 'UN', 'DEUX', 'TROIS', 'QUATRE', 'CINQ', 'SIX', 'SEPT', 'HUIT', 'NEUF'];
+      const dizaine = ['', 'DIX', 'VINGT', 'TRENTE', 'QUARANTE', 'CINQUANTE', 'SOIXANTE', 'SOIXANTE-DIX', 'QUATRE-VINGT', 'QUATRE-VINGT-DIX'];
+      
+      const centaines = Math.floor(n / 100);
+      const reste = n % 100;
+      
+      let result = '';
+      
+      // Centaines
+      if (centaines > 0) {
+        if (centaines === 1) {
+          result += 'CENT';
+        } else {
+          result += unite[centaines] + ' CENT';
+        }
+        if (reste === 0) {
+          return result;
+        }
+        result += ' ';
+      }
+      
+      // Dizaines et unités
+      if (reste > 0) {
+        const diz = Math.floor(reste / 10);
+        const un = reste % 10;
+        
+        // Cas particuliers : 70, 80, 90
+        if (reste >= 70 && reste <= 79) {
+          // 70-79 : SOIXANTE-DIX...
+          result += 'SOIXANTE-';
+          const complement = 10 + (reste % 10);
+          if (complement === 10) {
+            result += 'DIX';
+          } else if (complement === 11) {
+            result += 'ONZE';
+          } else {
+            result += unite[complement % 10];
+          }
+        } else if (reste >= 80 && reste <= 89) {
+          // 80-89 : QUATRE-VINGT...
+          result += 'QUATRE-VINGT';
+          if (un > 0) {
+            result += '-' + unite[un];
+          }
+        } else if (reste >= 90 && reste <= 99) {
+          // 90-99 : QUATRE-VINGT-DIX...
+          result += 'QUATRE-VINGT-DIX';
+          if (un > 0) {
+            result += '-' + unite[un];
+          }
+        } else {
+          // Cas normal
+          if (diz > 0) {
+            if (diz === 1 && un === 1) {
+              result += 'ONZE';
+            } else if (diz === 1 && un === 0) {
+              result += 'DIX';
+            } else {
+              result += dizaine[diz];
+              if (un > 0) {
+                if (diz === 7 || diz === 9) {
+                  result += '-';
+                } else if (diz === 8) {
+                  result += ' ';
+                } else {
+                  result += '-';
+                }
+                result += unite[un];
+              }
+            }
+          } else if (un > 0) {
+            result += unite[un];
+          }
+        }
+      }
+      
+      return result;
+    };
+
+    const totalGeneral = activeTab === 'journal' ? soldeFinal : totalCharges;
+    const totalEnLettres = convertirEnLettres(totalGeneral);
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${title} - ${dateStr}</title>
+          <meta charset="UTF-8">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            
+            body {
+              font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+              padding: 35px 40px;
+              background: #ffffff;
+              color: #1a1a2e;
+              font-size: 12px;
+              line-height: 1.5;
+            }
+            
+            /* ===== EN-TÊTE ===== */
+            .header {
+              text-align: center;
+              padding-bottom: 18px;
+              margin-bottom: 22px;
+              border-bottom: 2px solid #1b365d;
+              position: relative;
+            }
+            .header::after {
+              content: '';
+              position: absolute;
+              bottom: -4px;
+              left: 0;
+              right: 0;
+              height: 1px;
+              background: #d4af37;
+            }
+            .header .brand {
+              font-size: 26px;
+              font-weight: 700;
+              color: #1b365d;
+              letter-spacing: 4px;
+              font-family: 'Georgia', serif;
+            }
+            .header .brand span {
+              color: #d4af37;
+            }
+            .header .sub {
+              font-size: 11px;
+              color: #8a8aa0;
+              letter-spacing: 2px;
+              margin-top: 2px;
+              text-transform: uppercase;
+            }
+            .header .title {
+              font-size: 18px;
+              font-weight: 700;
+              color: #0d1b3e;
+              margin-top: 10px;
+              letter-spacing: 2px;
+              text-transform: uppercase;
+            }
+            .header .period {
+              font-size: 12px;
+              color: #6c6c8a;
+              margin-top: 3px;
+            }
+            
+            /* ===== MÉTA-INFORMATIONS ===== */
+            .meta {
+              display: flex;
+              justify-content: space-between;
+              background: #f7f8fc;
+              padding: 10px 16px;
+              border-radius: 8px;
+              margin-bottom: 18px;
+              border-left: 3px solid #1b365d;
+            }
+            .meta .item {
+              font-size: 11px;
+              color: #4a4a6a;
+            }
+            .meta .item strong {
+              color: #1b365d;
+              font-weight: 600;
+            }
+            
+            /* ===== TABLEAU ===== */
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            table thead th {
+              background: #1b365d;
+              color: #ffffff;
+              padding: 10px 12px;
+              text-align: left;
+              font-weight: 600;
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 0.8px;
+            }
+            table thead th:first-child { border-radius: 6px 0 0 0; }
+            table thead th:last-child { border-radius: 0 6px 0 0; }
+            table tbody tr:hover { background: #f7f8fc; }
+            table tbody td { padding: 9px 12px; border-bottom: 1px solid #eef0f4; }
+            
+            /* ===== TOTAUX ===== */
+            .totals {
+              margin-top: 16px;
+              padding: 14px 20px;
+              background: #f7f8fc;
+              border-radius: 8px;
+              border: 1px solid #e8ecf1;
+            }
+            .totals .line {
+              display: flex;
+              justify-content: flex-end;
+              padding: 4px 0;
+            }
+            .totals .line .label {
+              font-weight: 500;
+              width: 200px;
+              text-align: right;
+              padding-right: 30px;
+              color: #4a4a6a;
+            }
+            .totals .line .value {
+              font-weight: 600;
+              width: 150px;
+              text-align: right;
+            }
+            .totals .grand {
+              border-top: 2px solid #1b365d;
+              padding-top: 10px;
+              margin-top: 6px;
+            }
+            .totals .grand .label {
+              font-weight: 700;
+              font-size: 14px;
+              color: #1b365d;
+              width: 200px;
+              text-align: right;
+              padding-right: 30px;
+            }
+            .totals .grand .value {
+              font-weight: 700;
+              font-size: 15px;
+              color: #1b365d;
+              width: 150px;
+              text-align: right;
+            }
+            
+            /* ===== MONTANT EN LETTRES - SUR UNE SEULE LIGNE ===== */
+            .words {
+              margin-top: 18px;
+              padding: 14px 20px;
+              background: #f0f4fa;
+              border-radius: 8px;
+              border-left: 4px solid #d4af37;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              flex-wrap: wrap;
+            }
+            .words .label {
+              font-size: 12px;
+              color: #4a4a6a;
+              font-weight: 600;
+              letter-spacing: 0.5px;
+            }
+            .words .value {
+              font-size: 14px;
+              font-weight: 700;
+              color: #1b365d;
+            }
+            
+            /* ===== DATE D'ARRÊTÉ ===== */
+            .arrete {
+              margin-top: 22px;
+              text-align: right;
+              font-size: 12px;
+              color: #4a4a6a;
+              padding-right: 4px;
+            }
+            .arrete .highlight {
+              font-weight: 600;
+              color: #1b365d;
+            }
+            .arrete .underline {
+              text-decoration: underline;
+              text-decoration-style: dotted;
+            }
+            
+            /* ===== SIGNATURES ===== */
+            .signatures {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 35px;
+              padding-top: 20px;
+              border-top: 1px solid #e8ecf1;
+            }
+            .signatures .block {
+              text-align: center;
+              width: 42%;
+            }
+            .signatures .block .label {
+              font-size: 10px;
+              color: #6c6c8a;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              margin-bottom: 30px;
+            }
+            .signatures .block .line {
+              border-top: 1px solid #1a1a2e;
+              width: 70%;
+              margin: 0 auto;
+            }
+            .signatures .block .sub {
+              font-size: 9px;
+              color: #a0a0c0;
+              margin-top: 6px;
+            }
+            
+            /* ===== FOOTER ===== */
+            .footer {
+              margin-top: 25px;
+              text-align: center;
+              font-size: 9px;
+              color: #a0a0c0;
+              border-top: 1px solid #eef0f4;
+              padding-top: 12px;
+              letter-spacing: 0.5px;
+            }
+            
+            /* ===== BADGES ===== */
+            .badge {
+              display: inline-block;
+              padding: 3px 14px;
+              border-radius: 20px;
+              font-size: 10px;
+              font-weight: 600;
+            }
+            .badge-green { background: #e6f7e6; color: #1a8a1a; }
+            .badge-red { background: #fde8e8; color: #c0392b; }
+            .badge-purple { background: #f0ecf9; color: #6c5ce7; }
+            
+            /* ===== IMPRESSION ===== */
+            @media print {
+              body { padding: 20px 25px; }
+              table thead th { background: #1b365d !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .badge-green, .badge-red, .badge-purple { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+          </style>
+        </head>
+        <body>
+          <!-- ===== EN-TÊTE ===== -->
+          <div class="header">
+            <div class="brand">GESTION <span>PRO</span></div>
+            <div class="sub">Suivi Financier • Caisse</div>
+            <div class="title">${title}</div>
+            <div class="period">Période du ${dateStr}</div>
+          </div>
+
+          <!-- ===== MÉTA ===== -->
+          <div class="meta">
+            <span class="item"><strong>📄 Document</strong> ${activeTab === 'journal' ? 'Journal de Caisse' : 'Charges de fonctionnement'}</span>
+            <span class="item"><strong>📅 Date</strong> ${dateStr}</span>
+            <span class="item"><strong>📊 Lignes</strong> ${activeTab === 'journal' ? journalEntries.length : charges.length}</span>
+          </div>
+
+          <!-- ===== TABLEAU ===== -->
+          <table>
+            <thead>
+              <tr>
+                ${activeTab === 'journal' ? `
+                  <th style="width: 6%; text-align: center;">N°</th>
+                  <th style="width: 16%;">Date</th>
+                  <th style="width: 30%;">Désignation</th>
+                  <th style="width: 14%; text-align: center;">Type</th>
+                  <th style="width: 17%; text-align: right;">Montant</th>
+                  <th style="width: 17%; text-align: right;">Solde</th>
+                ` : `
+                  <th style="width: 6%; text-align: center;">N°</th>
+                  <th style="width: 16%;">Date</th>
+                  <th style="width: 26%;">Désignation</th>
+                  <th style="width: 20%;">Bénéficiaire</th>
+                  <th style="width: 16%;">Catégorie</th>
+                  <th style="width: 16%; text-align: right;">Montant</th>
+                `}
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows || `
+                <tr>
+                  <td colspan="6" style="text-align: center; padding: 40px 20px; color: #a0a0c0;">
+                    <div style="font-size: 14px;">📭</div>
+                    <div style="margin-top: 8px;">Aucune donnée disponible pour cette période</div>
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+
+          <!-- ===== TOTAUX ===== -->
+          ${(activeTab === 'journal' && journalEntries.length > 0) || (activeTab === 'charges' && charges.length > 0) ? `
+          <div class="totals">
+            ${activeTab === 'journal' ? `
+              <div class="line">
+                <span class="label">SOUS-TOTAL ENTREES</span>
+                <span class="value" style="color: #1a8a1a;">+ ${formatMontant(totalEntrees)}</span>
+              </div>
+              <div class="line">
+                <span class="label">SOUS-TOTAL SORTIES</span>
+                <span class="value" style="color: #c0392b;">− ${formatMontant(totalSorties)}</span>
+              </div>
+              <div class="line grand">
+                <span class="label">TOTAL GÉNÉRAL</span>
+                <span class="value">${formatMontant(soldeFinal)} FCFA</span>
+              </div>
+            ` : `
+              <div class="line grand">
+                <span class="label">TOTAL GÉNÉRAL CHARGES</span>
+                <span class="value" style="color: #c0392b;">${formatMontant(totalCharges)} FCFA</span>
+              </div>
+            `}
+          </div>
+          ` : ''}
+
+          <!-- ===== MONTANT EN LETTRES - SUR UNE SEULE LIGNE ===== -->
+          ${((activeTab === 'journal' && journalEntries.length > 0) || (activeTab === 'charges' && charges.length > 0)) ? `
+          <div class="words">
+            <span class="label">❖ ARRÊTÉ LE PRÉSENT COMPTE À LA SOMME DE ${totalEnLettres} (${formatMontant(totalGeneral)}) Francs CFA</span>
+          </div>
+          ` : ''}
+
+          <!-- ===== SIGNATURES ===== -->
+          <div class="signatures">
+            <div class="block">
+              <div class="label">Le Gérant(e)</div>
+              <div class="line"></div>
+              <div class="sub">Nom, prénom et signature</div>
+            </div>
+            <div class="block">
+              <div class="label">Le Directeur Général</div>
+              <div class="line"></div>
+              <div class="sub">Nom, prénom et signature</div>
+            </div>
+          </div>
+
+          <!-- ===== FOOTER ===== -->
+          <div class="footer">
+            Document généré le ${format(new Date(), 'dd/MM/yyyy à HH:mm', { locale: fr })} — © ${new Date().getFullYear()} Gestion Pro
+          </div>
+        </body>
+      </html>
+    `;
+
+    // Impression
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.top = '-9999px';
+    iframe.style.left = '-9999px';
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+    
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (iframeDoc) {
+      iframeDoc.open();
+      iframeDoc.write(html);
+      iframeDoc.close();
+      
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          const win = window.open('', '_blank', 'width=900,height=700,scrollbars=yes');
+          if (win) {
+            win.document.write(html);
+            win.document.close();
+            win.focus();
+            win.print();
+          }
+        }
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 2000);
+      }, 500);
+    }
+    
+  } catch (error) {
+    console.error('Erreur impression:', error);
+    notifications.show({
+      title: 'Erreur',
+      message: 'Erreur lors de l\'impression',
+      color: 'red'
+    });
+  }
+};
+
+  const handleExportCSV = () => {
+    try {
+      const data = activeTab === 'journal' ? journalEntries : charges;
+      
+      if (data.length === 0) {
+        notifications.show({
+          title: 'Information',
+          message: 'Aucune donnée à exporter',
+          color: 'blue'
+        });
+        return;
+      }
+      
+      let csvContent = '';
+      
+      if (activeTab === 'journal') {
+        csvContent = 'N°;Date;Désignation;Type;Montant;Solde\n';
+        journalEntries.forEach((entry: JournalEntry, idx: number) => {
+          csvContent += `${idx + 1};${formatDate(entry.date_journal)};${entry.designation};${entry.type_mouvement};${entry.montant};${entry.solde_apres}\n`;
+        });
+      } else {
+        csvContent = 'N°;Date;Désignation;Bénéficiaire;Catégorie;Montant\n';
+        charges.forEach((charge: ChargeFonctionnement, idx: number) => {
+          const catInfo = categoriesCharges.find(c => c.value === charge.categorie_charge);
+          csvContent += `${idx + 1};${formatDate(charge.date_charge)};${charge.designation};${charge.beneficiaire};${catInfo?.label || charge.categorie_charge};${charge.montant}\n`;
+        });
+      }
+      
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const dateStr = format(new Date(selectedDate), 'yyyy-MM-dd', { locale: fr });
+      const fileName = `${activeTab === 'journal' ? 'journal_caisse' : 'charges'}_${dateStr}.csv`;
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      
+      notifications.show({
+        title: '✅ Succès',
+        message: `Export CSV effectué (${data.length} lignes)`,
+        color: 'green'
+      });
+      
+    } catch (error) {
+      console.error('Erreur export:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors de l\'export CSV',
+        color: 'red'
+      });
     }
   };
 
@@ -369,7 +863,7 @@ export const JournalCaisse: React.FC = () => {
     );
   };
 
-  const filteredEntries = journalEntries.filter(entry =>
+  const filteredEntries = journalEntries.filter((entry: JournalEntry) =>
     entry.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (entry.reference && entry.reference.toLowerCase().includes(searchTerm.toLowerCase()))
   );
@@ -380,7 +874,7 @@ export const JournalCaisse: React.FC = () => {
     currentPage * itemsPerPage
   );
 
-  const filteredCharges = charges.filter(charge =>
+  const filteredCharges = charges.filter((charge: ChargeFonctionnement) =>
     charge.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
     charge.beneficiaire.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -395,7 +889,6 @@ export const JournalCaisse: React.FC = () => {
 
   return (
     <Stack gap="lg" p="md">
-      {/* EN-TÊTE */}
       <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
@@ -469,65 +962,69 @@ export const JournalCaisse: React.FC = () => {
         </SimpleGrid>
       </Paper>
 
-      {/* FILTRES ET ACTIONS */}
-      <Card withBorder radius="lg" shadow="sm" p="lg">
+      <Card withBorder radius="lg" shadow="sm" p="sm">
         <Grid align="flex-end">
-          <Grid.Col span={4}>
+          <Grid.Col span={3}>
             <TextInput
               label="Date"
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              size="md"
+              size="xs"
             />
           </Grid.Col>
           <Grid.Col span={4}>
             <TextInput
-              placeholder="Rechercher par désignation ou référence..."
-              leftSection={<IconSearch size={16} />}
+              placeholder="Rechercher..."
+              leftSection={<IconSearch size={14} />}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              size="md"
+              size="xs"
             />
           </Grid.Col>
-          <Grid.Col span={4}>
-            <Group justify="flex-end">
+          <Grid.Col span={5}>
+            <Group justify="flex-end" gap="xs">
               <Button
                 variant="light"
                 color="blue"
-                leftSection={<IconRefresh size={16} />}
+                leftSection={<IconRefresh size={14} />}
                 onClick={() => chargerDonnees()}
+                size="xs"
               >
                 Charger
               </Button>
               <Button
                 variant="filled"
                 color="red"
-                leftSection={<IconPlus size={16} />}
+                leftSection={<IconPlus size={14} />}
                 onClick={() => setChargeModalOpened(true)}
+                size="xs"
               >
                 Charge
               </Button>
               <Button
                 variant="light"
                 color="teal"
-                leftSection={<IconPrinter size={16} />}
-                onClick={() => {
-                  notifications.show({
-                    title: 'Information',
-                    message: 'Impression en cours de développement',
-                    color: 'blue'
-                  });
-                }}
+                leftSection={<IconPrinter size={14} />}
+                onClick={handlePrint}
+                size="xs"
               >
                 Imprimer
+              </Button>
+              <Button
+                variant="light"
+                color="grape"
+                leftSection={<IconDownload size={14} />}
+                onClick={handleExportCSV}
+                size="xs"
+              >
+                CSV
               </Button>
             </Group>
           </Grid.Col>
         </Grid>
       </Card>
 
-      {/* TABS */}
       <Card withBorder radius="lg" shadow="sm" p="md">
         <Tabs value={activeTab} onChange={setActiveTab}>
           <Tabs.List grow>
@@ -660,7 +1157,6 @@ export const JournalCaisse: React.FC = () => {
         </Tabs>
       </Card>
 
-      {/* MODAL AJOUT CHARGE */}
       <Modal
         opened={chargeModalOpened}
         onClose={() => setChargeModalOpened(false)}
@@ -684,6 +1180,7 @@ export const JournalCaisse: React.FC = () => {
             value={chargeForm.designation}
             onChange={(e) => setChargeForm({ ...chargeForm, designation: e.target.value })}
             required
+            size="xs"
           />
 
           <NumberInput
@@ -695,6 +1192,7 @@ export const JournalCaisse: React.FC = () => {
             step={100}
             required
             leftSection="FCFA"
+            size="xs"
           />
 
           <TextInput
@@ -703,6 +1201,7 @@ export const JournalCaisse: React.FC = () => {
             value={chargeForm.beneficiaire}
             onChange={(e) => setChargeForm({ ...chargeForm, beneficiaire: e.target.value })}
             required
+            size="xs"
           />
 
           <Select
@@ -711,6 +1210,7 @@ export const JournalCaisse: React.FC = () => {
             data={categoriesCharges}
             value={chargeForm.categorie_charge}
             onChange={(value) => setChargeForm({ ...chargeForm, categorie_charge: value || 'AUTRE' })}
+            size="xs"
           />
 
           <TextInput
@@ -718,6 +1218,7 @@ export const JournalCaisse: React.FC = () => {
             placeholder="N° de chèque, virement, etc."
             value={chargeForm.reference_paiement}
             onChange={(e) => setChargeForm({ ...chargeForm, reference_paiement: e.target.value })}
+            size="xs"
           />
 
           <Textarea
@@ -725,20 +1226,22 @@ export const JournalCaisse: React.FC = () => {
             placeholder="Informations complémentaires"
             value={chargeForm.notes}
             onChange={(e) => setChargeForm({ ...chargeForm, notes: e.target.value })}
-            rows={3}
+            rows={2}
+            size="xs"
           />
 
           <Divider />
 
           <Group justify="flex-end">
-            <Button variant="outline" onClick={() => setChargeModalOpened(false)}>
+            <Button variant="outline" onClick={() => setChargeModalOpened(false)} size="xs">
               Annuler
             </Button>
             <Button
               onClick={handleAjouterCharge}
               loading={saving}
               color="red"
-              leftSection={<IconPlus size={16} />}
+              leftSection={<IconPlus size={14} />}
+              size="xs"
             >
               Ajouter la charge
             </Button>

@@ -5,7 +5,8 @@ import {
   Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, Select, TextInput, Badge, Flex, Paper,
   Loader, Center, NumberInput, ScrollArea, Textarea, Alert,
-  Grid} from '@mantine/core';
+  Grid
+} from '@mantine/core';
 import {
   IconMoneybag, IconSearch, IconRefresh, IconPlus,
   IconX, IconCalendar, IconEdit, IconTrash,
@@ -16,6 +17,7 @@ import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { journalCaisseService } from '../../services/journalCaisseService';
 
 interface ChargeFonctionnement {
   idCharge: number;
@@ -66,6 +68,7 @@ export const ChargesFonctionnement: React.FC = () => {
   const [recap, setRecap] = useState<RecapCharge | null>(null);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<ChargeFonctionnement | null>(null);
+  const [soldeActuel, setSoldeActuel] = useState(0);
 
   const [formData, setFormData] = useState({
     designation: '',
@@ -77,6 +80,15 @@ export const ChargesFonctionnement: React.FC = () => {
   });
 
   const itemsPerPage = 10;
+
+  const chargerSolde = async () => {
+    try {
+      const solde = await journalCaisseService.getSoldeActuel();
+      setSoldeActuel(solde);
+    } catch (error) {
+      console.error('Erreur chargement solde:', error);
+    }
+  };
 
   const chargerCharges = async () => {
     setLoading(true);
@@ -137,6 +149,9 @@ export const ChargesFonctionnement: React.FC = () => {
         par_categorie: parCategorie
       });
 
+      // Charger le solde
+      await chargerSolde();
+
     } catch (error) {
       console.error('Erreur chargement charges:', error);
       notifications.show({
@@ -169,7 +184,7 @@ export const ChargesFonctionnement: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (!formData.designation || formData.montant <= 0 || !formData.beneficiaire) {
+    if (!formData.designation.trim() || !formData.beneficiaire.trim() || formData.montant <= 0) {
       notifications.show({
         title: 'Erreur',
         message: 'Veuillez remplir tous les champs obligatoires',
@@ -179,134 +194,51 @@ export const ChargesFonctionnement: React.FC = () => {
     }
 
     setSaving(true);
-    const db = await getDb();
-
     try {
-      // Vérifier le solde
-      const soldeResult = await db.select<{ solde: number }[]>(`
-        SELECT solde_apres as solde 
-        FROM journal_caisse 
-        ORDER BY idJournal DESC 
-        LIMIT 1
-      `);
-      const currentSolde = soldeResult[0]?.solde || 0;
-
-      if (formData.montant > currentSolde) {
-        notifications.show({
-          title: 'Erreur',
-          message: `Solde insuffisant. Solde actuel: ${currentSolde.toLocaleString()} FCFA`,
-          color: 'red'
-        });
-        setSaving(false);
-        return;
-      }
-
-      // Générer les codes
-      const chargeCount = await db.select<{ count: number }[]>(`
-        SELECT COUNT(*) as count FROM charges_fonctionnement
-      `);
-      const codeCharge = `CHG-${String((chargeCount[0]?.count || 0) + 1).padStart(4, '0')}`;
-
-      const journalCount = await db.select<{ count: number }[]>(`
-        SELECT COUNT(*) as count FROM journal_caisse
-      `);
-      const codeJournal = `JRN-${String((journalCount[0]?.count || 0) + 1).padStart(4, '0')}`;
-
-      const nouveauSolde = currentSolde - formData.montant;
+      const db = await getDb();
+      const now = new Date().toISOString();
 
       if (editing) {
-        // Modifier une charge existante
-        // D'abord supprimer l'ancienne entrée journal
-        await db.execute(`DELETE FROM journal_caisse WHERE idJournal = ?`, [editing.idJournal]);
-        
-        // Ajouter la nouvelle entrée journal
-        const journalResult = await db.execute(`
-          INSERT INTO journal_caisse (
-            code_journal, date_journal, type_mouvement, categorie,
-            designation, montant, solde_apres, notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          codeJournal,
-          new Date().toISOString(),
-          'SORTIE',
-          'CHARGE_FONCTIONNEMENT',
-          formData.designation,
-          formData.montant,
-          nouveauSolde,
-          formData.notes || null
-        ]);
-
-        const idJournal = Number(journalResult.lastInsertId);
-
-        // Mettre à jour la charge
         await db.execute(`
-          UPDATE charges_fonctionnement SET
-            designation = ?,
-            montant = ?,
-            beneficiaire = ?,
-            categorie_charge = ?,
-            reference_paiement = ?,
-            notes = ?,
-            idJournal = ?
+          UPDATE charges_fonctionnement
+          SET designation = ?, montant = ?, beneficiaire = ?, categorie_charge = ?, reference_paiement = ?, notes = ?
           WHERE idCharge = ?
         `, [
-          formData.designation,
+          formData.designation.trim(),
           formData.montant,
-          formData.beneficiaire,
+          formData.beneficiaire.trim(),
           formData.categorie_charge,
-          formData.reference_paiement || null,
-          formData.notes || null,
-          idJournal,
+          formData.reference_paiement.trim(),
+          formData.notes.trim(),
           editing.idCharge
         ]);
 
         notifications.show({
           title: '✅ Succès',
-          message: `Charge "${formData.designation}" modifiée avec succès`,
+          message: 'Charge modifiée avec succès',
           color: 'green'
         });
-
       } else {
-        // Ajouter une nouvelle charge
-        const journalResult = await db.execute(`
-          INSERT INTO journal_caisse (
-            code_journal, date_journal, type_mouvement, categorie,
-            designation, montant, solde_apres, notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          codeJournal,
-          new Date().toISOString(),
-          'SORTIE',
-          'CHARGE_FONCTIONNEMENT',
-          formData.designation,
-          formData.montant,
-          nouveauSolde,
-          formData.notes || null
-        ]);
-
-        const idJournal = Number(journalResult.lastInsertId);
-
+        const codeCharge = `CH-${Date.now()}`;
         await db.execute(`
-          INSERT INTO charges_fonctionnement (
-            code_charge, date_charge, designation, montant,
-            beneficiaire, categorie_charge, reference_paiement,
-            idJournal, notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO charges_fonctionnement
+          (code_charge, date_charge, designation, montant, beneficiaire, categorie_charge, reference_paiement, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           codeCharge,
-          new Date().toISOString(),
-          formData.designation,
+          now,
+          formData.designation.trim(),
           formData.montant,
-          formData.beneficiaire,
+          formData.beneficiaire.trim(),
           formData.categorie_charge,
-          formData.reference_paiement || null,
-          idJournal,
-          formData.notes || null
+          formData.reference_paiement.trim(),
+          formData.notes.trim(),
+          now
         ]);
 
         notifications.show({
           title: '✅ Succès',
-          message: `Charge "${formData.designation}" ajoutée avec succès`,
+          message: 'Charge ajoutée avec succès',
           color: 'green'
         });
       }
@@ -321,12 +253,13 @@ export const ChargesFonctionnement: React.FC = () => {
         reference_paiement: '',
         notes: ''
       });
-      chargerCharges();
 
-    } catch (error: any) {
+      await chargerCharges();
+    } catch (error) {
+      console.error('Erreur sauvegarde charge:', error);
       notifications.show({
         title: '❌ Erreur',
-        message: error.message || 'Erreur lors de l\'enregistrement',
+        message: 'Impossible de sauvegarder la charge',
         color: 'red'
       });
     } finally {
@@ -352,6 +285,18 @@ export const ChargesFonctionnement: React.FC = () => {
 
     try {
       const db = await getDb();
+      
+      // Récupérer l'ID journal associé
+      const charge = await db.select<ChargeFonctionnement[]>(`
+        SELECT idJournal FROM charges_fonctionnement WHERE idCharge = ?
+      `, [idCharge]);
+      
+      if (charge.length > 0 && charge[0].idJournal) {
+        // Supprimer l'entrée du journal de caisse
+        await db.execute(`DELETE FROM journal_caisse WHERE idJournal = ?`, [charge[0].idJournal]);
+      }
+      
+      // Supprimer la charge
       await db.execute(`DELETE FROM charges_fonctionnement WHERE idCharge = ?`, [idCharge]);
       
       notifications.show({
@@ -359,7 +304,8 @@ export const ChargesFonctionnement: React.FC = () => {
         message: 'Charge supprimée avec succès',
         color: 'green'
       });
-      chargerCharges();
+      
+      await chargerCharges();
     } catch (error) {
       notifications.show({
         title: '❌ Erreur',
@@ -422,11 +368,22 @@ export const ChargesFonctionnement: React.FC = () => {
           </Group>
         </Flex>
 
-        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
+        <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md" mt="xl">
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
             <Group>
               <ThemeIcon color="white" variant="light" size="lg">
                 <IconCash size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Solde actuel</Text>
+                <Text c="white" fw={700} size="xl">{formatMontant(soldeActuel)} F</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="red" variant="light" size="lg">
+                <IconMoneybag size={20} />
               </ThemeIcon>
               <div>
                 <Text c="white" size="xs">Total charges</Text>
@@ -462,7 +419,7 @@ export const ChargesFonctionnement: React.FC = () => {
                 <IconList size={20} />
               </ThemeIcon>
               <div>
-                <Text c="white" size="xs">Nombre de charges</Text>
+                <Text c="white" size="xs">Nombre</Text>
                 <Text c="white" fw={700} size="xl">{charges.length}</Text>
               </div>
             </Group>
@@ -471,16 +428,16 @@ export const ChargesFonctionnement: React.FC = () => {
       </Paper>
 
       {/* FILTRES */}
-      <Card withBorder radius="lg" shadow="sm" p="lg">
-        <Grid align="flex-end">
+      <Card withBorder radius="lg" shadow="sm" p="sm">
+        <Grid align="flex-end" >
           <Grid.Col span={3}>
             <TextInput
               label="Rechercher"
-              placeholder="Par désignation ou bénéficiaire..."
-              leftSection={<IconSearch size={16} />}
+              placeholder="Désignation ou bénéficiaire..."
+              leftSection={<IconSearch size={14} />}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              size="sm"
+              size="xs"
             />
           </Grid.Col>
           <Grid.Col span={2}>
@@ -491,7 +448,7 @@ export const ChargesFonctionnement: React.FC = () => {
               value={selectedCategorie}
               onChange={setSelectedCategorie}
               clearable
-              size="sm"
+              size="xs"
             />
           </Grid.Col>
           <Grid.Col span={2}>
@@ -500,7 +457,7 @@ export const ChargesFonctionnement: React.FC = () => {
               type="date"
               value={dateDebut}
               onChange={(e) => setDateDebut(e.target.value)}
-              size="sm"
+              size="xs"
             />
           </Grid.Col>
           <Grid.Col span={2}>
@@ -509,33 +466,33 @@ export const ChargesFonctionnement: React.FC = () => {
               type="date"
               value={dateFin}
               onChange={(e) => setDateFin(e.target.value)}
-              size="sm"
+              size="xs"
             />
           </Grid.Col>
           <Grid.Col span={3}>
-            <Group justify="flex-end">
+            <Group justify="flex-end" gap="xs">
               <Button
                 variant="light"
                 color="blue"
-                leftSection={<IconRefresh size={16} />}
+                leftSection={<IconRefresh size={14} />}
                 onClick={chargerCharges}
-                size="sm"
+                size="xs"
               >
                 Filtrer
               </Button>
               <Button
                 variant="light"
                 color="gray"
-                leftSection={<IconX size={16} />}
+                leftSection={<IconX size={14} />}
                 onClick={resetFilters}
-                size="sm"
+                size="xs"
               >
                 Effacer
               </Button>
               <Button
                 variant="filled"
                 color="red"
-                leftSection={<IconPlus size={16} />}
+                leftSection={<IconPlus size={14} />}
                 onClick={() => {
                   setEditing(null);
                   setFormData({
@@ -548,9 +505,9 @@ export const ChargesFonctionnement: React.FC = () => {
                   });
                   setModalOpened(true);
                 }}
-                size="sm"
+                size="xs"
               >
-                Nouvelle charge
+                Nouvelle
               </Button>
             </Group>
           </Grid.Col>
@@ -559,19 +516,19 @@ export const ChargesFonctionnement: React.FC = () => {
 
       {/* RÉCAPITULATIF PAR CATÉGORIE */}
       {recap && Object.keys(recap.par_categorie).length > 0 && (
-        <Card withBorder radius="lg" shadow="sm" p="md">
-          <Text fw={600} size="sm" mb="md">Répartition par catégorie</Text>
-          <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="sm">
+        <Card withBorder radius="lg" shadow="sm" p="sm">
+          <Text fw={600} size="xs" mb="xs">Répartition par catégorie</Text>
+          <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="xs">
             {Object.entries(recap.par_categorie).map(([categorie, total]) => {
               const info = getCategorieInfo(categorie);
               return (
-                <Paper key={categorie} p="sm" withBorder>
+                <Paper key={categorie} p="xs" withBorder>
                   <Group justify="space-between">
                     <Group gap="xs">
-                      <Text size="lg">{info.icon}</Text>
-                      <Text size="sm" fw={500}>{info.label}</Text>
+                      <Text size="sm">{info.icon}</Text>
+                      <Text size="xs" fw={500}>{info.label}</Text>
                     </Group>
-                    <Text fw={700} c="red">{formatMontant(total)} F</Text>
+                    <Text fw={700} c="red" size="sm">{formatMontant(total)} F</Text>
                   </Group>
                 </Paper>
               );
@@ -583,16 +540,16 @@ export const ChargesFonctionnement: React.FC = () => {
       {/* TABLEAU */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
         <ScrollArea h={450}>
-          <Table striped highlightOnHover verticalSpacing="sm">
+          <Table striped highlightOnHover verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                <Table.Th c="white" w={50}>N°</Table.Th>
+                <Table.Th c="white" w={40}>N°</Table.Th>
                 <Table.Th c="white">Date</Table.Th>
                 <Table.Th c="white">Désignation</Table.Th>
                 <Table.Th c="white">Bénéficiaire</Table.Th>
                 <Table.Th c="white">Catégorie</Table.Th>
                 <Table.Th c="white" ta="right">Montant</Table.Th>
-                <Table.Th c="white" ta="center" w={140}>Actions</Table.Th>
+                <Table.Th c="white" ta="center" w={120}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -611,58 +568,58 @@ export const ChargesFonctionnement: React.FC = () => {
                       <Table.Td fw={600}>{num}</Table.Td>
                       <Table.Td>{formatDate(charge.date_charge)}</Table.Td>
                       <Table.Td>
-                        <Text fw={500} size="sm">{charge.designation}</Text>
+                        <Text fw={500} size="xs">{charge.designation}</Text>
                         {charge.reference_paiement && (
                           <Text size="xs" c="dimmed">Réf: {charge.reference_paiement}</Text>
                         )}
                       </Table.Td>
                       <Table.Td>
                         <Group gap="xs">
-                          <IconUser size={14} color="#adb5bd" />
-                          <Text size="sm">{charge.beneficiaire}</Text>
+                          <IconUser size={12} color="#adb5bd" />
+                          <Text size="xs">{charge.beneficiaire}</Text>
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={info.color} variant="light" size="sm">
+                        <Badge color={info.color} variant="light" size="xs">
                           {info.icon} {info.label}
                         </Badge>
                       </Table.Td>
                       <Table.Td ta="right">
-                        <Text fw={600} c="red">{formatMontant(charge.montant)} F</Text>
+                        <Text fw={600} c="red" size="xs">{formatMontant(charge.montant)} F</Text>
                       </Table.Td>
                       <Table.Td ta="center">
-                        <Group gap={4} justify="center">
-                          <Tooltip label="Voir détails">
+                        <Group gap={2} justify="center">
+                          <Tooltip label="Détails">
                             <ActionIcon
                               variant="light"
                               color="blue"
-                              size="md"
+                              size="sm"
                               onClick={() => {
                                 setSelectedCharge(charge);
                                 setDetailsModalOpened(true);
                               }}
                             >
-                              <IconEye size={16} />
+                              <IconEye size={14} />
                             </ActionIcon>
                           </Tooltip>
                           <Tooltip label="Modifier">
                             <ActionIcon
                               variant="light"
                               color="orange"
-                              size="md"
+                              size="sm"
                               onClick={() => handleEdit(charge)}
                             >
-                              <IconEdit size={16} />
+                              <IconEdit size={14} />
                             </ActionIcon>
                           </Tooltip>
                           <Tooltip label="Supprimer">
                             <ActionIcon
                               variant="light"
                               color="red"
-                              size="md"
+                              size="sm"
                               onClick={() => handleDelete(charge.idCharge)}
                             >
-                              <IconTrash size={16} />
+                              <IconTrash size={14} />
                             </ActionIcon>
                           </Tooltip>
                         </Group>
@@ -700,7 +657,7 @@ export const ChargesFonctionnement: React.FC = () => {
       >
         <Stack gap="md">
           <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
-            Solde actuel: <strong>{formatMontant(0)} FCFA</strong>
+            Solde actuel: <strong>{formatMontant(soldeActuel)} FCFA</strong>
           </Alert>
 
           <TextInput
@@ -709,6 +666,7 @@ export const ChargesFonctionnement: React.FC = () => {
             value={formData.designation}
             onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
             required
+            size="xs"
           />
 
           <NumberInput
@@ -720,6 +678,7 @@ export const ChargesFonctionnement: React.FC = () => {
             step={100}
             required
             leftSection="FCFA"
+            size="xs"
           />
 
           <TextInput
@@ -728,6 +687,7 @@ export const ChargesFonctionnement: React.FC = () => {
             value={formData.beneficiaire}
             onChange={(e) => setFormData({ ...formData, beneficiaire: e.target.value })}
             required
+            size="xs"
           />
 
           <Select
@@ -736,6 +696,7 @@ export const ChargesFonctionnement: React.FC = () => {
             data={categoriesCharges.map(c => ({ value: c.value, label: c.label }))}
             value={formData.categorie_charge}
             onChange={(value) => setFormData({ ...formData, categorie_charge: value || 'AUTRE' })}
+            size="xs"
           />
 
           <TextInput
@@ -743,6 +704,7 @@ export const ChargesFonctionnement: React.FC = () => {
             placeholder="N° de chèque, virement, etc."
             value={formData.reference_paiement}
             onChange={(e) => setFormData({ ...formData, reference_paiement: e.target.value })}
+            size="xs"
           />
 
           <Textarea
@@ -750,7 +712,8 @@ export const ChargesFonctionnement: React.FC = () => {
             placeholder="Informations complémentaires"
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            rows={3}
+            rows={2}
+            size="xs"
           />
 
           <Divider />
@@ -759,14 +722,15 @@ export const ChargesFonctionnement: React.FC = () => {
             <Button variant="outline" onClick={() => {
               setModalOpened(false);
               setEditing(null);
-            }}>
+            }} size="xs">
               Annuler
             </Button>
             <Button
               onClick={handleSubmit}
               loading={saving}
               color="red"
-              leftSection={editing ? <IconEdit size={16} /> : <IconPlus size={16} />}
+              leftSection={editing ? <IconEdit size={14} /> : <IconPlus size={14} />}
+              size="xs"
             >
               {editing ? 'Modifier' : 'Ajouter'}
             </Button>
@@ -835,7 +799,7 @@ export const ChargesFonctionnement: React.FC = () => {
             <Divider />
 
             <Group justify="flex-end">
-              <Button variant="outline" onClick={() => setDetailsModalOpened(false)}>
+              <Button variant="outline" onClick={() => setDetailsModalOpened(false)} size="xs">
                 Fermer
               </Button>
             </Group>
