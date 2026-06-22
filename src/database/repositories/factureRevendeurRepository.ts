@@ -1,325 +1,423 @@
 // src/database/repositories/factureRevendeurRepository.ts
-
-import { getDb } from "../db";
-
-export interface FactureRevendeur {
-  idFactureRevendeur: number;
-  idCommande: number;
-  idRevendeur: number;
-  code_facture: string;
-  date_facture: string;
-  montant_ht: number;
-  montant_ttc: number;
-  commission: number;
-  statut: string;
-}
+import { getDb } from '../db';
 
 export const factureRevendeurRepository = {
+  
+  async getById(id: number): Promise<any> {
+    try {
+      const db = await getDb();
+      
+      // ✅ Récupérer la facture avec toutes les infos
+      const facture = await db.select<any[]>(`
+        SELECT 
+          fr.*,
+          c.NomComplet,
+          c.Societe,
+          c.Tel,
+          c.Adresse,
+          cmd.code_commande,
+          cmd.date_commande
+        FROM factures_revendeur fr
+        LEFT JOIN clients c ON c.idClient = fr.idRevendeur
+        LEFT JOIN commandes cmd ON cmd.idCommande = fr.idCommande
+        WHERE fr.idFactureRevendeur = ?
+      `, [id]);
 
-  async getAll() {
+      console.log('📄 Facture brute:', facture);
 
-    const db = await getDb();
+      if (facture.length === 0) {
+        return null;
+      }
 
-    return await db.select<any[]>(`
+      // ✅ Récupérer les détails
+      const details = await db.select<any[]>(`
+        SELECT 
+          frd.*,
+          p.designation,
+          p.code_produit,
+          p.unite_base,
+          p.categorie
+        FROM factures_revendeur_details frd
+        LEFT JOIN products p ON p.idProduit = frd.idProduit
+        WHERE frd.idFactureRevendeur = ?
+      `, [id]);
 
-      SELECT
+      console.log('📄 Détails bruts:', details);
 
-        fr.*,
+      const factureData = facture[0];
+      
+      // ✅ CALCULER LES MONTANTS À PARTIR DES DÉTAILS
+      let montantHT = 0;
+      let totalAchat = 0;
+      
+      if (details.length > 0) {
+        for (const detail of details) {
+          const qte = detail.qte_commande || 0;
+          const prixVente = detail.prix_unitaire_vente || 0;
+          const prixAchat = detail.prix_achat_base || 0;
+          
+          montantHT += prixVente * qte;
+          totalAchat += prixAchat * qte;
+        }
+      }
+      
+      const benefice = montantHT - totalAchat;
+      const tauxCommission = factureData.taux_commission || 60;
+      const commission = (benefice * tauxCommission) / 100;
+      const montantTTC = montantHT * 1.18; // TVA 18%
+      
+      // ✅ Si les montants sont à 0 dans la base, les mettre à jour
+      if (montantHT > 0 && factureData.montant_ht === 0) {
+        try {
+          await db.execute(`
+            UPDATE factures_revendeur 
+            SET montant_ht = ?, 
+                montant_ttc = ?, 
+                commission = ?
+            WHERE idFactureRevendeur = ?
+          `, [montantHT, montantTTC, commission, id]);
+          console.log('✅ Montants mis à jour dans la base:', { montantHT, montantTTC, commission });
+        } catch (updateError) {
+          console.warn('⚠️ Impossible de mettre à jour les montants:', updateError);
+        }
+      }
 
-        c.NomComplet,
-        c.Societe
+      const result = {
+        ...factureData,
+        montant_ht: montantHT || factureData.montant_ht || 0,
+        montant_ttc: montantTTC || factureData.montant_ttc || 0,
+        commission: commission || factureData.commission || 0,
+        taux_commission: tauxCommission,
+        details: details || []
+      };
 
-      FROM factures_revendeur fr
+      console.log('📄 Résultat final:', {
+        id: result.idFactureRevendeur,
+        code: result.code_facture,
+        montant_ht: result.montant_ht,
+        montant_ttc: result.montant_ttc,
+        commission: result.commission,
+        detailsCount: result.details.length
+      });
 
-      INNER JOIN clients c
-        ON c.idClient = fr.idRevendeur
+      return result;
 
-      ORDER BY fr.idFactureRevendeur DESC
-
-    `);
+    } catch (error) {
+      console.error('❌ Erreur getById facture revendeur:', error);
+      throw error;
+    }
   },
 
-  async getById(
-  idFactureRevendeur: number
-) {
+  async getAll(): Promise<any[]> {
+    try {
+      const db = await getDb();
+      
+      const factures = await db.select<any[]>(`
+        SELECT 
+          fr.*,
+          c.NomComplet,
+          c.Societe,
+          c.Tel,
+          c.Adresse,
+          cmd.code_commande,
+          cmd.date_commande
+        FROM factures_revendeur fr
+        LEFT JOIN clients c ON c.idClient = fr.idRevendeur
+        LEFT JOIN commandes cmd ON cmd.idCommande = fr.idCommande
+        ORDER BY fr.idFactureRevendeur DESC
+      `);
 
-  const db = await getDb();
+      const result = [];
+      for (const facture of factures) {
+        const details = await db.select<any[]>(`
+          SELECT 
+            frd.*,
+            p.designation,
+            p.code_produit,
+            p.unite_base,
+            p.categorie
+          FROM factures_revendeur_details frd
+          LEFT JOIN products p ON p.idProduit = frd.idProduit
+          WHERE frd.idFactureRevendeur = ?
+        `, [facture.idFactureRevendeur]);
+        
+        // ✅ Calculer les montants
+        let montantHT = 0;
+        let totalAchat = 0;
+        
+        for (const detail of details) {
+          const qte = detail.qte_commande || 0;
+          const prixVente = detail.prix_unitaire_vente || 0;
+          const prixAchat = detail.prix_achat_base || 0;
+          
+          montantHT += prixVente * qte;
+          totalAchat += prixAchat * qte;
+        }
+        
+        const benefice = montantHT - totalAchat;
+        const tauxCommission = facture.taux_commission || 60;
+        const commission = (benefice * tauxCommission) / 100;
+        const montantTTC = montantHT * 1.18;
+        
+        result.push({
+          ...facture,
+          montant_ht: montantHT || facture.montant_ht || 0,
+          montant_ttc: montantTTC || facture.montant_ttc || 0,
+          commission: commission || facture.commission || 0,
+          details: details || []
+        });
+      }
 
-  const facture =
-    await db.select<any[]>(`
+      return result;
 
-      SELECT
-
-        fr.*,
-
-        c.idClient,
-
-        c.NomComplet,
-
-        c.Societe,
-
-        c.Tel,
-
-        c.Adresse,
-
-        c.Email
-
-      FROM factures_revendeur fr
-
-      INNER JOIN clients c
-        ON c.idClient = fr.idRevendeur
-
-      WHERE fr.idFactureRevendeur = ?
-
-    `, [idFactureRevendeur]);
-
-  if (facture.length === 0) {
-    return null;
-  }
-
-  const details =
-    await db.select<any[]>(`
-
-      SELECT
-
-        cd.idDetail,
-
-        cd.idProduit,
-
-        cd.qte_commande,
-
-        cd.prix_unitaire_vente,
-
-        p.code_produit,
-
-        p.designation,
-
-        p.categorie,
-
-        p.unite_base,
-
-        p.prix_achat_base,
-
-        p.prix_vente_gros,
-
-        p.commission_pourcentage,
-
-        (
-          p.prix_vente_gros -
-          p.prix_achat_base
-        ) * cd.qte_commande
-          AS benefice_ligne,
-
-        (
-          (
-            p.prix_vente_gros -
-            p.prix_achat_base
-          )
-          * cd.qte_commande
-          * p.commission_pourcentage
-          / 100
-        ) AS commission_ligne
-
-      FROM commande_details cd
-
-      INNER JOIN products p
-        ON p.idProduit = cd.idProduit
-
-      WHERE cd.idCommande = ?
-
-      ORDER BY p.designation
-
-    `, [facture[0].idCommande]);
-
-  return {
-    ...facture[0],
-    details
-  };
-},
-  async createFromCommande(
-    idCommande: number
-  ): Promise<number> {
-
-    const db = await getDb();
-
-    const commande =
-      await db.select<any[]>(`
-
-        SELECT *
-        FROM commandes
-        WHERE idCommande = ?
-
-      `, [idCommande]);
-
-    if (commande.length === 0) {
-      throw new Error(
-        "Commande introuvable"
-      );
+    } catch (error) {
+      console.error('Erreur getAll factures revendeur:', error);
+      return [];
     }
+  },
 
-    const cmd = commande[0];
+  // ✅ RECALCULER LES MONTANTS D'UNE FACTURE
+  async recalculerMontants(idFacture: number): Promise<{ montant_ht: number; montant_ttc: number; commission: number }> {
+    try {
+      const db = await getDb();
+      
+      const details = await db.select<any[]>(`
+        SELECT frd.*, p.prix_achat_base
+        FROM factures_revendeur_details frd
+        LEFT JOIN products p ON p.idProduit = frd.idProduit
+        WHERE frd.idFactureRevendeur = ?
+      `, [idFacture]);
 
-    if (
-      cmd.type_commande !==
-      "REVENDEUR"
-    ) {
+      let totalHT = 0;
+      let totalAchat = 0;
+      
+      for (const detail of details) {
+        const qte = detail.qte_commande || 0;
+        const prixVente = detail.prix_unitaire_vente || 0;
+        const prixAchat = detail.prix_achat_base || 0;
+        
+        totalHT += prixVente * qte;
+        totalAchat += prixAchat * qte;
+      }
 
-      throw new Error(
-        "Cette commande n'est pas une commande revendeur"
-      );
-    }
+      const benefice = totalHT - totalAchat;
+      const tauxCommission = 60; // Valeur par défaut
+      const commission = (benefice * tauxCommission) / 100;
+      const totalTTC = totalHT * 1.18;
 
-    const existe =
-      await db.select<any[]>(`
-
-        SELECT *
-        FROM factures_revendeur
-        WHERE idCommande = ?
-
-      `, [idCommande]);
-
-    if (existe.length > 0) {
-
-      return Number(
-        existe[0]
-        .idFactureRevendeur
-      );
-    }
-
-    const details =
-      await db.select<any[]>(`
-
-        SELECT
-
-          cd.*,
-
-          p.prix_achat_base,
-
-          p.prix_vente_gros,
-
-          p.commission_pourcentage
-
-        FROM commande_details cd
-
-        INNER JOIN products p
-          ON p.idProduit =
-             cd.idProduit
-
-        WHERE cd.idCommande = ?
-
-      `, [idCommande]);
-
-    let montantHT = 0;
-    let montantTTC = 0;
-    let commission = 0;
-
-    for (const d of details) {
-
-      const qte =
-        Number(d.qte_commande);
-
-      const achat =
-        Number(d.prix_achat_base);
-
-      const vente =
-        Number(d.prix_vente_gros);
-
-      const taux =
-        Number(
-          d.commission_pourcentage
-        );
-
-      const totalAchat =
-        achat * qte;
-
-      const totalVente =
-        vente * qte;
-
-      const benefice =
-        totalVente -
-        totalAchat;
-
-      montantHT += totalVente;
-      montantTTC += totalVente;
-
-      commission +=
-        (benefice * taux) / 100;
-    }
-
-    const codeFacture =
-      `FR-${Date.now()}`;
-
-    const result =
       await db.execute(`
+        UPDATE factures_revendeur 
+        SET montant_ht = ?, 
+            montant_ttc = ?, 
+            commission = ?
+        WHERE idFactureRevendeur = ?
+      `, [totalHT, totalTTC, commission, idFacture]);
 
-        INSERT INTO
-        factures_revendeur
-        (
+      console.log('✅ Montants recalculés:', { totalHT, totalTTC, commission });
+      
+      return { montant_ht: totalHT, montant_ttc: totalTTC, commission };
+
+    } catch (error) {
+      console.error('❌ Erreur recalculMontants:', error);
+      throw error;
+    }
+  },
+
+  // ✅ CRÉER UNE FACTURE À PARTIR D'UNE COMMANDE
+  async createFromCommande(idCommande: number): Promise<number> {
+    try {
+      const db = await getDb();
+      
+      // 1. Récupérer la commande
+      const commande = await db.select<any[]>(`
+        SELECT c.*, cl.idClient as idRevendeur, cl.NomComplet
+        FROM commandes c
+        LEFT JOIN clients cl ON cl.idClient = c.idClient
+        WHERE c.idCommande = ? AND c.type_commande = 'REVENDEUR'
+      `, [idCommande]);
+
+      if (commande.length === 0) {
+        throw new Error('Commande revendeur non trouvée');
+      }
+
+      // 2. Récupérer les détails
+      const details = await db.select<any[]>(`
+        SELECT cd.*, p.designation, p.prix_achat_base
+        FROM commande_details cd
+        LEFT JOIN products p ON p.idProduit = cd.idProduit
+        WHERE cd.idCommande = ?
+      `, [idCommande]);
+
+      if (details.length === 0) {
+        throw new Error('Aucun détail de commande trouvé');
+      }
+
+      // 3. Calculer les montants
+      let totalHT = 0;
+      let totalAchat = 0;
+      
+      for (const d of details) {
+        const prixVente = d.prix_unitaire_vente || 0;
+        const qte = d.qte_commande || 0;
+        const prixAchat = d.prix_achat_base || 0;
+        
+        totalHT += prixVente * qte;
+        totalAchat += prixAchat * qte;
+      }
+
+      const benefice = totalHT - totalAchat;
+      const tauxCommission = 60;
+      const commission = (benefice * tauxCommission) / 100;
+      const totalTTC = totalHT * 1.18;
+
+      // 4. Générer le code facture
+      const codeFacture = await generateFactureRevendeurCode();
+
+      // 5. Insérer la facture
+      const result = await db.execute(`
+        INSERT INTO factures_revendeur (
           idCommande,
           idRevendeur,
           code_facture,
+          date_facture,
           montant_ht,
           montant_ttc,
           commission,
+          taux_commission,
           statut
         )
-        VALUES
-        (
-          ?,?,?,?,?,?,?
-        )
-
+        VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
       `, [
-
         idCommande,
-        cmd.idClient,
+        commande[0].idRevendeur,
         codeFacture,
-        montantHT,
-        montantTTC,
+        totalHT,
+        totalTTC,
         commission,
-        "EN_ATTENTE"
-
+        tauxCommission,
+        'EN_ATTENTE'
       ]);
 
-    return Number(
-      result.lastInsertId
-    );
+      const idFacture = Number(result.lastInsertId);
+
+      // 6. Insérer les détails
+      for (const detail of details) {
+        await db.execute(`
+          INSERT INTO factures_revendeur_details (
+            idFactureRevendeur,
+            idProduit,
+            qte_commande,
+            prix_achat_base,
+            prix_unitaire_vente
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `, [
+          idFacture,
+          detail.idProduit,
+          detail.qte_commande,
+          detail.prix_achat_base || 0,
+          detail.prix_unitaire_vente
+        ]);
+      }
+
+      // 7. Mettre à jour la commande
+      await db.execute(`
+        UPDATE commandes 
+        SET code_facture = ?, date_facture = datetime('now')
+        WHERE idCommande = ?
+      `, [codeFacture, idCommande]);
+
+      console.log('✅ Facture revendeur créée avec succès ID:', idFacture);
+      return idFacture;
+
+    } catch (error) {
+      console.error('❌ Erreur createFromCommande:', error);
+      throw error;
+    }
   },
 
-  async updateStatut(
-    idFactureRevendeur: number,
-    statut: string
-  ) {
-
-    const db = await getDb();
-
-    await db.execute(`
-
-      UPDATE factures_revendeur
-
-      SET statut = ?
-
-      WHERE idFactureRevendeur = ?
-
-    `, [
-      statut,
-      idFactureRevendeur
-    ]);
+  async updateStatut(id: number, statut: string): Promise<void> {
+    try {
+      const db = await getDb();
+      await db.execute(`
+        UPDATE factures_revendeur 
+        SET statut = ?
+        WHERE idFactureRevendeur = ?
+      `, [statut, id]);
+    } catch (error) {
+      console.error('Erreur updateStatut facture revendeur:', error);
+      throw error;
+    }
   },
 
-  async delete(
-    idFactureRevendeur: number
-  ) {
+  async getByCommande(idCommande: number): Promise<any[]> {
+    try {
+      const db = await getDb();
+      return await db.select<any[]>(`
+        SELECT 
+          fr.*,
+          c.NomComplet,
+          c.Societe,
+          c.Tel
+        FROM factures_revendeur fr
+        LEFT JOIN clients c ON c.idClient = fr.idRevendeur
+        WHERE fr.idCommande = ?
+        ORDER BY fr.idFactureRevendeur DESC
+      `, [idCommande]);
+    } catch (error) {
+      console.error('Erreur getByCommande:', error);
+      return [];
+    }
+  },
 
-    const db = await getDb();
-
-    await db.execute(`
-
-      DELETE
-      FROM factures_revendeur
-
-      WHERE idFactureRevendeur = ?
-
-    `, [idFactureRevendeur]);
+  async getByRevendeur(idRevendeur: number): Promise<any[]> {
+    try {
+      const db = await getDb();
+      return await db.select<any[]>(`
+        SELECT 
+          fr.*,
+          c.NomComplet,
+          c.Societe,
+          c.Tel,
+          cmd.code_commande
+        FROM factures_revendeur fr
+        LEFT JOIN clients c ON c.idClient = fr.idRevendeur
+        LEFT JOIN commandes cmd ON cmd.idCommande = fr.idCommande
+        WHERE fr.idRevendeur = ?
+        ORDER BY fr.idFactureRevendeur DESC
+      `, [idRevendeur]);
+    } catch (error) {
+      console.error('Erreur getByRevendeur:', error);
+      return [];
+    }
   }
+};
 
+// ✅ Fonction pour générer le code facture revendeur (FCR-XXXXX)
+const generateFactureRevendeurCode = async (): Promise<string> => {
+  try {
+    const db = await getDb();
+    const prefix = 'FCR';
+    
+    const lastCode = await db.select<{ max_code: string }[]>(`
+      SELECT code_facture as max_code 
+      FROM factures_revendeur 
+      WHERE code_facture LIKE '${prefix}-%' 
+      ORDER BY code_facture DESC 
+      LIMIT 1
+    `);
+
+    let sequence = 1;
+    if (lastCode.length > 0 && lastCode[0].max_code) {
+      const match = lastCode[0].max_code.match(new RegExp(`^${prefix}-(\\d+)$`));
+      if (match) {
+        sequence = parseInt(match[1]) + 1;
+      }
+    }
+
+    return `${prefix}-${String(sequence).padStart(5, '0')}`;
+  } catch (error) {
+    console.error('Erreur génération code facture revendeur:', error);
+    return `FCR-${String(Date.now()).slice(-5)}`;
+  }
 };

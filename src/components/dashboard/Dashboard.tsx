@@ -17,7 +17,8 @@ import {
   Box,
   Paper,
   Flex,
-  Avatar
+  Avatar,
+  Alert
 } from '@mantine/core';
 import {
   IconUsers,
@@ -34,6 +35,8 @@ import {
   IconTrendingDown,
   IconCalendar,
   IconPercentage,
+  IconAlertCircle,
+  IconRefresh
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
@@ -60,6 +63,8 @@ const formatCurrency = (v?: number) => `${(v || 0).toLocaleString('fr-FR')} FCFA
 
 const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
 
   const [stats, setStats] = useState({
     clients: 0,
@@ -85,169 +90,235 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
 
   const [infoModalOpen, setInfoModalOpen] = useState(false);
 
+  // Fonction pour vérifier si une colonne existe
+  const columnExists = async (db: any, table: string, column: string): Promise<boolean> => {
+    try {
+      const result = (await db.select(`PRAGMA table_info(${table})`)) as any[];
+      return result.some((col: any) => col.name === column);
+    } catch (error) {
+      console.warn(`Erreur vérification colonne ${table}.${column}:`, error);
+      return false;
+    }
+  };
+
+  // Fonction pour exécuter une requête avec gestion d'erreur
+  const safeQuery = async (db: any, query: string, params?: any[]): Promise<any[]> => {
+    try {
+      return (await db.select(query, params || [])) as any[];
+    } catch (error: any) {
+      console.warn(`Erreur requête: ${query.substring(0, 100)}...`, error?.message || error);
+      return [];
+    }
+  };
+
   useEffect(() => {
     const loadStats = async () => {
       setLoading(true);
+      setError(null);
+      setErrorDetails(null);
+      
       try {
         const db = await getDb();
+        console.log('✅ Base de données connectée');
 
         // Vérifier la structure de la table decomptes
-        let hasMontantVente = false;
-        let hasMontantCommission = false;
+        const hasMontantVente = await columnExists(db, 'decomptes', 'montant_vente');
+        const hasMontantCommission = await columnExists(db, 'decomptes', 'montant_commission');
+        const hasTauxCommission = await columnExists(db, 'decomptes', 'taux_commission');
+        
+        console.log('Table decomptes - colonnes:', { hasMontantVente, hasMontantCommission, hasTauxCommission });
 
-        try {
-          const tableInfo = await db.select<any[]>(`PRAGMA table_info(decomptes)`);
-          hasMontantVente = tableInfo.some(col => col.name === 'montant_vente');
-          hasMontantCommission = tableInfo.some(col => col.name === 'montant_commission');
-          console.log('Table decomptes - montant_vente:', hasMontantVente, 'montant_commission:', hasMontantCommission);
-        } catch (err) {
-          console.warn('Impossible de vérifier la structure de decomptes:', err);
-        }
-
+        // ============================================
+        // 1. STATISTIQUES DE BASE
+        // ============================================
+        
         // Nombre de clients
-        const clients = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM clients
-        `);
+        const clients = await safeQuery(db, `SELECT COUNT(*) as total FROM clients`);
+        console.log('✅ Clients:', clients[0]?.total || 0);
 
         // Nombre de revendeurs
-        const revendeurs = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM clients
-          WHERE TypeClient = 'revendeur'
-        `);
+        const revendeurs = await safeQuery(db, `SELECT COUNT(*) as total FROM clients WHERE TypeClient = 'revendeur'`);
+        console.log('✅ Revendeurs:', revendeurs[0]?.total || 0);
 
         // Produits actifs
-        const produits = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM products
-          WHERE est_supprime = 0
-        `);
+        const produits = await safeQuery(db, `SELECT COUNT(*) as total FROM products WHERE est_supprime = 0`);
+        console.log('✅ Produits:', produits[0]?.total || 0);
 
         // Nombre de commandes (non annulées)
-        const commandes = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM commandes
-          WHERE statut != 'ANNULEE'
-        `);
+        const commandes = await safeQuery(db, `SELECT COUNT(*) as total FROM commandes WHERE statut != 'ANNULEE'`);
+        console.log('✅ Commandes:', commandes[0]?.total || 0);
 
         // Nombre de ventes
-        const ventes = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM ventes
-        `);
+        const ventes = await safeQuery(db, `SELECT COUNT(*) as total FROM ventes`);
+        console.log('✅ Ventes:', ventes[0]?.total || 0);
 
         // Nombre de décomptes
-        const decomptes = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM decomptes
-        `);
+        const decomptes = await safeQuery(db, `SELECT COUNT(*) as total FROM decomptes`);
+        console.log('✅ Décomptes:', decomptes[0]?.total || 0);
 
         // Nombre de factures
-        const factures = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM factures
-        `);
+        const factures = await safeQuery(db, `SELECT COUNT(*) as total FROM factures`);
+        console.log('✅ Factures:', factures[0]?.total || 0);
 
-        // CA GLOBAL = Commandes (non annulées) + Ventes comptoir
-        const commandesCA = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant_ttc), 0) as total
-          FROM commandes
+        // ============================================
+        // 2. CHIFFRE D'AFFAIRES
+        // ============================================
+        
+        const commandesCA = await safeQuery(db, `
+          SELECT COALESCE(SUM(montant_ttc), 0) as total 
+          FROM commandes 
           WHERE statut != 'ANNULEE'
         `);
 
-        const ventesCA = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant_ttc), 0) as total
+        const ventesCA = await safeQuery(db, `
+          SELECT COALESCE(SUM(montant_ttc), 0) as total 
           FROM ventes
         `);
 
         const totalCommandes = Number(commandesCA[0]?.total || 0);
         const totalVentes = Number(ventesCA[0]?.total || 0);
         const chiffreAffairesGlobal = totalCommandes + totalVentes;
+        console.log('✅ Chiffre d\'affaires:', chiffreAffairesGlobal);
 
-        // 🔥 CORRECTION: Total des commissions (si la colonne existe)
+        // ============================================
+        // 3. COMMISSIONS ET NET À REVERSER
+        // ============================================
+        
         let totalCommissions = 0;
         let netAReverser = 0;
 
-        if (hasMontantCommission) {
-          const commissions = await db.select<any[]>(`
-            SELECT COALESCE(SUM(montant_commission), 0) as total
-            FROM decomptes
-          `);
-          totalCommissions = Number(commissions[0]?.total || 0);
-        } else {
-          // 🔥 Si la colonne n'existe pas, calculer la commission à partir du taux
-          const decomptesData = await db.select<any[]>(`
-            SELECT montant_vente, taux_commission
-            FROM decomptes
-          `);
-          for (const d of decomptesData) {
-            if (d.montant_vente && d.taux_commission) {
-              totalCommissions += (d.montant_vente * d.taux_commission) / 100;
+        try {
+          if (hasMontantVente && hasMontantCommission) {
+            // Structure complète
+            const commissions = await safeQuery(db, `
+              SELECT COALESCE(SUM(montant_commission), 0) as total 
+              FROM decomptes
+            `);
+            totalCommissions = Number(commissions[0]?.total || 0);
+            console.log('✅ Commissions (direct):', totalCommissions);
+
+            const net = await safeQuery(db, `
+              SELECT COALESCE(SUM(montant_vente - montant_commission), 0) as total 
+              FROM decomptes
+            `);
+            netAReverser = Number(net[0]?.total || 0);
+            console.log('✅ Net à reverser (direct):', netAReverser);
+
+          } else if (hasMontantVente && hasTauxCommission) {
+            // Structure avec montant_vente et taux_commission
+            const decomptesData = await safeQuery(db, `
+              SELECT montant_vente, taux_commission 
+              FROM decomptes
+            `);
+            
+            for (const d of decomptesData) {
+              if (d.montant_vente && d.taux_commission) {
+                const commission = (d.montant_vente * d.taux_commission) / 100;
+                totalCommissions += commission;
+                netAReverser += d.montant_vente - commission;
+              }
             }
+            console.log('✅ Commissions (calculées):', totalCommissions);
+            console.log('✅ Net à reverser (calculé):', netAReverser);
+
+          } else if (hasTauxCommission) {
+            // Structure avec taux_commission uniquement
+            const details = await safeQuery(db, `
+              SELECT 
+                dd.idDecompte,
+                dd.qte_decompte,
+                dd.prix_vente,
+                dd.prix_achat,
+                d.taux_commission
+              FROM decompte_details dd
+              INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
+            `);
+            
+            for (const det of details) {
+              const beneficeLigne = ((det.prix_vente || 0) - (det.prix_achat || 0)) * (det.qte_decompte || 0);
+              const taux = det.taux_commission || 60;
+              const commission = (beneficeLigne * taux) / 100;
+              totalCommissions += commission;
+              netAReverser += beneficeLigne - commission;
+            }
+            console.log('✅ Commissions (détails):', totalCommissions);
+            console.log('✅ Net à reverser (détails):', netAReverser);
+
+          } else {
+            // Structure sans commission
+            const details = await safeQuery(db, `
+              SELECT 
+                dd.idDecompte,
+                dd.qte_decompte,
+                dd.prix_vente,
+                dd.prix_achat
+              FROM decompte_details dd
+            `);
+            
+            for (const det of details) {
+              const beneficeLigne = ((det.prix_vente || 0) - (det.prix_achat || 0)) * (det.qte_decompte || 0);
+              const commission = (beneficeLigne * 60) / 100;
+              totalCommissions += commission;
+              netAReverser += beneficeLigne - commission;
+            }
+            console.log('✅ Commissions (défaut 60%):', totalCommissions);
+            console.log('✅ Net à reverser (défaut):', netAReverser);
           }
+        } catch (commissionError: any) {
+          console.error('❌ Erreur calcul commissions:', commissionError);
+          // On continue avec les valeurs par défaut (0)
         }
 
-        // 🔥 Net à reverser
-        if (hasMontantVente && hasMontantCommission) {
-          const net = await db.select<any[]>(`
-            SELECT COALESCE(SUM(montant_vente - montant_commission), 0) as total
-            FROM decomptes
-          `);
-          netAReverser = Number(net[0]?.total || 0);
-        } else if (hasMontantVente) {
-          const ventesRevendeur = await db.select<any[]>(`
-            SELECT COALESCE(SUM(montant_vente), 0) as total
-            FROM decomptes
-          `);
-          netAReverser = Number(ventesRevendeur[0]?.total || 0);
-        } else {
-          // 🔥 Si les colonnes n'existent pas, calculer à partir des détails
-          const details = await db.select<any[]>(`
-            SELECT dd.qte_decompte, dd.prix_vente, dd.prix_achat, d.taux_commission
-            FROM decompte_details dd
-            INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
-          `);
-          for (const det of details) {
-            const beneficeLigne = (det.prix_vente - det.prix_achat) * det.qte_decompte;
-            netAReverser += beneficeLigne - (beneficeLigne * (det.taux_commission || 60)) / 100;
-          }
-        }
-
-        // Encaissements reçus
-        const encaissements = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant), 0) as total
+        // ============================================
+        // 4. FINANCES
+        // ============================================
+        
+        const encaissements = await safeQuery(db, `
+          SELECT COALESCE(SUM(montant), 0) as total 
           FROM reglements
         `);
+        console.log('✅ Encaissements:', encaissements[0]?.total || 0);
 
-        // Factures impayées
-        const facturesImpayees = await db.select<any[]>(`
-          SELECT COALESCE(SUM(montant_ttc), 0) as total
-          FROM factures
+        const facturesImpayees = await safeQuery(db, `
+          SELECT COALESCE(SUM(montant_ttc), 0) as total 
+          FROM factures 
           WHERE statut IN ('EN_ATTENTE', 'PARTIELLEMENT_REGLEE')
         `);
+        console.log('✅ Factures impayées:', facturesImpayees[0]?.total || 0);
 
-        // Nombre de commandes revendeur
-        const commandesRevendeur = await db.select<any[]>(`
-          SELECT COUNT(*) as total
-          FROM commandes
-          WHERE UPPER(type_commande) = 'REVENDEUR'
+        // ============================================
+        // 5. COMMANDES REVENDEURS
+        // ============================================
+        
+        const commandesRevendeur = await safeQuery(db, `
+          SELECT COUNT(*) as total 
+          FROM commandes 
+          WHERE UPPER(type_commande) = 'REVENDEUR' 
           AND statut != 'ANNULEE'
         `);
+        console.log('✅ Commandes revendeurs:', commandesRevendeur[0]?.total || 0);
 
-        // Stock central
-        const stockCentral = await db.select<any[]>(`
-          SELECT COALESCE(SUM(qte_stock), 0) as total
-          FROM products
+        // ============================================
+        // 6. STOCKS
+        // ============================================
+        
+        const stockCentral = await safeQuery(db, `
+          SELECT COALESCE(SUM(qte_stock), 0) as total 
+          FROM products 
           WHERE est_supprime = 0
         `);
+        console.log('✅ Stock central:', stockCentral[0]?.total || 0);
 
-        // Stock revendeur
-        const stockRevendeur = await db.select<any[]>(`
-          SELECT COALESCE(SUM(qte_stock), 0) as total
+        const stockRevendeur = await safeQuery(db, `
+          SELECT COALESCE(SUM(qte_stock), 0) as total 
           FROM stock_revendeur
         `);
+        console.log('✅ Stock revendeur:', stockRevendeur[0]?.total || 0);
 
+        // ============================================
+        // 7. MISE À JOUR DES STATS
+        // ============================================
+        
         setStats({
           clients: Number(clients[0]?.total || 0),
           revendeurs: Number(revendeurs[0]?.total || 0),
@@ -266,7 +337,10 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           stockRevendeur: Number(stockRevendeur[0]?.total || 0)
         });
 
-        // 🔥 CORRECTION: Derniers décomptes (avec gestion des colonnes manquantes)
+        // ============================================
+        // 8. DERNIERS DÉCOMPTES
+        // ============================================
+        
         let lastDecomptesQuery = `
           SELECT
             d.idDecompte,
@@ -294,11 +368,15 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           LIMIT 10
         `;
 
-        const lastDecomptes = await db.select<any[]>(lastDecomptesQuery);
+        const lastDecomptes = await safeQuery(db, lastDecomptesQuery);
         setRecentDecomptes(lastDecomptes || []);
+        console.log('✅ Derniers décomptes:', lastDecomptes.length);
 
-        // Dernières commandes
-        const lastCommandes = await db.select<any[]>(`
+        // ============================================
+        // 9. DERNIÈRES COMMANDES
+        // ============================================
+        
+        const lastCommandes = await safeQuery(db, `
           SELECT
             c.idCommande,
             c.code_commande,
@@ -314,9 +392,13 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           LIMIT 5
         `);
         setRecentCommandes(lastCommandes || []);
+        console.log('✅ Dernières commandes:', lastCommandes.length);
 
-        // Dernières ventes
-        const lastVentes = await db.select<any[]>(`
+        // ============================================
+        // 10. DERNIÈRES VENTES
+        // ============================================
+        
+        const lastVentes = await safeQuery(db, `
           SELECT
             v.code_vente,
             v.date_vente,
@@ -330,13 +412,21 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
           LIMIT 10
         `);
         setRecentVentes(lastVentes || []);
+        console.log('✅ Dernières ventes:', lastVentes.length);
 
-      } catch (error) {
-        console.error("Erreur dashboard", error);
+        console.log('✅ Toutes les statistiques chargées avec succès');
+
+      } catch (error: any) {
+        console.error("❌ Erreur fatale dashboard:", error);
+        const errorMsg = error?.message || 'Erreur inconnue';
+        setError("Impossible de charger les statistiques");
+        setErrorDetails(errorMsg);
+        
         notifications.show({
           title: "Erreur",
-          message: "Impossible de charger les statistiques",
-          color: "red"
+          message: `Impossible de charger les statistiques: ${errorMsg}`,
+          color: "red",
+          autoClose: 10000
         });
       } finally {
         setLoading(false);
@@ -406,6 +496,48 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
     );
   }
 
+  if (error) {
+    return (
+      <Card withBorder radius="md" p="lg" style={{ minHeight: 300 }}>
+        <Stack align="center" gap="md">
+          <ThemeIcon size={60} radius="xl" color="red" variant="light">
+            <IconAlertCircle size={30} />
+          </ThemeIcon>
+          <Text size="lg" fw={600} c="red">{error}</Text>
+          {errorDetails && (
+            <Alert color="red" variant="light" style={{ maxWidth: 500 }}>
+              <Text size="xs" c="dimmed">Détails: {errorDetails}</Text>
+            </Alert>
+          )}
+          <Text c="dimmed" ta="center" size="sm">
+            Vérifiez la console pour plus de détails
+          </Text>
+          <Group>
+            <Button 
+              variant="light" 
+              color="blue"
+              leftSection={<IconRefresh size={16} />}
+              onClick={() => window.location.reload()}
+            >
+              Réessayer
+            </Button>
+            <Button 
+              variant="subtle"
+              onClick={() => {
+                setError(null);
+                setErrorDetails(null);
+                window.location.reload();
+              }}
+            >
+              Ignorer
+            </Button>
+          </Group>
+        </Stack>
+      </Card>
+    );
+  }
+
+  // Le reste du JSX est identique...
   return (
     <Box p="md">
       <Stack gap="lg">
@@ -759,10 +891,10 @@ const Dashboard: React.FC<DashboardProps> = ({ setPage }) => {
                       <Text size="xs" c="dimmed">{d.NomComplet || 'Revendeur inconnu'}</Text>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      {d.montant_vente !== undefined && (
+                      {d.montant_vente !== undefined && d.montant_vente > 0 && (
                         <Text size="xs" c="dimmed">Ventes: {formatCurrency(d.montant_vente || 0)}</Text>
                       )}
-                      {d.montant_commission !== undefined && (
+                      {d.montant_commission !== undefined && d.montant_commission > 0 && (
                         <Text size="xs" c="orange">Commission: {formatCurrency(d.montant_commission || 0)}</Text>
                       )}
                     </div>

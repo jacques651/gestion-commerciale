@@ -17,7 +17,8 @@ import {
   IconUser,
   IconBuildingStore,
   IconCheck,
-  IconPlus
+  IconPlus,
+  IconCash
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { notifications } from "@mantine/notifications";
@@ -66,6 +67,7 @@ interface FacturePredefinie {
   client_nom?: string;
   client_societe?: string;
   details?: any[];
+  taux_commission?: number;
 }
 
 interface NouveauDecompteProps {
@@ -120,7 +122,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
     try {
       const result = await stockRevendeurRepository.getByRevendeur(idRevendeur);
       
-      // ✅ S'assurer que les champs categorie et unite_base sont présents
       const produitsAvecInfos = result.map(p => ({
         ...p,
         categorie: p.categorie || 'Non catégorisé',
@@ -128,6 +129,7 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
       }));
       
       setProduits(produitsAvecInfos);
+      console.log(`✅ ${produitsAvecInfos.length} produits chargés pour le revendeur`);
       return produitsAvecInfos;
     } catch (error) {
       console.error('Erreur chargement produits:', error);
@@ -138,42 +140,32 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
     }
   };
 
-  // Pré-remplir avec la facture sélectionnée
+  // ✅ Pré-remplir UNIQUEMENT les informations du client - LE PANIER RESTE VIDE
   useEffect(() => {
     const prefillFromFacture = async () => {
       if (facturePredefinie && facturePredefinie.idRevendeur && clients.length > 0 && !initialized) {
+        console.log('📄 Facture pré-définie reçue:', facturePredefinie.code_facture);
+        
+        // 1. Trouver le client
         const client = clients.find(c => c.idClient === facturePredefinie.idRevendeur);
         if (client) {
           setSelectedClient(client);
+          console.log('✅ Client sélectionné:', client.NomComplet);
           
-          const produitsStock = await loadStockRevendeur(client.idClient);
+          // 2. Charger le stock du revendeur
+          await loadStockRevendeur(client.idClient);
           
-          if (facturePredefinie.details && facturePredefinie.details.length > 0 && produitsStock.length > 0) {
-            const panierItems: PanierItem[] = [];
-            
-            for (const detail of facturePredefinie.details) {
-              const produitStock = produitsStock.find(p => p.idProduit === detail.idProduit);
-              
-              if (produitStock && produitStock.qte_stock > 0) {
-                panierItems.push({
-                  idProduit: detail.idProduit,
-                  designation: detail.designation || produitStock.designation,
-                  categorie: detail.categorie || produitStock.categorie || 'Non catégorisé',
-                  unite_mesure: detail.unite_base || produitStock.unite_base || 'pièce',
-                  quantite: Math.min(produitStock.qte_stock, 10),
-                  prix_vente: detail.prix_unitaire_vente || produitStock.prix_vente_gros,
-                  prix_achat: detail.prix_achat_base || produitStock.prix_achat_base,
-                  total: (detail.prix_unitaire_vente || produitStock.prix_vente_gros) * Math.min(produitStock.qte_stock, 10)
-                });
-              }
-            }
-            
-            if (panierItems.length > 0) {
-              setPanier(panierItems);
-            }
+          // 3. ✅ LE PANIER RESTE VIDE - l'utilisateur choisira les produits manuellement
+          setPanier([]);
+          
+          // 4. Pré-remplir l'objet
+          setObjet(`Décompte pour facture ${facturePredefinie.code_facture}`);
+          
+          // 5. Récupérer le taux de commission de la facture
+          if (facturePredefinie.taux_commission) {
+            setTauxCommission(facturePredefinie.taux_commission);
           }
           
-          setObjet(`Décompte pour facture ${facturePredefinie.code_facture}`);
           setInitialized(true);
         }
       }
@@ -266,29 +258,47 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
       const dateDecompte = new Date().toISOString().split('T')[0];
       
       const insertResult = await db.execute(`
-        INSERT INTO decomptes (idClient, code_decompte, date_decompte, montant_vente, montant_commission, montant_net, statut, observation, taux_commission, idFactureRevendeur)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO decomptes (
+          idClient, 
+          code_decompte, 
+          date_decompte, 
+          montant_achat,
+          montant_vente, 
+          montant_benefice,
+          montant_commission, 
+          montant_net, 
+          statut, 
+          observation,
+          taux_commission
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         selectedClient.idClient,
         codeDecompte,
         dateDecompte,
+        totalAchat,
         totalVente,
+        totalBenefice,
         totalCommission,
         netAPayer,
         'VALIDE',
         objet || null,
-        tauxCommission,
-        facturePredefinie?.idFactureRevendeur || null
+        tauxCommission
       ]);
 
       const idDecompte = Number(insertResult.lastInsertId);
 
       for (const item of panier) {
-        const beneficeUnitaire = item.prix_vente - item.prix_achat;
-        const beneficeLigne = beneficeUnitaire * item.quantite;
-        
         await db.execute(`
-          INSERT INTO decompte_details (idDecompte, idProduit, qte_decompte, prix_achat, prix_vente, benefice, commission)
+          INSERT INTO decompte_details (
+            idDecompte, 
+            idProduit, 
+            qte_decompte, 
+            prix_achat, 
+            prix_vente,
+            commission_pourcentage,
+            designation
+          )
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [
           idDecompte,
@@ -296,8 +306,8 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
           item.quantite,
           item.prix_achat,
           item.prix_vente,
-          beneficeLigne,
-          (beneficeLigne * tauxCommission) / 100
+          tauxCommission,
+          item.designation
         ]);
 
         await db.execute(`
@@ -305,9 +315,25 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
           SET qte_stock = qte_stock - ? 
           WHERE idProduit = ? AND idRevendeur = ?
         `, [item.quantite, item.idProduit, selectedClient.idClient]);
+
+        await db.execute(`
+          INSERT INTO mouvements_revendeur (
+            idProduit,
+            idRevendeur,
+            idDecompte,
+            type_mouvement,
+            qte_mouvement
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `, [
+          item.idProduit,
+          selectedClient.idClient,
+          idDecompte,
+          "SORTIE",
+          item.quantite
+        ]);
       }
 
-      // ✅ AJOUTER AU JOURNAL DE CAISSE
       try {
         await journalCaisseService.ajouterDecompteRevendeur({
           montant: netAPayer,
@@ -318,7 +344,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
         console.log('✅ Journal de caisse mis à jour pour le décompte', codeDecompte);
       } catch (journalError) {
         console.error('Erreur journal de caisse:', journalError);
-        // Ne pas bloquer le décompte si le journal échoue
       }
 
       notifications.show({
@@ -357,263 +382,276 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
   }));
 
   const produitsFiltres = produits.filter(p =>
-    p.designation.toLowerCase().includes(recherche.toLowerCase())
+    p.designation.toLowerCase().includes(recherche.toLowerCase()) &&
+    p.qte_stock > 0
   );
 
   return (
-    <>
-      <Modal
-        opened={true}
-        onClose={onCancel}
-        size="70%"
-        padding="xl"
-        radius="lg"
-        styles={{
-          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 700, fontSize: '1.5rem' },
-          body: { padding: 0 }
-        }}
-        title={
-          <Group gap="md">
-            <ThemeIcon size="lg" radius="md" color="white" variant="light">
-              <IconFileText size={24} />
-            </ThemeIcon>
-            <div>
-              <Text size="lg" fw={700} c="white">
-                {facturePredefinie ? `Décompte - Facture ${facturePredefinie.code_facture}` : 'Nouveau décompte'}
-              </Text>
-              <Text size="xs" opacity={0.7} c="white">Créez un décompte pour un revendeur</Text>
-            </div>
-          </Group>
-        }
-      >
-        <ScrollArea h="calc(100vh - 180px)" type="auto" p="lg">
-          <Stack gap="md">
-            {/* ============================================ */}
-            {/* LIGNE 1: Client - Compactée */}
-            {/* ============================================ */}
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-              <Grid align="flex-end">
-                {/* Sélection client */}
-                <Grid.Col span={4}>
-                  <Select
-                    label="Revendeur"
-                    placeholder="Sélectionner..."
-                    data={clientData}
-                    value={selectedClient?.idClient?.toString() || null}
-                    onChange={async (val) => {
-                      const client = clients.find(c => c.idClient.toString() === val);
-                      setSelectedClient(client || null);
-                      if (client) {
-                        await loadStockRevendeur(client.idClient);
-                        setPanier([]);
-                        setQuantiteInput({});
-                      }
-                    }}
-                    searchable
-                    size="xs"
-                    leftSection={<IconUser size={14} />}
-                    disabled={!!facturePredefinie}
-                  />
-                </Grid.Col>
+    <Modal
+      opened={true}
+      onClose={onCancel}
+      size="80%"
+      padding="xl"
+      radius="lg"
+      styles={{
+        header: { 
+          backgroundColor: '#1b365d', 
+          padding: '16px 24px', 
+          borderTopLeftRadius: '12px', 
+          borderTopRightRadius: '12px' 
+        },
+        title: { color: 'white', fontWeight: 700, fontSize: '1.3rem' },
+        body: { padding: 0 }
+      }}
+      title={
+        <Group gap="md">
+          <ThemeIcon size="lg" radius="md" color="white" variant="light">
+            <IconFileText size={24} />
+          </ThemeIcon>
+          <div>
+            <Text size="lg" fw={700} c="white">
+              {facturePredefinie ? `Décompte - Facture ${facturePredefinie.code_facture}` : 'Nouveau décompte'}
+            </Text>
+            <Text size="xs" opacity={0.7} c="white">Créez un décompte pour un revendeur</Text>
+          </div>
+        </Group>
+      }
+    >
+      <ScrollArea h="calc(100vh - 160px)" type="auto" p="lg">
+        <Stack gap="md">
+          {/* LIGNE 1: Client */}
+          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Grid align="flex-end">
+              <Grid.Col span={3}>
+                <Select
+                  label="Revendeur"
+                  placeholder="Sélectionner..."
+                  data={clientData}
+                  value={selectedClient?.idClient?.toString() || null}
+                  onChange={async (val) => {
+                    const client = clients.find(c => c.idClient.toString() === val);
+                    setSelectedClient(client || null);
+                    if (client) {
+                      await loadStockRevendeur(client.idClient);
+                      setPanier([]);
+                      setQuantiteInput({});
+                    }
+                  }}
+                  searchable
+                  size="xs"
+                  leftSection={<IconUser size={14} />}
+                  disabled={!!facturePredefinie}
+                />
+              </Grid.Col>
 
-                {/* Contact */}
-                <Grid.Col span={2}>
-                  <TextInput
-                    label="Contact"
-                    value={selectedClient?.Tel || ''}
-                    readOnly
-                    size="xs"
-                    leftSection={<IconPhone size={14} />}
-                    placeholder="Tél"
-                  />
-                </Grid.Col>
+              <Grid.Col span={2}>
+                <TextInput
+                  label="Contact"
+                  value={selectedClient?.Tel || ''}
+                  readOnly
+                  size="xs"
+                  leftSection={<IconPhone size={14} />}
+                  placeholder="Tél"
+                />
+              </Grid.Col>
 
-                {/* Type */}
-                <Grid.Col span={2}>
-                  <Select
-                    label="Type"
-                    value="revendeur"
-                    data={[{ value: 'revendeur', label: 'Revendeur' }]}
-                    readOnly
-                    size="xs"
-                    leftSection={<IconBuildingStore size={14} />}
-                  />
-                </Grid.Col>
+              <Grid.Col span={2}>
+                <Select
+                  label="Type"
+                  value="revendeur"
+                  data={[{ value: 'revendeur', label: 'Revendeur' }]}
+                  readOnly
+                  size="xs"
+                  leftSection={<IconBuildingStore size={14} />}
+                />
+              </Grid.Col>
 
-                {/* Code décompte */}
-                <Grid.Col span={2}>
-                  <TextInput
-                    label="Code"
-                    value={codeDecompte}
-                    readOnly
-                    disabled
-                    size="xs"
-                    leftSection={<IconFileText size={14} />}
-                  />
-                </Grid.Col>
+              <Grid.Col span={2}>
+                <TextInput
+                  label="Code"
+                  value={codeDecompte}
+                  readOnly
+                  disabled
+                  size="xs"
+                  leftSection={<IconFileText size={14} />}
+                />
+              </Grid.Col>
 
-                {/* Taux commission */}
-                <Grid.Col span={2}>
-                  <NumberInput
-                    label="Commission %"
-                    value={tauxCommission}
-                    onChange={(val) => setTauxCommission(typeof val === 'number' ? val : 0)}
-                    min={0}
-                    max={100}
-                    step={5}
-                    size="xs"
-                    leftSection={<IconPercentage size={14} />}
-                  />
-                </Grid.Col>
-              </Grid>
+              <Grid.Col span={3}>
+                <NumberInput
+                  label="Commission %"
+                  value={tauxCommission}
+                  onChange={(val) => setTauxCommission(typeof val === 'number' ? val : 0)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  size="xs"
+                  leftSection={<IconPercentage size={14} />}
+                />
+              </Grid.Col>
+            </Grid>
 
-              {/* Info client */}
-              {selectedClient && (
-                <Paper p="xs" withBorder radius="md" mt="xs" style={{ backgroundColor: '#f8f9fa' }}>
-                  <Group justify="space-between">
-                    <Group gap="xs">
-                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
-                        <IconTruck size={12} />
-                      </ThemeIcon>
-                      <Text size="xs" fw={500}>{selectedClient.NomComplet}</Text>
-                      {selectedClient.Societe && <Text size="xs" c="dimmed">| {selectedClient.Societe}</Text>}
-                    </Group>
-                    <Badge color="green" variant="light" size="xs">Revendeur</Badge>
-                  </Group>
-                </Paper>
-              )}
-            </Card>
-
-            {/* ============================================ */}
-            {/* LIGNE 2: Produits - Compactée avec Catégorie et Unité */}
-            {/* ============================================ */}
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-              <Group gap="xs" mb="xs" justify="space-between">
-                <Group gap="xs">
-                  <ThemeIcon color="grape" variant="light" radius="md" size="sm">
-                    <IconPackage size={14} />
-                  </ThemeIcon>
-                  <Text fw={600} size="sm" c="#1b365d">Produits disponibles</Text>
-                  <Badge color="blue" variant="light" size="xs">{produits.length}</Badge>
-                </Group>
-                <Group gap="xs">
-                  <TextInput
-                    placeholder="Rechercher..."
-                    size="xs"
-                    value={recherche}
-                    onChange={(e) => setRecherche(e.target.value)}
-                    style={{ width: 200 }}
-                    leftSection={<IconSearch size={12} />}
-                  />
-                  <Tooltip label="Actualiser">
-                    <ActionIcon size="sm" variant="light" onClick={() => selectedClient && loadStockRevendeur(selectedClient.idClient)}>
-                      <IconRefresh size={14} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
-              </Group>
-
-              {loadingProduits ? (
-                <Center py={30}><Loader size="sm" /><Text size="xs" ml="sm">Chargement...</Text></Center>
-              ) : produitsFiltres.length === 0 ? (
-                <Center py={30}><IconPackage size={24} color="#ccc" /><Text size="xs" c="dimmed" ml="sm">Aucun produit disponible</Text></Center>
-              ) : (
-                <ScrollArea h={200}>
-                  <Table striped highlightOnHover verticalSpacing="xs">
-                    <Table.Thead>
-                      <Table.Tr style={{ backgroundColor: "#1b365d" }}>
-                        <Table.Th c="white" style={{ width: '25%' }}>Produit</Table.Th>
-                        <Table.Th c="white" style={{ width: '15%' }}>Catégorie</Table.Th>
-                        <Table.Th c="white" style={{ width: '10%' }}>Unité</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%' }} ta="right">Prix</Table.Th>
-                        <Table.Th c="white" style={{ width: '10%' }} ta="center">Stock</Table.Th>
-                        <Table.Th c="white" style={{ width: '16%' }} ta="center">Qté</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%' }} ta="center">Action</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {produitsFiltres.map((p) => (
-                        <Table.Tr key={p.idProduit}>
-                          <Table.Td>
-                            <Text size="xs" fw={500} lineClamp={1}>{p.designation}</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge variant="light" size="xs" color="grape">
-                              {p.categorie || '-'}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" c="dimmed">{p.unite_base || 'pièce'}</Text>
-                          </Table.Td>
-                          <Table.Td ta="right">
-                            <Text size="xs" fw={600} c="blue">{p.prix_vente_gros.toLocaleString()} F</Text>
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <Badge size="xs" color={p.qte_stock <= 0 ? "red" : p.qte_stock <= 5 ? "orange" : "green"} variant="light">
-                              {p.qte_stock}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <NumberInput
-                              size="xs"
-                              min={0}
-                              max={p.qte_stock}
-                              value={quantiteInput[p.idProduit] || 0}
-                              onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) || 0 })}
-                              w={60}
-                              placeholder="Qté"
-                            />
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <Button 
-                              size="xs" 
-                              variant="light" 
-                              color="green" 
-                              onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)} 
-                              disabled={!quantiteInput[p.idProduit] || quantiteInput[p.idProduit] <= 0 || p.qte_stock <= 0}
-                              leftSection={<IconPlus size={12} />}
-                            >
-                              Ajouter
-                            </Button>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-              )}
-            </Card>
-
-            {/* ============================================ */}
-            {/* LIGNE 3: Panier - Compactée avec Catégorie et Unité */}
-            {/* ============================================ */}
-            {panier.length > 0 && (
-              <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
-                <Group justify="space-between" mb="xs">
+            {selectedClient && (
+              <Paper p="xs" withBorder radius="md" mt="xs" style={{ backgroundColor: '#f8f9fa' }}>
+                <Group justify="space-between">
                   <Group gap="xs">
-                    <ThemeIcon color="orange" variant="light" radius="md" size="sm">
-                      <IconShoppingCart size={14} />
+                    <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                      <IconTruck size={12} />
                     </ThemeIcon>
-                    <Text fw={600} size="sm" c="#1b365d">Panier</Text>
-                    <Badge color="orange" variant="light" size="xs">{panier.length} produits</Badge>
+                    <Text size="xs" fw={500}>{selectedClient.NomComplet}</Text>
+                    {selectedClient.Societe && <Text size="xs" c="dimmed">| {selectedClient.Societe}</Text>}
                   </Group>
-                  <Button variant="subtle" color="red" size="xs" onClick={viderPanier} leftSection={<IconTrash size={12} />}>
-                    Vider
-                  </Button>
+                  <Badge color="green" variant="light" size="xs">Revendeur</Badge>
                 </Group>
+              </Paper>
+            )}
+          </Card>
 
+          {/* LIGNE 2: Produits disponibles */}
+          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Group gap="xs" mb="xs" justify="space-between">
+              <Group gap="xs">
+                <ThemeIcon color="grape" variant="light" radius="md" size="sm">
+                  <IconPackage size={14} />
+                </ThemeIcon>
+                <Text fw={600} size="sm" c="#1b365d">Produits disponibles</Text>
+                <Badge color="green" variant="light" size="xs">{produitsFiltres.length} en stock</Badge>
+              </Group>
+              <Group gap="xs">
+                <TextInput
+                  placeholder="Rechercher..."
+                  size="xs"
+                  value={recherche}
+                  onChange={(e) => setRecherche(e.target.value)}
+                  style={{ width: 200 }}
+                  leftSection={<IconSearch size={12} />}
+                />
+                <Tooltip label="Actualiser">
+                  <ActionIcon size="sm" variant="light" onClick={() => selectedClient && loadStockRevendeur(selectedClient.idClient)}>
+                    <IconRefresh size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Group>
+
+            {loadingProduits ? (
+              <Center py={30}><Loader size="sm" /><Text size="xs" ml="sm">Chargement...</Text></Center>
+            ) : produitsFiltres.length === 0 ? (
+              <Center py={30}>
+                <Stack align="center" gap="xs">
+                  <IconPackage size={32} color="#adb5bd" />
+                  <Text c="dimmed" size="sm">Aucun produit disponible en stock</Text>
+                  <Text c="dimmed" size="xs">Le revendeur n'a pas encore de stock</Text>
+                </Stack>
+              </Center>
+            ) : (
+              <ScrollArea h={220}>
+                <Table striped highlightOnHover verticalSpacing="xs">
+                  <Table.Thead>
+                    <Table.Tr style={{ backgroundColor: "#1b365d" }}>
+                      <Table.Th c="white" style={{ width: '25%' }}>Produit</Table.Th>
+                      <Table.Th c="white" style={{ width: '15%' }}>Catégorie</Table.Th>
+                      <Table.Th c="white" style={{ width: '10%' }}>Unité</Table.Th>
+                      <Table.Th c="white" style={{ width: '12%' }} ta="right">Prix</Table.Th>
+                      <Table.Th c="white" style={{ width: '10%' }} ta="center">Stock</Table.Th>
+                      <Table.Th c="white" style={{ width: '14%' }} ta="center">Qté</Table.Th>
+                      <Table.Th c="white" style={{ width: '14%' }} ta="center">Action</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {produitsFiltres.map((p) => (
+                      <Table.Tr key={p.idProduit}>
+                        <Table.Td>
+                          <Text size="xs" fw={500} lineClamp={1}>{p.designation}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge variant="light" size="xs" color="grape">
+                            {p.categorie || '-'}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">{p.unite_base || 'pièce'}</Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="xs" fw={600} c="blue">{p.prix_vente_gros.toLocaleString()} F</Text>
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Badge color={p.qte_stock <= 0 ? "red" : p.qte_stock <= 5 ? "orange" : "green"} variant="light">
+                            {p.qte_stock}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <NumberInput
+                            size="xs"
+                            min={0}
+                            max={p.qte_stock}
+                            value={quantiteInput[p.idProduit] || 0}
+                            onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) || 0 })}
+                            w={60}
+                            placeholder="Qté"
+                          />
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Button 
+                            size="xs" 
+                            variant="light" 
+                            color="green" 
+                            onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)} 
+                            disabled={!quantiteInput[p.idProduit] || quantiteInput[p.idProduit] <= 0 || p.qte_stock <= 0}
+                            leftSection={<IconPlus size={12} />}
+                          >
+                            Ajouter
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            )}
+          </Card>
+
+          {/* LIGNE 3: Panier */}
+          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
+            <Group justify="space-between" mb="xs">
+              <Group gap="xs">
+                <ThemeIcon color="orange" variant="light" radius="md" size="sm">
+                  <IconShoppingCart size={14} />
+                </ThemeIcon>
+                <Text fw={600} size="sm" c="#1b365d">Panier</Text>
+                <Badge color="orange" variant="light" size="xs">{panier.length} produits</Badge>
+              </Group>
+              <Group gap="xs">
+                {panier.length > 0 && (
+                  <Text size="xs" c="dimmed">Total: {totalVente.toLocaleString()} F</Text>
+                )}
+                <Button variant="subtle" color="red" size="xs" onClick={viderPanier} leftSection={<IconTrash size={12} />}>
+                  Vider
+                </Button>
+              </Group>
+            </Group>
+
+            {panier.length === 0 ? (
+              <Center py={30}>
+                <Stack align="center" gap="xs">
+                  <IconShoppingCart size={32} color="#adb5bd" />
+                  <Text c="dimmed" size="sm">Panier vide</Text>
+                  <Text c="dimmed" size="xs">Ajoutez des produits depuis la liste ci-dessus</Text>
+                </Stack>
+              </Center>
+            ) : (
+              <>
                 <ScrollArea h={150}>
                   <Table striped highlightOnHover verticalSpacing="xs">
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th style={{ width: '25%' }}>Produit</Table.Th>
-                        <Table.Th style={{ width: '15%' }}>Catégorie</Table.Th>
+                        <Table.Th style={{ width: '12%' }}>Catégorie</Table.Th>
                         <Table.Th style={{ width: '10%' }}>Unité</Table.Th>
                         <Table.Th style={{ width: '13%' }} ta="center">Qté</Table.Th>
                         <Table.Th style={{ width: '13%' }} ta="right">Prix</Table.Th>
                         <Table.Th style={{ width: '15%' }} ta="right">Total</Table.Th>
-                        <Table.Th style={{ width: '9%' }} ta="center"></Table.Th>
+                        <Table.Th style={{ width: '12%' }} ta="center">Action</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -652,7 +690,6 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
 
                 <Divider my="xs" />
 
-                {/* Totaux compactés */}
                 <Grid>
                   <Grid.Col span={3}>
                     <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
@@ -682,53 +719,54 @@ const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, 
 
                 <Paper p="sm" withBorder radius="md" bg="green.0" mt="xs">
                   <Flex justify="space-between" align="center">
-                    <Text fw={700} size="sm">NET À PAYER :</Text>
-                    <Text fw={800} size="lg" c="green">{netAPayer.toLocaleString()} FCFA</Text>
+                    <Group gap="xs">
+                      <IconCash size={18} color="#2e7d32" />
+                      <Text fw={700} size="sm" c="green.8">NET À PAYER :</Text>
+                    </Group>
+                    <Text fw={800} size="lg" c="green.8">{netAPayer.toLocaleString()} FCFA</Text>
                   </Flex>
                 </Paper>
-              </Card>
+              </>
             )}
+          </Card>
 
-            {/* ============================================ */}
-            {/* Objet + Boutons - Compactés */}
-            {/* ============================================ */}
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-              <Grid align="flex-end">
-                <Grid.Col span={6}>
-                  <TextInput
-                    label="Objet"
-                    placeholder="Motif du décompte (optionnel)"
-                    value={objet}
-                    onChange={(e) => setObjet(e.target.value)}
-                    size="xs"
-                    leftSection={<IconFileText size={14} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={6}>
-                  <Group justify="flex-end" gap="xs">
-                    <Button variant="outline" color="gray" size="xs" onClick={onCancel} leftSection={<IconArrowLeft size={12} />}>
-                      Annuler
-                    </Button>
-                    <Button 
-                      onClick={handleSubmit} 
-                      loading={saving} 
-                      size="xs" 
-                      color="green" 
-                      disabled={!selectedClient || panier.length === 0}
-                      leftSection={<IconCheck size={14} />}
-                    >
-                      Enregistrer
-                    </Button>
-                  </Group>
-                </Grid.Col>
-              </Grid>
-            </Card>
+          {/* Objet + Boutons */}
+          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Grid align="flex-end">
+              <Grid.Col span={6}>
+                <TextInput
+                  label="Objet"
+                  placeholder="Motif du décompte (optionnel)"
+                  value={objet}
+                  onChange={(e) => setObjet(e.target.value)}
+                  size="xs"
+                  leftSection={<IconFileText size={14} />}
+                />
+              </Grid.Col>
+              <Grid.Col span={6}>
+                <Group justify="flex-end" gap="xs">
+                  <Button variant="outline" color="gray" size="xs" onClick={onCancel} leftSection={<IconArrowLeft size={12} />}>
+                    Annuler
+                  </Button>
+                  <Button 
+                    onClick={handleSubmit} 
+                    loading={saving} 
+                    size="xs" 
+                    color="green" 
+                    disabled={!selectedClient || panier.length === 0}
+                    leftSection={<IconCheck size={14} />}
+                  >
+                    Enregistrer
+                  </Button>
+                </Group>
+              </Grid.Col>
+            </Grid>
+          </Card>
 
-            {error && <Alert color="red" variant="light" p="xs" icon={<IconAlertCircle size={12} />}>{error}</Alert>}
-          </Stack>
-        </ScrollArea>
-      </Modal>
-    </>
+          {error && <Alert color="red" variant="light" p="xs" icon={<IconAlertCircle size={12} />}>{error}</Alert>}
+        </Stack>
+      </ScrollArea>
+    </Modal>
   );
 };
 

@@ -1,16 +1,14 @@
 // src/components/factures/ListeFacturesRevendeur.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
   Pagination, TextInput, Paper, Box, SimpleGrid,
-  Loader, ThemeIcon, Flex, Modal, Center
-} from '@mantine/core';
+  Loader, ThemeIcon, Flex, Modal, Center} from '@mantine/core';
 import {
   IconPrinter, IconDownload, IconSearch, IconRefresh, IconFileInvoice,
   IconTruck, IconCurrencyFrank, IconReceipt, IconCash, IconAlertCircle,
-  IconList, IconListDetails
-} from '@tabler/icons-react';
+  IconList, IconListDetails} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import NouveauDecompte from '../decomptes/NouveauDecompte';
@@ -55,7 +53,8 @@ export const ListeFacturesRevendeur: React.FC = () => {
   
   const itemsPerPage = 10;
 
-  const chargerFactures = async () => {
+  // ✅ Charger les factures avec useCallback
+  const chargerFactures = useCallback(async () => {
     console.log("🔍 Début chargement des factures...");
     setLoading(true);
     setError(null);
@@ -63,6 +62,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
     try {
       const db = await getDb();
       
+      // Vérifier si la table existe
       const tables = await db.select<{ name: string }[]>(`
         SELECT name FROM sqlite_master WHERE type='table' AND name='factures_revendeur'
       `);
@@ -74,6 +74,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
         return;
       }
       
+      // ✅ Récupérer les factures avec les montants calculés
       const result = await db.select<any[]>(`
         SELECT 
           fr.idFactureRevendeur,
@@ -84,25 +85,73 @@ export const ListeFacturesRevendeur: React.FC = () => {
           fr.montant_ttc,
           fr.commission,
           fr.statut,
+          fr.taux_commission,
           cl.NomComplet as client_nom,
-          cl.Societe as client_societe
+          cl.Societe as client_societe,
+          cl.Tel as client_tel,
+          (SELECT COUNT(*) FROM factures_revendeur_details WHERE idFactureRevendeur = fr.idFactureRevendeur) as nb_details
         FROM factures_revendeur fr
         LEFT JOIN clients cl ON fr.idRevendeur = cl.idClient
         ORDER BY fr.date_facture DESC
       `);
       
+      console.log(`📊 ${result.length} factures chargées`);
+      
+      // ✅ Si des montants sont à 0, les recalculer
+      let facturesCorrigees = 0;
+      for (const f of result) {
+        if ((f.montant_ht === 0 || f.montant_ttc === 0) && f.nb_details > 0) {
+          // Recalculer les montants
+          const details = await db.select<any[]>(`
+            SELECT qte_commande, prix_achat_base, prix_unitaire_vente
+            FROM factures_revendeur_details
+            WHERE idFactureRevendeur = ?
+          `, [f.idFactureRevendeur]);
+          
+          let montantHT = 0;
+          let totalAchat = 0;
+          for (const d of details) {
+            const qte = d.qte_commande || 0;
+            const prixVente = d.prix_unitaire_vente || 0;
+            const prixAchat = d.prix_achat_base || 0;
+            montantHT += prixVente * qte;
+            totalAchat += prixAchat * qte;
+          }
+          
+          const benefice = montantHT - totalAchat;
+          const tauxCommission = f.taux_commission || 60;
+          const commission = benefice > 0 ? (benefice * tauxCommission) / 100 : 0;
+          const montantTTC = montantHT * 1.18;
+          
+          await db.execute(`
+            UPDATE factures_revendeur 
+            SET montant_ht = ?, montant_ttc = ?, commission = ?
+            WHERE idFactureRevendeur = ?
+          `, [montantHT, montantTTC, commission, f.idFactureRevendeur]);
+          
+          f.montant_ht = montantHT;
+          f.montant_ttc = montantTTC;
+          f.commission = commission;
+          facturesCorrigees++;
+        }
+      }
+      
+      if (facturesCorrigees > 0) {
+        console.log(`✅ ${facturesCorrigees} factures corrigées`);
+      }
+      
       setFactures(result || []);
       
     } catch (error) {
-      console.error('Erreur chargement factures:', error);
+      console.error('❌ Erreur chargement factures:', error);
       setError(error instanceof Error ? error.message : 'Erreur de chargement');
       setFactures([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // 🔥 Générer un code facture pour une facture qui n'en a pas
+  // ✅ Générer un code facture
   const genererCodeFacture = async (idFactureRevendeur: number): Promise<string> => {
     try {
       const code = await generateFactureRevendeurCode();
@@ -114,16 +163,16 @@ export const ListeFacturesRevendeur: React.FC = () => {
       console.log(`✅ Code facture généré: ${code}`);
       return code;
     } catch (error) {
-      console.error('Erreur génération code facture:', error);
+      console.error('❌ Erreur génération code facture:', error);
       throw error;
     }
   };
 
   useEffect(() => {
     chargerFactures();
-  }, []);
+  }, [chargerFactures]);
 
-  // 🔥 Charger les détails d'une facture avec catégorie et unité
+  // ✅ Charger les détails d'une facture
   const chargerDetailsFacture = async (idFactureRevendeur: number): Promise<DetailFacture[]> => {
     try {
       const db = await getDb();
@@ -154,7 +203,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
       
       return details;
     } catch (error) {
-      console.error('Erreur chargement détails:', error);
+      console.error('❌ Erreur chargement détails:', error);
       return [];
     }
   };
@@ -187,11 +236,10 @@ export const ListeFacturesRevendeur: React.FC = () => {
     }
   };
 
-  // 🔥 Créer le décompte avec catégorie et unité
+  // ✅ Créer le décompte
   const handleCreerDecompte = async (facture: FactureRevendeur) => {
     setLoadingDetails(true);
     try {
-      // Si la facture n'a pas de code, en générer un
       let factureAvecDetails = { ...facture };
       
       if (!facture.code_facture || facture.code_facture === 'FR-XXXX') {
@@ -199,14 +247,23 @@ export const ListeFacturesRevendeur: React.FC = () => {
         factureAvecDetails.code_facture = newCode;
       }
       
-      // 🔥 Charger les détails avec catégorie et unité
       const details = await chargerDetailsFacture(facture.idFactureRevendeur);
-      setSelectedDetails(details);
       
+      if (details.length === 0) {
+        notifications.show({
+          title: '⚠️ Attention',
+          message: 'Cette facture n\'a pas de détails. Veuillez la recréer.',
+          color: 'orange'
+        });
+        setLoadingDetails(false);
+        return;
+      }
+      
+      setSelectedDetails(details);
       setSelectedFacture(factureAvecDetails);
       setDecompteModalOpened(true);
     } catch (error) {
-      console.error('Erreur:', error);
+      console.error('❌ Erreur:', error);
       notifications.show({
         title: 'Erreur',
         message: 'Impossible de charger les détails de la facture',
@@ -219,6 +276,67 @@ export const ListeFacturesRevendeur: React.FC = () => {
 
   const handleVoirDecomptes = () => {
     navigate('/decomptes');
+  };
+
+  // ✅ Recalculer tous les montants
+  const handleRecalculerTout = async () => {
+    try {
+      setLoading(true);
+      const db = await getDb();
+      
+      const factures = await db.select<any[]>(`
+        SELECT idFactureRevendeur FROM factures_revendeur
+      `);
+      
+      let total = 0;
+      for (const f of factures) {
+        const details = await db.select<any[]>(`
+          SELECT qte_commande, prix_achat_base, prix_unitaire_vente
+          FROM factures_revendeur_details
+          WHERE idFactureRevendeur = ?
+        `, [f.idFactureRevendeur]);
+        
+        if (details.length > 0) {
+          let montantHT = 0;
+          let totalAchat = 0;
+          for (const d of details) {
+            const qte = d.qte_commande || 0;
+            const prixVente = d.prix_unitaire_vente || 0;
+            const prixAchat = d.prix_achat_base || 0;
+            montantHT += prixVente * qte;
+            totalAchat += prixAchat * qte;
+          }
+          
+          const benefice = montantHT - totalAchat;
+          const tauxCommission = 60;
+          const commission = benefice > 0 ? (benefice * tauxCommission) / 100 : 0;
+          const montantTTC = montantHT * 1.18;
+          
+          await db.execute(`
+            UPDATE factures_revendeur 
+            SET montant_ht = ?, montant_ttc = ?, commission = ?
+            WHERE idFactureRevendeur = ?
+          `, [montantHT, montantTTC, commission, f.idFactureRevendeur]);
+          total++;
+        }
+      }
+      
+      notifications.show({
+        title: '✅ Succès',
+        message: `${total} factures recalculées avec succès`,
+        color: 'green'
+      });
+      
+      await chargerFactures();
+      
+    } catch (error) {
+      console.error('❌ Erreur recalcul:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de recalculer les montants',
+        color: 'red'
+      });
+    }
   };
 
   const facturesFiltrees = factures.filter(f =>
@@ -285,6 +403,14 @@ export const ListeFacturesRevendeur: React.FC = () => {
               </Group>
             </Stack>
             <Group>
+              <Button 
+                variant="light" 
+                color="red" 
+                leftSection={<IconRefresh size={18} />}
+                onClick={handleRecalculerTout}
+              >
+                Recalculer
+              </Button>
               <Button 
                 variant="light" 
                 color="teal" 
@@ -404,7 +530,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
                     <Table.Tr key={f.idFactureRevendeur}>
                       <Table.Td>
                         <Text fw={600} size="sm" c={f.code_facture ? 'green' : 'dimmed'}>
-                          {f.code_facture || 'FR-XXXX'}
+                          {f.code_facture || 'FCR-XXXX'}
                         </Text>
                       </Table.Td>
                       <Table.Td fw={500}>{f.client_nom || f.client_societe || '-'}</Table.Td>
@@ -425,6 +551,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
                               color="green" 
                               size="md" 
                               onClick={() => handleCreerDecompte(f)}
+                              disabled={f.montant_ht === 0}
                             >
                               <IconCash size={16} />
                             </ActionIcon>

@@ -16,10 +16,11 @@ import { useFactures } from '../../hooks/useFactures';
 import { factureRepository } from '../../database/repositories/factureRepository';
 import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 import { FactureStandard } from './FactureStandard';
-import { FactureRevendeur } from './FactureRevendeur';
+
 import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import { notifications } from '@mantine/notifications';
 import { getDb } from '../../database/db';
+import FactureRevendeur from './FactureRevendeur';
 
 export const ListeFactures: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export const ListeFactures: React.FC = () => {
   const [selectedFacture, setSelectedFacture] = useState<any>(null);
   const [factureModalOpened, setFactureModalOpened] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [localFactures, setLocalFactures] = useState<any[]>([]);
   
   // États pour le règlement
   const [reglementModalOpened, setReglementModalOpened] = useState(false);
@@ -47,6 +49,13 @@ export const ListeFactures: React.FC = () => {
 
   const itemsPerPage = 10;
 
+  // ✅ Mettre à jour les factures locales quand les factures du hook changent
+  React.useEffect(() => {
+    if (factures) {
+      setLocalFactures(factures);
+    }
+  }, [factures]);
+
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';
     const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -55,17 +64,14 @@ export const ListeFactures: React.FC = () => {
   };
 
   const getTypeFactureLabel = (facture: any): string => {
-    if (facture.idFactureRevendeur !== undefined) {
-      return 'Revendeur';
-    }
-    if (facture.type_commande === 'REVENDEUR') {
+    if (facture.idFactureRevendeur !== undefined || facture.type_commande === 'REVENDEUR' || facture.type === 'revendeur') {
       return 'Revendeur';
     }
     return 'Standard';
   };
 
   const isRevendeurFacture = (facture: any): boolean => {
-    return facture.idFactureRevendeur !== undefined || facture.type_commande === 'REVENDEUR';
+    return facture.idFactureRevendeur !== undefined || facture.type_commande === 'REVENDEUR' || facture.type === 'revendeur';
   };
 
   const handleViewFacture = async (facture: any) => {
@@ -73,17 +79,14 @@ export const ListeFactures: React.FC = () => {
       setLoadingDetails(true);
       
       let completeFacture = null;
+      const factureId = facture.idFacture || facture.idFactureRevendeur;
       
       if (isRevendeurFacture(facture)) {
-        const factureId = facture.idFactureRevendeur;
-        if (factureId) {
-          completeFacture = await factureRevendeurRepository.getById(factureId);
-        }
+        // ✅ Récupérer la facture revendeur complète
+        completeFacture = await factureRevendeurRepository.getById(factureId);
       } else {
-        const factureId = facture.idFacture;
-        if (factureId) {
-          completeFacture = await factureRepository.getById(factureId);
-        }
+        // ✅ Récupérer la facture standard complète
+        completeFacture = await factureRepository.getById(factureId);
       }
       
       if (completeFacture) {
@@ -119,7 +122,7 @@ export const ListeFactures: React.FC = () => {
       
       if (isRevendeurFacture(facture)) {
         type = 'revendeur';
-        idFacture = facture.idFactureRevendeur;
+        idFacture = facture.idFactureRevendeur || facture.idFacture;
         montantTotal = facture.montant_ttc || 0;
         
         const reglements = await db.select<any[]>(`
@@ -184,7 +187,7 @@ export const ListeFactures: React.FC = () => {
       let clientNom = facture.NomComplet || facture.client_nom || 'Client';
       
       if (isRevendeurFacture(facture)) {
-        const idFacture = facture.idFactureRevendeur;
+        const idFacture = facture.idFactureRevendeur || facture.idFacture;
         codeFacture = facture.code_facture || `FR-${idFacture}`;
         
         reglements = await db.select(`
@@ -292,23 +295,19 @@ export const ListeFactures: React.FC = () => {
   const handleDownload = async (facture: any) => {
     try {
       let completeFacture = null;
+      const factureId = facture.idFacture || facture.idFactureRevendeur;
       
       if (isRevendeurFacture(facture)) {
-        const factureId = facture.idFactureRevendeur;
-        if (factureId) {
-          completeFacture = await factureRevendeurRepository.getById(factureId);
-        }
+        completeFacture = await factureRevendeurRepository.getById(factureId);
       } else {
-        const factureId = facture.idFacture;
-        if (factureId) {
-          completeFacture = await factureRepository.getById(factureId);
-        }
+        completeFacture = await factureRepository.getById(factureId);
       }
       
       if (completeFacture) {
+        // ✅ Créer un PDF simplifié ou un JSON
         const dataStr = JSON.stringify(completeFacture, null, 2);
         const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        const codeFacture = completeFacture.code_facture || completeFacture.code_facture_revendeur || 'facture';
+        const codeFacture = completeFacture.code_facture || 'facture';
         const exportFileDefaultName = `${codeFacture}.json`;
         
         const linkElement = document.createElement('a');
@@ -333,9 +332,9 @@ export const ListeFactures: React.FC = () => {
   };
 
   const datesDisponibles = useMemo(() => {
-    const dates = factures
+    const dates = localFactures
       .map(facture => {
-        const dateStr = facture.date_facture;
+        const dateStr = facture.date_facture || facture.date_commande;
         if (!dateStr) return null;
         const date = new Date(dateStr);
         return isNaN(date.getTime()) ? null : date.toLocaleDateString('fr-FR');
@@ -350,7 +349,7 @@ export const ListeFactures: React.FC = () => {
       const dateB = new Date(`${yearB}-${monthB}-${dayB}`);
       return dateA.getTime() - dateB.getTime();
     });
-  }, [factures]);
+  }, [localFactures]);
 
   const stringToDate = (dateStr: string | null): Date | null => {
     if (!dateStr) return null;
@@ -361,7 +360,7 @@ export const ListeFactures: React.FC = () => {
   };
 
   const filteredFactures = useMemo(() => {
-    let filtered = [...factures];
+    let filtered = [...localFactures];
 
     if (searchClient) {
       filtered = filtered.filter(facture =>
@@ -381,7 +380,7 @@ export const ListeFactures: React.FC = () => {
 
     if (dateDebutObj || dateFinObj) {
       filtered = filtered.filter(facture => {
-        const dateFacture = new Date(facture.date_facture);
+        const dateFacture = new Date(facture.date_facture || facture.date_commande);
 
         if (dateDebutObj) {
           const debut = new Date(dateDebutObj);
@@ -400,7 +399,7 @@ export const ListeFactures: React.FC = () => {
     }
 
     return filtered;
-  }, [factures, searchClient, typeFacture, dateDebut, dateFin]);
+  }, [localFactures, searchClient, typeFacture, dateDebut, dateFin]);
 
   const resetFilters = () => {
     setSearchClient('');
@@ -411,10 +410,10 @@ export const ListeFactures: React.FC = () => {
   };
 
   const stats = {
-    total: factures.length,
-    montantTotal: factures.reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
-    revendeurs: factures.filter(f => getTypeFactureLabel(f) === 'Revendeur').length,
-    standards: factures.filter(f => getTypeFactureLabel(f) === 'Standard').length
+    total: localFactures.length,
+    montantTotal: localFactures.reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
+    revendeurs: localFactures.filter(f => getTypeFactureLabel(f) === 'Revendeur').length,
+    standards: localFactures.filter(f => getTypeFactureLabel(f) === 'Standard').length
   };
 
   const totalPages = Math.ceil(filteredFactures.length / itemsPerPage);
@@ -423,7 +422,7 @@ export const ListeFactures: React.FC = () => {
     currentPage * itemsPerPage
   );
 
-  if (loading && factures.length === 0) {
+  if (loading && localFactures.length === 0) {
     return (
       <Card withBorder p="xl" ta="center">
         <Loader size="xl" />
@@ -567,9 +566,9 @@ export const ListeFactures: React.FC = () => {
           </Grid>
         </Card>
 
-        {/* BARRE DE NAVIGATION VERS LES COMMANDES */}
+        {/* BARRE DE NAVIGATION */}
         <Card withBorder radius="lg" shadow="sm" p="md">
-          <Group justify="center" gap="md">
+          <Group justify="center" gap="md" wrap="wrap">
             <Button
               variant="light"
               color="blue"
@@ -617,126 +616,127 @@ export const ListeFactures: React.FC = () => {
             </Flex>
           </Paper>
 
-       <Box style={{ overflowX: 'auto' }}>
-  <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
-    <Table.Thead>
-      <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-        <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '12px' }}>N°</Table.Th>
-        <Table.Th c="white" style={{ width: 180, fontSize: '12px' }}>Client</Table.Th>
-        <Table.Th c="white" style={{ width: 100, fontSize: '12px' }}>Date</Table.Th>
-        <Table.Th c="white" style={{ width: 90, fontSize: '12px' }}>Type</Table.Th>
-        <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '12px' }}>Montant TTC</Table.Th>
-        <Table.Th c="white" style={{ width: 130, fontSize: '12px' }}>Code Facture</Table.Th>
-        <Table.Th c="white" style={{ width: 280, textAlign: 'center', fontSize: '12px' }}>Actions</Table.Th>
-      </Table.Tr>
-    </Table.Thead>
-    <Table.Tbody>
-      {paginatedFactures.map((facture: any, index) => {
-        const typeLabel = getTypeFactureLabel(facture);
-        const uniqueKey = facture.idFacture || facture.idFactureRevendeur;
-        const clientName = facture.NomComplet || '-';
-        const codeFacture = facture.code_facture || '-';
+          <Box style={{ overflowX: 'auto' }}>
+            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                  <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '12px' }}>N°</Table.Th>
+                  <Table.Th c="white" style={{ width: 180, fontSize: '12px' }}>Client</Table.Th>
+                  <Table.Th c="white" style={{ width: 100, fontSize: '12px' }}>Date</Table.Th>
+                  <Table.Th c="white" style={{ width: 90, fontSize: '12px' }}>Type</Table.Th>
+                  <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '12px' }}>Montant TTC</Table.Th>
+                  <Table.Th c="white" style={{ width: 130, fontSize: '12px' }}>Code Facture</Table.Th>
+                  <Table.Th c="white" style={{ width: 280, textAlign: 'center', fontSize: '12px' }}>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {paginatedFactures.map((facture: any, index) => {
+                  const typeLabel = getTypeFactureLabel(facture);
+                  const uniqueKey = facture.idFacture || facture.idFactureRevendeur || index;
+                  const clientName = facture.NomComplet || '-';
+                  const codeFacture = facture.code_facture || '-';
+                  const dateFacture = facture.date_facture || facture.date_commande;
 
-        return (
-          <Table.Tr key={uniqueKey}>
-            <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-              <Text fw={600} size="sm">{(currentPage - 1) * itemsPerPage + index + 1}</Text>
-            </Table.Td>
-            <Table.Td style={{ verticalAlign: 'middle' }}>
-              <Group gap="sm" wrap="nowrap">
-                <Avatar size="sm" radius="xl" color="blue">
-                  {clientName.charAt(0).toUpperCase()}
-                </Avatar>
-                <Text fw={500} size="sm">{clientName}</Text>
-              </Group>
-            </Table.Td>
-            <Table.Td style={{ verticalAlign: 'middle' }}>
-              <Text size="sm">
-                {facture.date_facture ? new Date(facture.date_facture).toLocaleDateString("fr-FR") : "-"}
-              </Text>
-            </Table.Td>
-            <Table.Td style={{ verticalAlign: 'middle' }}>
-              <Badge 
-                size="sm" 
-                color={typeLabel === "Revendeur" ? "green" : "blue"} 
-                variant="light"
-                leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
-              >
-                {typeLabel}
-              </Badge>
-            </Table.Td>
-            <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-              <Text fw={600} size="sm" c="blue">{formatMontant(facture.montant_ttc)} FCFA</Text>
-            </Table.Td>
-            <Table.Td style={{ verticalAlign: 'middle' }}>
-              <Text fw={500} size="sm">{codeFacture}</Text>
-            </Table.Td>
-            <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-              {/* 🔥 Boutons compactés sur une seule ligne */}
-              <Group gap="4" justify="center" wrap="nowrap">
-                <Tooltip label="Voir détails">
-                  <ActionIcon 
-                    variant="light" 
-                    color="blue" 
-                    size="sm" 
-                    onClick={() => handleViewFacture(facture)} 
-                    loading={loadingDetails}
-                  >
-                    <IconEye size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                  return (
+                    <Table.Tr key={uniqueKey}>
+                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                        <Text fw={600} size="sm">{(currentPage - 1) * itemsPerPage + index + 1}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Group gap="sm" wrap="nowrap">
+                          <Avatar size="sm" radius="xl" color={typeLabel === "Revendeur" ? "green" : "blue"}>
+                            {clientName.charAt(0).toUpperCase()}
+                          </Avatar>
+                          <Text fw={500} size="sm" lineClamp={1}>{clientName}</Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Text size="sm">
+                          {dateFacture ? new Date(dateFacture).toLocaleDateString("fr-FR") : "-"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Badge 
+                          size="sm" 
+                          color={typeLabel === "Revendeur" ? "green" : "blue"} 
+                          variant="light"
+                          leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+                        >
+                          {typeLabel}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                        <Text fw={600} size="sm" c="blue">{formatMontant(facture.montant_ttc)} FCFA</Text>
+                      </Table.Td>
+                      <Table.Td style={{ verticalAlign: 'middle' }}>
+                        <Text fw={500} size="sm">{codeFacture}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                        <Group gap="4" justify="center" wrap="nowrap">
+                          <Tooltip label="Voir détails">
+                            <ActionIcon 
+                              variant="light" 
+                              color="blue" 
+                              size="sm" 
+                              onClick={() => handleViewFacture(facture)} 
+                              loading={loadingDetails}
+                            >
+                              <IconEye size={16} />
+                            </ActionIcon>
+                          </Tooltip>
 
-                <Tooltip label="Régler">
-                  <ActionIcon 
-                    variant="light" 
-                    color="green" 
-                    size="sm" 
-                    onClick={() => handleRegler(facture)}
-                  >
-                    <IconCash size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                          <Tooltip label="Régler">
+                            <ActionIcon 
+                              variant="light" 
+                              color="green" 
+                              size="sm" 
+                              onClick={() => handleRegler(facture)}
+                            >
+                              <IconCash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
 
-                <Tooltip label="Reçu de règlement">
-                  <ActionIcon 
-                    variant="light" 
-                    color="orange" 
-                    size="sm" 
-                    onClick={() => handleGenererRecu(facture)}
-                  >
-                    <IconReceipt size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                          <Tooltip label="Reçu de règlement">
+                            <ActionIcon 
+                              variant="light" 
+                              color="orange" 
+                              size="sm" 
+                              onClick={() => handleGenererRecu(facture)}
+                            >
+                              <IconReceipt size={16} />
+                            </ActionIcon>
+                          </Tooltip>
 
-                <Tooltip label="Imprimer">
-                  <ActionIcon 
-                    variant="light" 
-                    color="teal" 
-                    size="sm" 
-                    onClick={handlePrint}
-                  >
-                    <IconPrinter size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                          <Tooltip label="Imprimer">
+                            <ActionIcon 
+                              variant="light" 
+                              color="teal" 
+                              size="sm" 
+                              onClick={handlePrint}
+                            >
+                              <IconPrinter size={16} />
+                            </ActionIcon>
+                          </Tooltip>
 
-                <Tooltip label="Télécharger">
-                  <ActionIcon 
-                    variant="light" 
-                    color="grape" 
-                    size="sm" 
-                    onClick={() => handleDownload(facture)}
-                  >
-                    <IconDownload size={16} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-            </Table.Td>
-          </Table.Tr>
-        );
-      })}
-    </Table.Tbody>
-  </Table>
-</Box>
+                          <Tooltip label="Télécharger">
+                            <ActionIcon 
+                              variant="light" 
+                              color="grape" 
+                              size="sm" 
+                              onClick={() => handleDownload(facture)}
+                            >
+                              <IconDownload size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+            </Table>
+          </Box>
+
           {filteredFactures.length === 0 && (
             <Flex justify="center" align="center" direction="column" py={60}>
               <IconFileInvoice size={60} color="#ccc" />
@@ -754,10 +754,20 @@ export const ListeFactures: React.FC = () => {
       </Stack>
 
       {/* MODAL FACTURE */}
-      <Modal opened={factureModalOpened} onClose={() => setFactureModalOpened(false)} title={`Facture ${selectedFacture?.code_facture || ''}`} size="xl" fullScreen>
+      <Modal 
+        opened={factureModalOpened} 
+        onClose={() => setFactureModalOpened(false)} 
+        title={`Facture ${selectedFacture?.code_facture || ''}`} 
+        size="xl" 
+        fullScreen
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '16px 20px' },
+          title: { color: 'white', fontWeight: 600 }
+        }}
+      >
         {selectedFacture && (
           <>
-            <Group justify="flex-end" mb="md">
+            <Group justify="flex-end" mb="md" className="no-print">
               <Button variant="outline" onClick={() => setFactureModalOpened(false)} leftSection={<IconX size={16} />}>Fermer</Button>
               <Button variant="filled" color="blue" leftSection={<IconPrinter size={16} />} onClick={handlePrint}>Imprimer</Button>
             </Group>

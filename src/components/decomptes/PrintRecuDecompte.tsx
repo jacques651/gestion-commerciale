@@ -1,39 +1,65 @@
 // src/components/decomptes/PrintRecuDecompte.tsx
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Button, Group, Loader, Center, Stack, Paper, Text } from '@mantine/core';
-import { IconPrinter, IconArrowLeft } from '@tabler/icons-react';
+import { Button, Group, Loader, Center, Stack, Paper, Text, Alert } from '@mantine/core';
+import { IconPrinter, IconArrowLeft, IconAlertCircle, IconRefresh } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { getDb } from '../../database/db';
 import RecuDecompte from './RecuDecompte';
 
-type RecuDecompteDetail = {
+interface DecompteDetail {
+  categorie: string;
+  unite_base: string;
   idProduit: number;
-  codeFacture: string;
   designation: string;
-  qteInitiale: number;
-  qteVendue: number;
-  qteRestante: number;
-  prixAchat: number;
-  prixVente: number;
-  commissionPourcentage: number;
-};
+  qte_decompte: number;
+  prix_achat: number;
+  prix_vente: number;
+  commission_pourcentage: number;
+  code_produit?: string;
+}
 
-// ✅ Supprimer l'interface des props et utiliser useParams
+interface DecompteData {
+  idDecompte: number;
+  code_decompte: string;
+  date_decompte: string;
+  montant_vente: number;
+  montant_commission: number;
+  montant_net: number;
+  observation?: string;
+  NomComplet: string;
+  details: DecompteDetail[];
+}
+
 export default function PrintRecuDecompte() {
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>(); // ✅ Utiliser useParams directement
-  const [decompte, setDecompte] = useState<any>(null);
+  const { id } = useParams<{ id: string }>();
+  const [decompte, setDecompte] = useState<DecompteData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const loadDecompte = async () => {
-      if (!id) return;
-      
+      if (!id) {
+        setError("ID du décompte manquant");
+        setLoading(false);
+        return;
+      }
+
       try {
+        setLoading(true);
+        setError(null);
+
         const db = await getDb();
-        
+        const decompteId = parseInt(id);
+
+        if (isNaN(decompteId)) {
+          setError("ID du décompte invalide");
+          setLoading(false);
+          return;
+        }
+
         // Récupérer le décompte
         const decompteData = await db.select<any[]>(`
           SELECT 
@@ -43,19 +69,24 @@ export default function PrintRecuDecompte() {
             d.montant_vente,
             d.montant_commission,
             d.montant_net,
+            d.montant_achat,
+            d.montant_benefice,
             d.observation,
-            c.NomComplet
+            d.taux_commission,
+            c.NomComplet,
+            c.Societe,
+            c.Tel
           FROM decomptes d
           LEFT JOIN clients c ON c.idClient = d.idClient
           WHERE d.idDecompte = ?
-        `, [parseInt(id)]);
-        
+        `, [decompteId]);
+
         if (decompteData.length === 0) {
-          console.error('Décompte non trouvé');
+          setError("Décompte non trouvé");
           setLoading(false);
           return;
         }
-        
+
         // Récupérer les détails
         const detailsData = await db.select<any[]>(`
           SELECT 
@@ -65,40 +96,53 @@ export default function PrintRecuDecompte() {
             dd.prix_achat,
             dd.prix_vente,
             dd.commission_pourcentage,
+            dd.designation as detail_designation,
             p.designation,
-            p.code_produit
+            p.code_produit,
+            p.unite_base,
+            p.categorie
           FROM decompte_details dd
           LEFT JOIN products p ON p.idProduit = dd.idProduit
           WHERE dd.idDecompte = ?
-        `, [parseInt(id)]);
-        
-        const recuDetails: RecuDecompteDetail[] = (detailsData || []).map((detail: any) => ({
-          idProduit: detail.idProduit,
-          codeFacture: `FACT-${detail.idProduit}`,
-          designation: detail.designation || 'Produit',
-          qteInitiale: detail.qte_decompte || 0,
-          qteVendue: detail.qte_decompte || 0,
-          qteRestante: 0,
-          prixAchat: detail.prix_achat || 0,
-          prixVente: detail.prix_vente || 0,
-          commissionPourcentage: detail.commission_pourcentage || 60
+          ORDER BY dd.idDetailRevendeur ASC
+        `, [decompteId]);
+
+        // Transformer les détails
+        const recuDetails: DecompteDetail[] = (detailsData || []).map((detail: any) => ({
+          idProduit: detail.idProduit || 0,
+          designation: detail.detail_designation || detail.designation || 'Produit',
+          qte_decompte: detail.qte_decompte || 0,
+          prix_achat: detail.prix_achat || 0,
+          prix_vente: detail.prix_vente || 0,
+          commission_pourcentage: detail.commission_pourcentage || 60,
+          code_produit: detail.code_produit || '',
+          categorie: detail.categorie || 'Catégorie inconnue',
+          unite_base: detail.unite_base || 'Unité inconnue'
         }));
-        
-        setDecompte({
-          id: decompteData[0].idDecompte,
+
+        // Construire l'objet décompte
+        const decompteObj: DecompteData = {
+          idDecompte: decompteData[0].idDecompte,
           code_decompte: decompteData[0].code_decompte || `DC-${decompteData[0].idDecompte}`,
-          date_decompte: decompteData[0].date_decompte,
+          date_decompte: decompteData[0].date_decompte || new Date().toISOString(),
+          montant_vente: decompteData[0].montant_vente || 0,
+          montant_commission: decompteData[0].montant_commission || 0,
+          montant_net: decompteData[0].montant_net || 0,
+          observation: decompteData[0].observation,
           NomComplet: decompteData[0].NomComplet || 'Client',
           details: recuDetails
-        });
-        
-      } catch (error) {
+        };
+
+        setDecompte(decompteObj);
+
+      } catch (error: any) {
         console.error('Erreur chargement décompte:', error);
+        setError(error?.message || 'Erreur lors du chargement du décompte');
       } finally {
         setLoading(false);
       }
     };
-    
+
     loadDecompte();
   }, [id]);
 
@@ -106,7 +150,11 @@ export default function PrintRecuDecompte() {
     contentRef: printRef,
     documentTitle: `Recu_Decompte_${decompte?.code_decompte || id}`,
     onAfterPrint: () => {
-      console.log('Impression lancée');
+      console.log('✅ Impression lancée');
+    },
+    onPrintError: (error) => {
+      console.error('❌ Erreur impression:', error);
+      setError('Erreur lors de l\'impression');
     }
   });
 
@@ -114,6 +162,40 @@ export default function PrintRecuDecompte() {
     return (
       <Center py={100}>
         <Loader size="xl" />
+        <Text ml="md" c="dimmed">Chargement du décompte...</Text>
+      </Center>
+    );
+  }
+
+  if (error) {
+    return (
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert 
+            icon={<IconAlertCircle size={16} />} 
+            title="Erreur" 
+            color="red"
+            withCloseButton
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+          <Group>
+            <Button 
+              leftSection={<IconRefresh size={16} />}
+              onClick={() => window.location.reload()}
+              variant="light"
+            >
+              Réessayer
+            </Button>
+            <Button 
+              variant="subtle"
+              onClick={() => navigate('/decomptes')}
+            >
+              Retour à la liste
+            </Button>
+          </Group>
+        </Stack>
       </Center>
     );
   }
@@ -122,7 +204,7 @@ export default function PrintRecuDecompte() {
     return (
       <Center py={100}>
         <Stack align="center">
-          <Text>Décompte non trouvé</Text>
+          <Text size="lg" c="dimmed">Décompte non trouvé</Text>
           <Button onClick={() => navigate('/decomptes')}>Retour</Button>
         </Stack>
       </Center>
@@ -156,9 +238,17 @@ export default function PrintRecuDecompte() {
       <div ref={printRef}>
         <RecuDecompte
           numero={decompte.code_decompte}
-          date={decompte.date_decompte ? new Date(decompte.date_decompte).toLocaleDateString('fr-FR') : new Date().toLocaleDateString('fr-FR')}
+          date={decompte.date_decompte}
           client={decompte.NomComplet}
-          details={decompte.details}
+          details={decompte.details.map(detail => ({
+            qte_decompte: detail.qte_decompte,
+            prix_achat: detail.prix_achat,
+            prix_vente: detail.prix_vente,
+            commission_pourcentage: detail.commission_pourcentage,
+            designation: detail.designation,
+            categorie: detail.categorie || '-',
+            unite_base: detail.unite_base || 'pièce'
+          }))}
         />
       </div>
     </Stack>

@@ -1,5 +1,5 @@
 // src/components/commandes/ListeCommande.tsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table,
@@ -124,6 +124,13 @@ export function ListeCommande() {
     loading,
     refresh
   } = useCommandes();
+
+  // ✅ Mettre à jour quand les commandes changent
+  useEffect(() => {
+    if (commandes.length > 0) {
+      console.log('📊 Commandes chargées:', commandes.length);
+    }
+  }, [commandes]);
 
   const filteredCommandes = useMemo(() => {
     let filtered = [...commandes];
@@ -296,7 +303,6 @@ export function ListeCommande() {
     }
   };
 
-  // ✅ Vérifier si une commande peut être supprimée
   const peutSupprimerCommande = async (idCommande: number): Promise<{ peut: boolean; raison: string }> => {
     const db = await getDb();
 
@@ -312,7 +318,7 @@ export function ListeCommande() {
       return { peut: false, raison: 'Des règlements ont déjà été effectués sur les factures de cette commande' };
     }
 
-    // Vérifier s'il y a des décomptes associés (pour les commandes revendeur)
+    // Vérifier s'il y a des décomptes associés
     const decomptes = await db.select<any[]>(`
       SELECT COUNT(*) as count
       FROM decomptes
@@ -350,11 +356,9 @@ export function ListeCommande() {
     return { peut: true, raison: '' };
   };
 
-  // ✅ Supprimer une commande avec restauration du stock
   const handleDelete = async (idCommande: number) => {
     setCommandeToDelete(idCommande);
     
-    // Vérifier si la commande peut être supprimée
     const { peut, raison } = await peutSupprimerCommande(idCommande);
     
     if (!peut) {
@@ -370,7 +374,6 @@ export function ListeCommande() {
     setDeleteConfirmOpened(true);
   };
 
-  // ✅ Confirmer la suppression
   const confirmDelete = async () => {
     if (!commandeToDelete) return;
 
@@ -378,14 +381,14 @@ export function ListeCommande() {
     try {
       const db = await getDb();
 
-      // 1. Récupérer les détails de la commande pour restaurer le stock
+      // 1. Récupérer les détails
       const details = await db.select<any[]>(`
         SELECT idProduit, qte_commande
         FROM commande_details
         WHERE idCommande = ?
       `, [commandeToDelete]);
 
-      // 2. Restaurer le stock pour chaque produit
+      // 2. Restaurer le stock
       for (const detail of details) {
         await db.execute(`
           UPDATE products
@@ -394,7 +397,7 @@ export function ListeCommande() {
         `, [detail.qte_commande, detail.idProduit]);
       }
 
-      // 3. Supprimer les détails de la commande
+      // 3. Supprimer les détails
       await db.execute(`DELETE FROM commande_details WHERE idCommande = ?`, [commandeToDelete]);
 
       // 4. Supprimer la commande
@@ -562,9 +565,9 @@ export function ListeCommande() {
           </SimpleGrid>
         </Paper>
 
-        {/* Filtres + Boutons sur une seule ligne */}
+        {/* Filtres */}
         <Card withBorder radius="lg" shadow="sm" p="xs">
-          <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
+          <Group align="flex-end" gap="xs" style={{ flexWrap: 'wrap' }}>
             {/* Recherche */}
             <Box style={{ width: 130 }}>
               <TextInput
@@ -653,7 +656,7 @@ export function ListeCommande() {
             </Box>
 
             {/* BOUTONS D'ACTION */}
-            <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
+            <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flexWrap: 'wrap' }}>
               <Button
                 leftSection={<IconList size={12} />}
                 variant="filled"
@@ -722,7 +725,7 @@ export function ListeCommande() {
                   <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>Montant HT</Table.Th>
                   <Table.Th c="white" style={{ width: 130, fontSize: '13px', fontWeight: 600 }}>Code Facture</Table.Th>
                   <Table.Th c="white" style={{ width: 100, fontSize: '13px', fontWeight: 600 }}>Date Facture</Table.Th>
-                  <Table.Th c="white" style={{ width: 220, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
+                  <Table.Th c="white" style={{ width: 250, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -739,125 +742,132 @@ export function ListeCommande() {
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  paginatedCommandes.map((commande, index) => (
-                    <Table.Tr key={commande.idCommande}>
-                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                        <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Badge color="blue" variant="light" size="sm">
-                          {commande.code_commande || '-'}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Group gap="sm" wrap="nowrap">
-                          <Avatar size="sm" radius="xl" color="blue">
-                            {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
-                          </Avatar>
-                          <div>
-                            <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
-                            {commande.Societe && (
-                              <Text size="xs" c="dimmed">{commande.Societe}</Text>
+                  paginatedCommandes.map((commande, index) => {
+                    // ✅ Vérifier si la commande a une facture
+                    const hasFacture = commande.code_facture || commande.idFacture || commande.idFactureRevendeur;
+                    
+                    return (
+                      <Table.Tr key={commande.idCommande}>
+                        <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                          <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Badge color="blue" variant="light" size="sm">
+                            {commande.code_commande || '-'}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Group gap="sm" wrap="nowrap">
+                            <Avatar size="sm" radius="xl" color="blue">
+                              {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
+                            </Avatar>
+                            <div>
+                              <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
+                              {commande.Societe && (
+                                <Text size="xs" c="dimmed">{commande.Societe}</Text>
+                              )}
+                            </div>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Text size="sm">
+                            {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Badge
+                            color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
+                            variant="light"
+                            size="sm"
+                            leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
+                          >
+                            {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                          <Text fw={600} size="sm" c="blue">
+                            {commande.montant_ht.toLocaleString('fr-FR')} FCFA
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Text fw={500} size="sm" c={hasFacture ? 'green' : 'dimmed'}>
+                            {commande.code_facture || '-'}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ verticalAlign: 'middle' }}>
+                          <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
+                            {commande.date_facture
+                              ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
+                              : '-'}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                          <Group gap="4" justify="center" wrap="nowrap">
+                            <Tooltip label="Voir détails">
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                size="md"
+                                onClick={() => handleViewDetails(commande.idCommande)}
+                              >
+                                <IconEye size={18} />
+                              </ActionIcon>
+                            </Tooltip>
+
+                            {hasFacture && (
+                              <Tooltip label="Voir facture">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="grape"
+                                  size="md"
+                                  onClick={() => handleVoirFacture(commande)}
+                                >
+                                  <IconFileInvoice size={18} />
+                                </ActionIcon>
+                              </Tooltip>
                             )}
-                          </div>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Text size="sm">
-                          {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Badge
-                          color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
-                          variant="light"
-                          size="sm"
-                          leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
-                        >
-                          {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                        <Text fw={600} size="sm" c="blue">
-                          {commande.montant_ht.toLocaleString('fr-FR')} FCFA
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Text fw={500} size="sm" c={commande.code_facture ? 'green' : 'dimmed'}>
-                          {commande.code_facture || '-'}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
-                          {commande.date_facture
-                            ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
-                            : '-'}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                        <Group gap="xs" justify="center" wrap="nowrap">
-                          <Tooltip label="Voir détails">
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              size="md"
-                              onClick={() => handleViewDetails(commande.idCommande)}
-                            >
-                              <IconEye size={18} />
-                            </ActionIcon>
-                          </Tooltip>
 
-                          {(commande.code_facture || commande.idFacture || commande.idFactureRevendeur) && (
-                            <Tooltip label="Voir facture">
+                            {commande.type_commande !== 'REVENDEUR' && (
+                              <Tooltip label="Régler">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="green"
+                                  size="md"
+                                  onClick={() => handleRegler(commande)}
+                                >
+                                  <IconCash size={18} />
+                                </ActionIcon>
+                              </Tooltip>
+                            )}
+
+                            {!hasFacture && (
+                              <Tooltip label="Générer facture">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="grape"
+                                  size="md"
+                                  onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
+                                >
+                                  <IconReceipt size={18} />
+                                </ActionIcon>
+                              </Tooltip>
+                            )}
+
+                            <Tooltip label="Supprimer">
                               <ActionIcon
                                 variant="subtle"
-                                color="grape"
+                                color="red"
                                 size="md"
-                                onClick={() => handleVoirFacture(commande)}
+                                onClick={() => handleDelete(commande.idCommande)}
                               >
-                                <IconFileInvoice size={18} />
+                                <IconTrash size={18} />
                               </ActionIcon>
                             </Tooltip>
-                          )}
-
-                          <Tooltip label="Régler">
-                            <ActionIcon
-                              variant="subtle"
-                              color="green"
-                              size="md"
-                              onClick={() => handleRegler(commande)}
-                            >
-                              <IconCash size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Supprimer">
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              size="md"
-                              onClick={() => handleDelete(commande.idCommande)}
-                            >
-                              <IconTrash size={18} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          {!commande.code_facture && !commande.idFacture && !commande.idFactureRevendeur && (
-                            <Tooltip label="Générer facture">
-                              <ActionIcon
-                                variant="subtle"
-                                color="grape"
-                                size="md"
-                                onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
-                              >
-                                <IconReceipt size={18} />
-                              </ActionIcon>
-                            </Tooltip>
-                          )}
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })
                 )}
               </Table.Tbody>
             </Table>
@@ -994,7 +1004,7 @@ export function ListeCommande() {
         )}
       </Modal>
 
-      {/* Modal de règlement pour facture standard */}
+      {/* Modal de règlement */}
       <FormulaireReglement
         opened={reglementModalOpened}
         onClose={() => {

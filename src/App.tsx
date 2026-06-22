@@ -8,13 +8,17 @@ import Navbar from './components/common/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { getDb, isDatabaseConnected } from './database/db';
 import { initDatabaseWithMigrations } from './database/runMigration';
+import { DatabaseVersionManager } from './database/versionManager';
+import { MigrationManagerComponent } from './components/MigrationManager';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+const DebugPanel = lazy(() => import('./components/debug/DebugPanel'));
 
 // ==================== FACTURES DÉTAILS (imports directs car utilisés dans les routes) ====================
 import DetailFacture from './components/factures/DetailFacture';
 import DetailFactureRevendeur from './components/factures/DetailFactureRevendeur';
 import ListeCommandes from './components/commandes/ListeCommandes';
+import HistoriqueRevendeur from './components/pages/revendeurs/HistoriqueRevendeur';
 
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
@@ -35,7 +39,10 @@ const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireC
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
-const HistoriqueRevendeur = lazy(() => import('./components/pages/revendeurs/HistoriqueRevendeur'));
+
+// ✅ CORRECTION : Chemin correct pour HistoriqueRevendeur
+
+
 const ListeStockRevendeur = lazy(() => import('./components/pages/revendeurs/ListeStockRevendeur'));
 const DashboardRevendeurs = lazy(() => import('./components/pages/revendeurs/DashboardRevendeurs'));
 const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompte'));
@@ -140,22 +147,75 @@ function DatabaseStatus() {
   return null;
 }
 
-function RouteGuard({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
+// ✅ RouteGuard basé sur les permissions
+function RouteGuard({
+  children,
+  requiredPermissions,
+  requiredRoles,
+  redirectTo = '/'
+}: {
+  children: React.ReactNode;
+  requiredPermissions?: string[];
+  requiredRoles?: string[];
+  redirectTo?: string;
+}) {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
   if (!isAuthenticated) return <Login />;
-  if (roles && user && !roles.includes(user.role)) {
-    return (
-      <Center style={{ height: '50vh' }}>
-        <div style={{ textAlign: 'center' }}>
-          <h2>⛔ Accès non autorisé</h2>
-          <p>Vous n'avez pas les permissions nécessaires.</p>
-          <Button onClick={() => navigate('/')} mt="md">Retour au Dashboard</Button>
-        </div>
-      </Center>
-    );
+
+  if (!user) {
+    return <Login />;
   }
+
+  // Vérifier les rôles
+  if (requiredRoles && requiredRoles.length > 0) {
+    const hasRole = requiredRoles.includes(user.role);
+    if (!hasRole) {
+      return (
+        <Center style={{ height: '50vh' }}>
+          <div style={{ textAlign: 'center' }}>
+            <h2>⛔ Accès non autorisé</h2>
+            <p>Vous n'avez pas les permissions nécessaires pour accéder à cette page.</p>
+            <Button onClick={() => navigate(redirectTo)} mt="md">Retour</Button>
+          </div>
+        </Center>
+      );
+    }
+  }
+
+  // Vérifier les permissions
+  if (requiredPermissions && requiredPermissions.length > 0) {
+    // Si l'utilisateur est admin, il a tous les droits
+    if (user.role === 'admin') {
+      return <>{children}</>;
+    }
+
+    // Récupérer les permissions de l'utilisateur
+    let userPermissions: Record<string, boolean> = {};
+    try {
+      // @ts-ignore - user.permissions est ajouté dynamiquement
+      userPermissions = user.permissions ? JSON.parse(user.permissions) : {};
+    } catch (e) {
+      console.error('Erreur parsing permissions:', e);
+    }
+
+    // Vérifier chaque permission requise
+    const hasAllPermissions = requiredPermissions.every(perm => userPermissions[perm] === true);
+
+    if (!hasAllPermissions) {
+      return (
+        <Center style={{ height: '50vh' }}>
+          <div style={{ textAlign: 'center' }}>
+            <h2>⛔ Accès non autorisé</h2>
+            <p>Vous n'avez pas les permissions nécessaires pour accéder à cette page.</p>
+            <Button onClick={() => navigate(redirectTo)} mt="md">Retour</Button>
+          </div>
+        </Center>
+      );
+    }
+  }
+
   return <>{children}</>;
 }
 
@@ -224,167 +284,174 @@ function AuthenticatedApp() {
           <Routes>
             {/* DASHBOARD */}
             <Route path="/" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['dashboard.view']}>
                 <Dashboard setPage={handleSetPage} />
               </RouteGuard>
             } />
-            
-            {/* GESTION COMMERCIALE */}
+
+            {/* GESTION COMMERCIALE - CLIENTS */}
             <Route path="/clients" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['clients.view']}>
                 <ListeClients />
               </RouteGuard>
             } />
-            
-            {/* Commandes */}
+
+            {/* COMMANDES */}
             <Route path="/commandes" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['commandes.view']}>
                 <ListeCommandes />
               </RouteGuard>
             } />
             <Route path="/commandes/standard" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['commandes.view']}>
                 <ListeCommandeStandard />
               </RouteGuard>
             } />
             <Route path="/commandes/revendeur" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['revendeurs.commandes']}>
                 <ListeCommandesRevendeur />
               </RouteGuard>
             } />
             <Route path="/commandes/nouveau" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
-                <FormulaireCommande opened={true} onClose={() => {}} />
+              <RouteGuard requiredPermissions={['commandes.create']}>
+                <FormulaireCommande opened={true} onClose={() => { }} />
               </RouteGuard>
             } />
-            
-            {/* Factures */}
+
+            {/* FACTURES */}
             <Route path="/factures" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['factures.view']}>
                 <ListeFactures />
               </RouteGuard>
             } />
             <Route path="/factures-revendeur" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['revendeurs.factures']}>
                 <ListeFacturesRevendeur />
               </RouteGuard>
             } />
 
             {/* DÉTAILS FACTURES */}
             <Route path="/factures/:id" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['factures.view']}>
                 <DetailFacture />
               </RouteGuard>
             } />
             <Route path="/factures-revendeur/:id" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['revendeurs.factures']}>
                 <DetailFactureRevendeur />
               </RouteGuard>
             } />
 
+            {/* VENTES */}
             <Route path="/ventes" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['ventes.view']}>
                 <ListeVentes />
               </RouteGuard>
             } />
 
             {/* REVENDEURS */}
             <Route path="/dashboard-revendeurs" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.view']}>
                 <DashboardRevendeurs />
               </RouteGuard>
             } />
-            <Route path="/commandes-revendeur" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
-                <ListeCommandesRevendeur />
-              </RouteGuard>
-            } />
             <Route path="/stock-revendeurs" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.stock']}>
                 <ListeStockRevendeur />
               </RouteGuard>
             } />
+            
+            {/* ✅ Route pour l'historique - CORRECTE */}
             <Route path="/revendeurs/historique" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.view']}>
                 <HistoriqueRevendeur />
               </RouteGuard>
             } />
 
             {/* PRODUITS & STOCK */}
             <Route path="/products" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['products.view']}>
                 <ListeProduits />
               </RouteGuard>
             } />
-            
+
             {/* FINANCES */}
             <Route path="/decomptes" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <ListeDecomptes />
               </RouteGuard>
             } />
             <Route path="/decomptes/nouveau" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <NouveauDecompteWrapper />
               </RouteGuard>
             } />
             <Route path="/decomptes/:id" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <DetailDecompte />
               </RouteGuard>
             } />
             <Route path="/decomptes/:id/print" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <PrintRecuDecompte />
               </RouteGuard>
             } />
             <Route path="/reglements" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['finances.reglements']}>
                 <ListeReglements />
               </RouteGuard>
             } />
 
-            {/* 🔥 CAISSE */}
+            {/* CAISSE */}
             <Route path="/caisse" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['caisse.view']}>
                 <JournalCaisse />
               </RouteGuard>
             } />
             <Route path="/charges" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['caisse.charges']}>
                 <ChargesFonctionnement />
               </RouteGuard>
             } />
 
-            {/* 🔥 CRÉDITS */}
+            {/* CRÉDITS */}
             <Route path="/credits" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['finances.credits']}>
                 <ListeCredits />
               </RouteGuard>
             } />
-
-            {/* 🔥 REMBOURSEMENTS */}
             <Route path="/remboursements" element={
-              <RouteGuard roles={['admin', 'gestionnaire']}>
+              <RouteGuard requiredPermissions={['finances.remboursements']}>
                 <RemboursementsList />
               </RouteGuard>
             } />
 
             {/* PARAMÈTRES */}
             <Route path="/utilisateurs" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['admin.users']}>
                 <ListeUtilisateurs />
               </RouteGuard>
             } />
             <Route path="/parametres" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['admin.parametres']}>
                 <ParametresAtelier />
               </RouteGuard>
             } />
-
             <Route path="/diagnostic" element={
-              <RouteGuard roles={['admin']}>
+              <RouteGuard requiredPermissions={['admin.diagnostic']}>
                 <DiagnosticDB />
+              </RouteGuard>
+            } />
+            <Route path="/debug" element={
+              <RouteGuard requiredPermissions={['admin.diagnostic']}>
+                <DebugPanel />
+              </RouteGuard>
+            } />
+
+            {/* ✅ Route pour les commandes revendeur (ajoutée) */}
+            <Route path="/commandes-revendeur" element={
+              <RouteGuard requiredPermissions={['revendeurs.commandes']}>
+                <ListeCommandesRevendeur />
               </RouteGuard>
             } />
 
@@ -420,20 +487,43 @@ const queryClient = new QueryClient({
 function App() {
   const [dbReady, setDbReady] = useState(false);
   const [migrationRunning, setMigrationRunning] = useState(true);
+  const [showMigration, setShowMigration] = useState(false);
+  const [appReady, setAppReady] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   useEffect(() => {
     const setup = async () => {
       try {
         console.log('🚀 Démarrage de l\'application...');
-        
+
         // 🔥 Exécuter la migration complète avec le schéma
         await initDatabaseWithMigrations();
-        
+
+        // Vérifier si une migration est nécessaire
+        try {
+          const versionInfo = await DatabaseVersionManager.getCurrentVersion();
+          const currentVersion = DatabaseVersionManager.getCurrentVersionNumber();
+
+          console.log(`📊 Version DB: ${versionInfo.version} (dernière: ${currentVersion})`);
+
+          if (versionInfo.version < currentVersion) {
+            console.log('🔄 Migration nécessaire !');
+            setShowMigration(true);
+          } else {
+            console.log('✅ Base de données à jour');
+            setAppReady(true);
+          }
+        } catch (versionError) {
+          console.warn('⚠️ Impossible de vérifier la version, continuation...');
+          setAppReady(true);
+        }
+
         console.log('✅ Base de données initialisée avec succès');
         setDbReady(true);
       } catch (error: any) {
         const errorMsg = error?.message || 'Erreur inconnue';
         console.error('❌ Erreur DB fatale:', errorMsg);
+        setDbError(errorMsg);
         setDbReady(false);
       } finally {
         setMigrationRunning(false);
@@ -445,28 +535,64 @@ function App() {
   // Afficher un loader pendant la migration
   if (migrationRunning) {
     return (
-      <Center style={{ height: '100vh' }}>
-        <Stack align="center" gap="md">
-          <Loader size="xl" variant="dots" />
-          <Text size="lg" fw={600}>Initialisation de la base de données...</Text>
-          <Text size="sm" c="dimmed">Création des tables et migration en cours</Text>
-        </Stack>
-      </Center>
+      <MantineProvider>
+        <Center style={{ height: '100vh' }}>
+          <Stack align="center" gap="md">
+            <Loader size="xl" variant="dots" />
+            <Text size="lg" fw={600}>Initialisation de la base de données...</Text>
+            <Text size="sm" c="dimmed">Création des tables et migration en cours</Text>
+          </Stack>
+        </Center>
+      </MantineProvider>
     );
   }
 
-  if (!dbReady) {
+  // Afficher le gestionnaire de migration si nécessaire
+  if (showMigration) {
     return (
-      <Center style={{ height: '100vh' }}>
-        <Stack align="center" gap="md">
-          <Notification title="Erreur Base de données" color="red">
-            Impossible d'initialiser la base de données.
-            <Button onClick={() => window.location.reload()} size="xs" mt="md">
-              Réessayer
-            </Button>
-          </Notification>
-        </Stack>
-      </Center>
+      <MantineProvider>
+        <Notifications position="top-right" />
+        <MigrationManagerComponent
+          onComplete={() => {
+            setShowMigration(false);
+            setAppReady(true);
+            // Recharger la page pour appliquer les changements
+            setTimeout(() => {
+              window.location.reload();
+            }, 500);
+          }}
+        />
+      </MantineProvider>
+    );
+  }
+
+  // Erreur de base de données
+  if (!dbReady || dbError) {
+    return (
+      <MantineProvider>
+        <Center style={{ height: '100vh' }}>
+          <Stack align="center" gap="md">
+            <Notification title="Erreur Base de données" color="red">
+              {dbError || 'Impossible d\'initialiser la base de données.'}
+              <Button onClick={() => window.location.reload()} size="xs" mt="md">
+                Réessayer
+              </Button>
+            </Notification>
+          </Stack>
+        </Center>
+      </MantineProvider>
+    );
+  }
+
+  // L'application est prête
+  if (!appReady) {
+    return (
+      <MantineProvider>
+        <Center style={{ height: '100vh' }}>
+          <Loader size="xl" />
+          <Text mt="md" c="dimmed">Préparation de l'application...</Text>
+        </Center>
+      </MantineProvider>
     );
   }
 

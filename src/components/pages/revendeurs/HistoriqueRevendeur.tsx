@@ -1,4 +1,4 @@
-// src/pages/revendeurs/HistoriqueRevendeur.tsx
+// src/pages/revendeurs/HistoriqueRevendeur.tsx - Version corrigée avec tous les imports
 
 import { useState, useEffect } from "react";
 import {
@@ -23,7 +23,8 @@ import {
   Grid,
   ActionIcon,
   Tooltip,
-  ScrollArea
+  ScrollArea,
+  Divider
 } from "@mantine/core";
 import {
   IconHistory,
@@ -31,22 +32,25 @@ import {
   IconRefresh,
   IconPrinter,
   IconFilter,
-  IconDownload,
   IconCalendar,
   IconArrowUp,
   IconArrowDown,
   IconUsers,
   IconPackage,
   IconAlertCircle,
-  IconX
+  IconX,
+  IconFileSpreadsheet,
+  IconEye
 } from "@tabler/icons-react";
 
 import { notifications } from '@mantine/notifications';
-import { clientRepository } from "../../../database/repositories/clientRepository";
-import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
+
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { clientRepository } from "../../../database/repositories/clientRepository";
+import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
 
+// Interfaces
 interface MouvementRevendeur {
   idMouvementRevendeur: number;
   date_mouvement: string;
@@ -88,6 +92,8 @@ export default function HistoriqueRevendeur() {
   const [currentPage, setCurrentPage] = useState(1);
   const [printModalOpened, setPrintModalOpened] = useState(false);
   const [statistiques, setStatistiques] = useState<Statistiques | null>(null);
+  const [detailModalOpened, setDetailModalOpened] = useState(false);
+  const [selectedMouvement, setSelectedMouvement] = useState<MouvementRevendeur | null>(null);
 
   const itemsPerPage = 15;
 
@@ -250,7 +256,7 @@ export default function HistoriqueRevendeur() {
       ...rows.map(row => row.join(','))
     ].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     const clientName = clients.find(c => c.idClient.toString() === selected)?.NomComplet || 'revendeur';
@@ -263,6 +269,11 @@ export default function HistoriqueRevendeur() {
       message: 'Le fichier CSV a été téléchargé',
       color: 'green'
     });
+  };
+
+  const handleViewDetail = (mouvement: MouvementRevendeur) => {
+    setSelectedMouvement(mouvement);
+    setDetailModalOpened(true);
   };
 
   const totalPages = Math.ceil(filteredMouvements.length / itemsPerPage);
@@ -369,7 +380,7 @@ export default function HistoriqueRevendeur() {
       {/* Sélection du revendeur */}
       <Card withBorder radius="lg" shadow="sm" p="lg">
         <Grid align="flex-end">
-          <Grid.Col span={4}>
+          <Grid.Col span={{ base: 12, md: 6, lg: 4 }}>
             <Select
               label="Revendeur"
               placeholder="Sélectionner un revendeur"
@@ -397,11 +408,10 @@ export default function HistoriqueRevendeur() {
         </Grid>
       </Card>
 
-      {/* Filtres - TOUT SUR UNE SEULE LIGNE */}
+      {/* Filtres */}
       {selected && (
         <Card withBorder radius="lg" shadow="sm" p="md">
-          <Flex align="flex-end" gap="sm" wrap="nowrap">
-            {/* Recherche */}
+          <Flex align="flex-end" gap="sm" wrap="wrap">
             <TextInput
               placeholder="Rechercher..."
               leftSection={<IconSearch size={16} />}
@@ -411,8 +421,6 @@ export default function HistoriqueRevendeur() {
               style={{ flex: 2, minWidth: 120 }}
               label="Recherche"
             />
-
-            {/* Type */}
             <Select
               placeholder="Type"
               clearable
@@ -427,8 +435,6 @@ export default function HistoriqueRevendeur() {
               label="Type"
               leftSection={<IconFilter size={14} />}
             />
-
-            {/* Date début */}
             <TextInput
               type="date"
               placeholder="Du"
@@ -439,8 +445,6 @@ export default function HistoriqueRevendeur() {
               label="Du"
               leftSection={<IconCalendar size={14} />}
             />
-
-            {/* Date fin */}
             <TextInput
               type="date"
               placeholder="Au"
@@ -451,8 +455,6 @@ export default function HistoriqueRevendeur() {
               label="Au"
               leftSection={<IconCalendar size={14} />}
             />
-
-            {/* Actions */}
             <Group gap="xs" style={{ flex: '0 0 auto' }}>
               <Tooltip label="Réinitialiser">
                 <ActionIcon
@@ -473,7 +475,7 @@ export default function HistoriqueRevendeur() {
                   size={30}
                   style={{ marginTop: 18 }}
                 >
-                  <IconDownload size={16} />
+                  <IconFileSpreadsheet size={16} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Imprimer">
@@ -490,7 +492,6 @@ export default function HistoriqueRevendeur() {
             </Group>
           </Flex>
 
-          {/* Résultat du filtrage */}
           {filteredMouvements.length > 0 && (
             <Text size="xs" c="dimmed" mt="xs">
               {filteredMouvements.length} mouvement(s) trouvé(s)
@@ -549,6 +550,7 @@ export default function HistoriqueRevendeur() {
                     <Table.Th c="white" ta="right">Quantité</Table.Th>
                     <Table.Th c="white">Référence</Table.Th>
                     <Table.Th c="white">Notes</Table.Th>
+                    <Table.Th c="white" ta="center">Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -596,6 +598,18 @@ export default function HistoriqueRevendeur() {
                             {m.notes || '-'}
                           </Text>
                         </Table.Td>
+                        <Table.Td ta="center">
+                          <Tooltip label="Voir détails">
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              onClick={() => handleViewDetail(m)}
+                              size="sm"
+                            >
+                              <IconEye size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Table.Td>
                       </Table.Tr>
                     );
                   })}
@@ -616,6 +630,82 @@ export default function HistoriqueRevendeur() {
           </>
         )}
       </Card>
+
+      {/* Modal Détails */}
+      <Modal
+        opened={detailModalOpened}
+        onClose={() => setDetailModalOpened(false)}
+        title="Détails du mouvement"
+        size="md"
+        centered
+      >
+        {selectedMouvement && (
+          <Stack gap="md">
+            <SimpleGrid cols={2} spacing="md">
+              <div>
+                <Text size="xs" c="dimmed">Date</Text>
+                <Text fw={500}>{formatDate(selectedMouvement.date_mouvement)}</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Type</Text>
+                <Badge
+                  color={selectedMouvement.type_mouvement === "ENTREE" ? "green" : "red"}
+                  size="lg"
+                >
+                  {selectedMouvement.type_mouvement === "ENTREE" ? "📥 Entrée" : "📤 Sortie"}
+                </Badge>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Produit</Text>
+                <Text fw={500}>{selectedMouvement.designation}</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Quantité</Text>
+                <Text fw={700} c={selectedMouvement.type_mouvement === "ENTREE" ? "green" : "red"}>
+                  {selectedMouvement.type_mouvement === "ENTREE" ? "+" : "-"}
+                  {formatNombre(selectedMouvement.qte_mouvement)}
+                </Text>
+              </div>
+              {selectedMouvement.prix_unitaire && (
+                <div>
+                  <Text size="xs" c="dimmed">Prix unitaire</Text>
+                  <Text fw={500}>{formatNombre(selectedMouvement.prix_unitaire)} €</Text>
+                </div>
+              )}
+              {selectedMouvement.total && (
+                <div>
+                  <Text size="xs" c="dimmed">Total</Text>
+                  <Text fw={700}>{formatNombre(selectedMouvement.total)} €</Text>
+                </div>
+              )}
+              {selectedMouvement.code_commande && (
+                <div>
+                  <Text size="xs" c="dimmed">Commande</Text>
+                  <Badge color="blue">{selectedMouvement.code_commande}</Badge>
+                </div>
+              )}
+              {selectedMouvement.code_decompte && (
+                <div>
+                  <Text size="xs" c="dimmed">Décompte</Text>
+                  <Badge color="orange">{selectedMouvement.code_decompte}</Badge>
+                </div>
+              )}
+            </SimpleGrid>
+            {selectedMouvement.notes && (
+              <>
+                <Divider />
+                <div>
+                  <Text size="xs" c="dimmed">Notes</Text>
+                  <Text>{selectedMouvement.notes}</Text>
+                </div>
+              </>
+            )}
+            <Button onClick={() => setDetailModalOpened(false)} mt="md">
+              Fermer
+            </Button>
+          </Stack>
+        )}
+      </Modal>
 
       {/* Modal d'impression */}
       <Modal

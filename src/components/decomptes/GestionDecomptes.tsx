@@ -3,16 +3,17 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Stack, Card, Title, Text, Group, Button, Paper,
-  ThemeIcon, SimpleGrid, Flex, Tabs, Badge, Tooltip, Loader, Center
+  ThemeIcon, SimpleGrid, Flex, Tabs, Badge, Tooltip, Loader, Center,
+  Alert
 } from '@mantine/core';
 import {
   IconReceipt, IconTruck, IconPackage, 
   IconFileInvoice, IconPlus, IconRefresh, IconArrowBackUp,
-  IconBuildingStore, IconList
+  IconBuildingStore, IconList, IconAlertCircle
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import { ListeDecomptes } from './ListeDecomptes';
+import ListeDecomptes from './ListeDecomptes';
 import { ListeCommandesRevendeur } from '../commandes/ListeCommandesRevendeur';
 import ListeStockRevendeur from '../pages/revendeurs/ListeStockRevendeur';
 
@@ -20,6 +21,7 @@ export const GestionDecomptes: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string | null>('decomptes');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({
     decomptes: 0,
     commandes: 0,
@@ -29,31 +31,53 @@ export const GestionDecomptes: React.FC = () => {
   // Charger les statistiques
   const chargerStats = async () => {
     setLoading(true);
+    setError(null);
     try {
       const db = await getDb();
       
+      // Vérifier si les tables existent
+      const tables = await db.select<{ name: string }[]>(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name IN ('decomptes', 'commandes', 'stock_revendeur')
+      `);
+      
+      const tableNames = tables.map(t => t.name);
+      
       // Nombre de décomptes
-      const decomptes = await db.select<{ count: number }[]>(
-        `SELECT COUNT(*) as count FROM decomptes`
-      );
+      let decomptesCount = 0;
+      if (tableNames.includes('decomptes')) {
+        const decomptes = await db.select<{ count: number }[]>(
+          `SELECT COUNT(*) as count FROM decomptes`
+        );
+        decomptesCount = decomptes[0]?.count || 0;
+      }
       
       // Nombre de commandes revendeurs
-      const commandes = await db.select<{ count: number }[]>(
-        `SELECT COUNT(*) as count FROM commandes WHERE type_commande = 'REVENDEUR'`
-      );
+      let commandesCount = 0;
+      if (tableNames.includes('commandes')) {
+        const commandes = await db.select<{ count: number }[]>(
+          `SELECT COUNT(*) as count FROM commandes WHERE type_commande = 'REVENDEUR'`
+        );
+        commandesCount = commandes[0]?.count || 0;
+      }
       
       // Nombre de produits en stock revendeur
-      const stocks = await db.select<{ count: number }[]>(
-        `SELECT COUNT(*) as count FROM stock_revendeur WHERE qte_stock > 0`
-      );
+      let stocksCount = 0;
+      if (tableNames.includes('stock_revendeur')) {
+        const stocks = await db.select<{ count: number }[]>(
+          `SELECT COUNT(*) as count FROM stock_revendeur WHERE qte_stock > 0`
+        );
+        stocksCount = stocks[0]?.count || 0;
+      }
       
       setStats({
-        decomptes: decomptes[0]?.count || 0,
-        commandes: commandes[0]?.count || 0,
-        stocks: stocks[0]?.count || 0
+        decomptes: decomptesCount,
+        commandes: commandesCount,
+        stocks: stocksCount
       });
     } catch (error) {
       console.error('Erreur chargement stats:', error);
+      setError('Impossible de charger les statistiques');
       notifications.show({
         title: 'Erreur',
         message: 'Impossible de charger les statistiques',
@@ -72,7 +96,32 @@ export const GestionDecomptes: React.FC = () => {
     return (
       <Center py={100}>
         <Loader size="xl" />
-        <Text ml="md">Chargement des statistiques...</Text>
+        <Text ml="md" c="dimmed">Chargement des statistiques...</Text>
+      </Center>
+    );
+  }
+
+  if (error) {
+    return (
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert 
+            icon={<IconAlertCircle size={16} />} 
+            title="Erreur" 
+            color="red"
+            withCloseButton
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+          <Button 
+            leftSection={<IconRefresh size={16} />}
+            onClick={chargerStats}
+            variant="light"
+          >
+            Réessayer
+          </Button>
+        </Stack>
       </Center>
     );
   }
@@ -198,7 +247,7 @@ export const GestionDecomptes: React.FC = () => {
 
       {/* Boutons d'action rapide */}
       <Paper p="md" withBorder radius="lg" shadow="sm">
-        <Group justify="center" gap="md">
+        <Group justify="center" gap="md" wrap="wrap">
           <Tooltip label="Nouveau décompte">
             <Button
               variant="filled"
@@ -241,6 +290,17 @@ export const GestionDecomptes: React.FC = () => {
               size="sm"
             >
               Stocks Revendeurs
+            </Button>
+          </Tooltip>
+          <Tooltip label="Historique revendeurs">
+            <Button
+              variant="light"
+              color="violet"
+              leftSection={<IconList size={18} />}
+              onClick={() => navigate('/revendeurs/historique')}
+              size="sm"
+            >
+              Historique
             </Button>
           </Tooltip>
         </Group>

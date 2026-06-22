@@ -2,10 +2,10 @@
 import React, { useMemo, useRef } from 'react';
 import {
   Paper, Text, Table, Group, Box,
-  Button, Image, Divider, SimpleGrid, Badge, Flex
+  Button, Image, Divider, SimpleGrid, Badge, Flex, Loader, Center
 } from '@mantine/core';
 import {
-  IconPrinter, IconDownload, IconPercentage
+  IconPrinter, IconDownload, IconCash
 } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
@@ -15,7 +15,7 @@ interface RecuDecompteProps {
   date: string;
   client: string;
   details: any[];
-  factureOriginale?: any; // Pour récupérer les données originales
+  factureOriginale?: any;
 }
 
 interface DetailCalcul {
@@ -41,15 +41,16 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
 
-  // Récupérer le taux de commission de la facture originale ou du détail
+  // Récupérer le taux de commission
   const tauxCommissionUnique = useMemo(() => {
-    // Priorité: facture originale > premier détail > 60%
+    // Priorité: facture originale > détails > 60%
     const taux = factureOriginale?.taux_commission_revendeur 
+      || factureOriginale?.taux_commission
       || factureOriginale?.commission_pourcentage
-      || (details && details.length > 0 ? details[0]?.commissionPourcentage : null)
+      || (details && details.length > 0 ? details[0]?.commission_pourcentage || details[0]?.commissionPourcentage : null)
       || 60;
     
-    return Number(taux);
+    return Number(taux) || 60;
   }, [factureOriginale, details]);
 
   const { detailsWithCalculs, totalVente, totalCommission, totalBenefice } = useMemo(() => {
@@ -59,9 +60,10 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
     let totalBeneficeValue = 0;
 
     const detailsWithCalculsValue: DetailCalcul[] = safeDetails.map((detail: any, idx: number) => {
-      const qte = Number(detail.qteVendue || detail.quantite || detail.qte_commande || 1);
-      const prixAchat = Number(detail.prixAchat || detail.prix_achat_base || detail.prix_achat || 0);
-      const prixVente = Number(detail.prixVente || detail.prix_unitaire_vente || detail.prix_vente || 0);
+      // Extraction des données avec gestion des null/undefined
+      const qte = Number(detail.qte_decompte || detail.qteVendue || detail.quantite || detail.qte_commande || 1);
+      const prixAchat = Number(detail.prix_achat || detail.prixAchat || detail.prix_achat_base || 0);
+      const prixVente = Number(detail.prix_vente || detail.prixVente || detail.prix_unitaire_vente || 0);
       const unite = detail.unite_base || detail.unite_mesure || detail.unite || 'pièce';
       const categorie = detail.categorie || '-';
       const designation = detail.designation || detail.produit_designation || 'Produit';
@@ -114,12 +116,13 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '-';
-      return d.toLocaleDateString('fr-FR');
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     } catch {
       return '-';
     }
   };
 
+  // Valeurs par défaut si l'atelier n'est pas chargé
   const atelier = atelierConfig || {
     nom_atelier: 'MON ATELIER',
     telephone: '',
@@ -131,9 +134,10 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
 
   if (atelierLoading) {
     return (
-      <Paper p="xl" ta="center">
-        <Text>Chargement...</Text>
-      </Paper>
+      <Center py={50}>
+        <Loader size="sm" />
+        <Text ml="sm" size="sm">Chargement...</Text>
+      </Center>
     );
   }
 
@@ -162,7 +166,7 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
               )}
               <Box>
                 <Text fw={700} size="xs">{atelier.nom_atelier}</Text>
-                <Text size="xs" c="dimmed">{atelier.telephone}</Text>
+                {atelier.telephone && <Text size="xs" c="dimmed">{atelier.telephone}</Text>}
               </Box>
             </Flex>
             <Box style={{ textAlign: 'right' }}>
@@ -178,106 +182,116 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
 
           {/* Infos client */}
           <Flex justify="space-between" wrap="wrap" gap="xs" mb="xs" style={{ fontSize: '14px' }}>
-            <Text><Text span fw={600}>Revendeur:</Text> {client}</Text>
+            <Text><Text span fw={600}>Revendeur:</Text> {client || 'Non spécifié'}</Text>
             <Text><Text span fw={600}>Date décompte:</Text> {formatDate(date)}</Text>
           </Flex>
 
           <Divider my={4} />
 
           {/* Tableau */}
-          <Table withColumnBorders style={{ fontSize: '14px', marginBottom: 12 }}>
-            <Table.Thead>
-              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                <Table.Th c="white" ta="center" w={25}>#</Table.Th>
-                <Table.Th c="white">Désignation</Table.Th>
-                <Table.Th c="white">Catégorie</Table.Th>
-                <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
-                <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
-                <Table.Th c="white" ta="right" w={90}>P.A (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={90}>P.V (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={100}>Bénéf (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={100}>Total (F)</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {detailsWithCalculs.map((detail) => (
-                <Table.Tr key={detail.numero}>
-                  <Table.Td ta="center">{detail.numero}</Table.Td>
-                  <Table.Td>
-                    <Text size="xs" fw={500}>{detail.designation}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">{detail.categorie}</Text>
-                  </Table.Td>
-                  <Table.Td ta="center">
-                    <Badge size="xs" variant="light" color="gray" style={{ fontSize: '12px' }}>
-                      {detail.unite}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td ta="center">{detail.qte}</Table.Td>
-                  <Table.Td ta="right">{formatMontant(detail.prix_achat)}</Table.Td>
-                  <Table.Td ta="right" fw={600}>{formatMontant(detail.prix_vente)}</Table.Td>
-                  <Table.Td ta="right" c="green.7">{formatMontant(detail.benefice_ligne)}</Table.Td>
-                  <Table.Td ta="right" fw={700}>{formatMontant(detail.total_vente)}</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+          {detailsWithCalculs.length === 0 ? (
+            <Text ta="center" c="dimmed" py="xl" size="sm">Aucun détail disponible</Text>
+          ) : (
+            <>
+              <Table withColumnBorders style={{ fontSize: '14px', marginBottom: 12 }}>
+                <Table.Thead>
+                  <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                    <Table.Th c="white" ta="center" w={25}>#</Table.Th>
+                    <Table.Th c="white">Désignation</Table.Th>
+                    <Table.Th c="white">Catégorie</Table.Th>
+                    <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
+                    <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
+                    <Table.Th c="white" ta="right" w={90}>P.A (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={90}>P.V (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={100}>Bénéf (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={100}>Total (F)</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {detailsWithCalculs.map((detail) => (
+                    <Table.Tr key={detail.numero}>
+                      <Table.Td ta="center">{detail.numero}</Table.Td>
+                      <Table.Td>
+                        <Text size="xs" fw={500}>{detail.designation}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">{detail.categorie}</Text>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge size="xs" variant="light" color="gray" style={{ fontSize: '12px' }}>
+                          {detail.unite}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">{detail.qte}</Table.Td>
+                      <Table.Td ta="right">{formatMontant(detail.prix_achat)}</Table.Td>
+                      <Table.Td ta="right" fw={600}>{formatMontant(detail.prix_vente)}</Table.Td>
+                      <Table.Td ta="right" c={detail.benefice_ligne >= 0 ? "green.7" : "red.7"}>
+                        {formatMontant(detail.benefice_ligne)}
+                      </Table.Td>
+                      <Table.Td ta="right" fw={700}>{formatMontant(detail.total_vente)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
 
-          <Divider my={4} />
+              <Divider my={4} />
 
-          {/* Section bas compacte */}
-          <SimpleGrid cols={3} spacing={6} mb={6}>
-            <Paper p="xs" withBorder>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Total Ventes:</Text>
-                <Text size="xs" fw={700}>{formatMontant(totalVente)} FCFA</Text>
+              {/* Section bas compacte */}
+              <SimpleGrid cols={3} spacing={6} mb={6}>
+                <Paper p="xs" withBorder>
+                  <Flex justify="space-between" gap={8}>
+                    <Text size="xs" fw={600}>Total Ventes:</Text>
+                    <Text size="xs" fw={700} c="blue">{formatMontant(totalVente)} FCFA</Text>
+                  </Flex>
+                </Paper>
+                <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9' }}>
+                  <Flex justify="space-between" gap={8}>
+                    <Text size="xs" fw={600}>Bénéfice Total:</Text>
+                    <Text size="xs" fw={600} c="green">{formatMontant(totalBenefice)} FCFA</Text>
+                  </Flex>
+                </Paper>
+                <Paper p="xs" withBorder style={{ backgroundColor: '#fff3e0' }}>
+                  <Flex justify="space-between" gap={8}>
+                    <Text size="xs" fw={600}>Commission ({tauxCommissionUnique}%):</Text>
+                    <Text size="xs" fw={600} c="orange">{formatMontant(totalCommission)} FCFA</Text>
+                  </Flex>
+                </Paper>
+              </SimpleGrid>
+
+              {/* Net à reverser */}
+              <Paper p="xs" style={{ backgroundColor: '#e8f5e9', borderRadius: '4px', border: '1px solid #c8e6c9' }}>
+                <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+                  <Group gap="xs">
+                    <IconCash size={16} color="#2e7d32" />
+                    <Text fw={700} size="sm" c="green.8">NET À REVERSER :</Text>
+                  </Group>
+                  <Text fw={800} size="lg" c="green.8">{formatMontant(netAReverser)} FCFA</Text>
+                </Flex>
+              </Paper>
+
+              {/* Montant en lettres */}
+              <Paper p="xs" withBorder style={{ backgroundColor: '#f8f9fa', marginTop: 8 }}>
+                <Text size="xs" fw={500} ta="center">
+                  Arrêté le présent reçu à la somme de : {formatMontant(netAReverser)} Francs CFA
+                </Text>
+              </Paper>
+
+              {/* Signature */}
+              <Flex justify="flex-end" mt={16}>
+                <Box>
+                  <Text fw={600} size="xs">Le responsable</Text>
+                  <Text size="xs" c="dimmed" mt={12}>Signature et cachet</Text>
+                </Box>
               </Flex>
-            </Paper>
-            <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9' }}>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Bénéfice Total:</Text>
-                <Text size="xs" fw={600} c="green">{formatMontant(totalBenefice)} FCFA</Text>
-              </Flex>
-            </Paper>
-            <Paper p="xs" withBorder style={{ backgroundColor: '#fff3e0' }}>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Commission ({tauxCommissionUnique}%):</Text>
-                <Text size="xs" fw={600} c="orange">{formatMontant(totalCommission)} FCFA</Text>
-              </Flex>
-            </Paper>
-          </SimpleGrid>
 
-          {/* Net à reverser */}
-          <Paper p="xs" style={{ backgroundColor: '#e8f5e9', borderRadius: '4px', border: '1px solid #c8e6c9' }}>
-            <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
-              <Group gap="xs">
-                <IconPercentage size={16} color="#2e7d32" />
-                <Text fw={700} size="sm">NET À REVERSER :</Text>
-              </Group>
-              <Text fw={800} size="lg" c="green">{formatMontant(netAReverser)} FCFA</Text>
-            </Flex>
-          </Paper>
-
-          {/* Montant en lettres */}
-          <Paper p="xs" withBorder style={{ backgroundColor: '#f8f9fa', marginTop: 8 }}>
-            <Text size="xs" fw={500} ta="center">
-              Arrêté le présent reçu à la somme de : {formatMontant(netAReverser)} Francs CFA
-            </Text>
-          </Paper>
-
-          {/* Signature */}
-          <Flex justify="flex-end" mt={16}>
-            <Box>
-              <Text fw={600} size="xs">Le responsable</Text>
-              <Text size="xs" c="dimmed" mt={12}>Signature et cachet</Text>
-            </Box>
-          </Flex>
-
-          {/* Message */}
-          <Text size="xs" ta="center" fs="italic" c="dimmed" mt={12}>
-            {atelier.message_facture}
-          </Text>
+              {/* Message */}
+              {atelier.message_facture && (
+                <Text size="xs" ta="center" fs="italic" c="dimmed" mt={12}>
+                  {atelier.message_facture}
+                </Text>
+              )}
+            </>
+          )}
         </Paper>
       </div>
 
@@ -285,6 +299,14 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
         @media print {
           .no-print {
             display: none !important;
+          }
+          body {
+            padding: 0;
+            margin: 0;
+          }
+          .mantine-Paper-root {
+            box-shadow: none !important;
+            border: none !important;
           }
         }
       `}</style>

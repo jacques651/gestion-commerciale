@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS stock_revendeur (
 );
 
 -- =====================================================
--- 6. DÉCOMPTES REVENDEURS
+-- 6. DÉCOMPTES REVENDEURS (version corrigée)
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS decomptes (
@@ -263,8 +263,13 @@ CREATE TABLE IF NOT EXISTS decomptes (
     montant_benefice REAL DEFAULT 0,
     montant_commission REAL DEFAULT 0,
     montant_net REAL DEFAULT 0,
-    statut TEXT DEFAULT 'EN_ATTENTE',
+    statut TEXT DEFAULT 'brouillon',
     observation TEXT,
+    periode_debut TEXT,
+    periode_fin TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (idClient) REFERENCES clients(idClient)
 );
 
@@ -276,9 +281,19 @@ CREATE TABLE IF NOT EXISTS decompte_details (
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
     commission_pourcentage REAL DEFAULT 0,
+    designation TEXT,
+    total REAL DEFAULT 0,
     FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
     FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
+
+-- Index pour les décomptes
+CREATE INDEX IF NOT EXISTS idx_decomptes_client ON decomptes(idClient);
+CREATE INDEX IF NOT EXISTS idx_decomptes_date ON decomptes(date_decompte);
+CREATE INDEX IF NOT EXISTS idx_decomptes_statut ON decomptes(statut);
+CREATE INDEX IF NOT EXISTS idx_decomptes_code ON decomptes(code_decompte);
+CREATE INDEX IF NOT EXISTS idx_decompte_details_decompte ON decompte_details(idDecompte);
+CREATE INDEX IF NOT EXISTS idx_decompte_details_produit ON decompte_details(idProduit);
 
 -- =====================================================
 -- 7. VENTES
@@ -447,6 +462,7 @@ CREATE TABLE IF NOT EXISTS factures_revendeur (
     montant_ttc REAL DEFAULT 0,
     commission REAL DEFAULT 0,
     statut TEXT DEFAULT 'EN_ATTENTE',
+    taux_commission REAL DEFAULT 60,  -- ✅ Ajout de la colonne
     FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
     FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
 );

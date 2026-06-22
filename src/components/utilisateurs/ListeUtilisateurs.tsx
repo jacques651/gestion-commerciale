@@ -4,12 +4,16 @@ import {
   Stack, Card, Title, Text, Group, Button, Table, Badge, ActionIcon,
   Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, TextInput, Select, PasswordInput, Paper, Flex, Avatar,
-  Loader, Alert
+  Loader, Alert, Checkbox, ScrollArea, Grid, Chip
 } from "@mantine/core";
 import {
   IconUsers, IconPlus, IconEdit, IconTrash, IconSearch, IconInfoCircle,
   IconUserShield, IconUserCheck, IconUser, IconBuildingStore, IconCash,
-  IconRefresh, IconX, IconAlertCircle, IconLock, IconMail
+  IconRefresh, IconX, IconAlertCircle, IconLock, IconMail,
+  IconDashboard, IconPackage, IconShoppingCart, IconFileInvoice,
+  IconTruck, IconReceipt, IconCreditCard, IconSettings, IconList,
+  IconCheck, IconChevronDown, IconChevronRight,
+  IconShieldCheck
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import bcrypt from "bcryptjs";
@@ -18,12 +22,316 @@ import { notifications } from "@mantine/notifications";
 interface Utilisateur {
   id: number;
   nom: string;
-  email: string; // email sert de login
+  email: string;
+  login: string;
   mot_de_passe: string;
   role: string;
   telephone: string;
+  permissions: string;
   created_at: string;
 }
+
+interface Permission {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+  category: string;
+  defaultRoles: string[];
+}
+
+// =====================================================
+// DÉFINITION DES PERMISSIONS
+// =====================================================
+
+const PERMISSIONS: Permission[] = [
+  // Dashboard
+  {
+    id: 'dashboard.view',
+    label: 'Voir le tableau de bord',
+    icon: <IconDashboard size={16} />,
+    description: 'Accès au tableau de bord principal',
+    category: 'Tableau de bord',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial', 'caissier']
+  },
+  // Produits
+  {
+    id: 'products.view',
+    label: 'Voir les produits',
+    icon: <IconPackage size={16} />,
+    description: 'Consulter la liste des produits',
+    category: 'Produits',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial', 'caissier']
+  },
+  {
+    id: 'products.create',
+    label: 'Créer des produits',
+    icon: <IconPlus size={16} />,
+    description: 'Ajouter de nouveaux produits',
+    category: 'Produits',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'products.edit',
+    label: 'Modifier les produits',
+    icon: <IconEdit size={16} />,
+    description: 'Modifier les informations des produits',
+    category: 'Produits',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'products.delete',
+    label: 'Supprimer des produits',
+    icon: <IconTrash size={16} />,
+    description: 'Supprimer des produits de la base',
+    category: 'Produits',
+    defaultRoles: ['admin']
+  },
+  // Clients
+  {
+    id: 'clients.view',
+    label: 'Voir les clients',
+    icon: <IconUsers size={16} />,
+    description: 'Consulter la liste des clients',
+    category: 'Clients',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'clients.create',
+    label: 'Créer des clients',
+    icon: <IconPlus size={16} />,
+    description: 'Ajouter de nouveaux clients',
+    category: 'Clients',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'clients.edit',
+    label: 'Modifier les clients',
+    icon: <IconEdit size={16} />,
+    description: 'Modifier les informations des clients',
+    category: 'Clients',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'clients.delete',
+    label: 'Supprimer des clients',
+    icon: <IconTrash size={16} />,
+    description: 'Supprimer des clients de la base',
+    category: 'Clients',
+    defaultRoles: ['admin']
+  },
+  // Commandes
+  {
+    id: 'commandes.view',
+    label: 'Voir les commandes',
+    icon: <IconShoppingCart size={16} />,
+    description: 'Consulter la liste des commandes',
+    category: 'Commandes',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'commandes.create',
+    label: 'Créer des commandes',
+    icon: <IconPlus size={16} />,
+    description: 'Créer de nouvelles commandes',
+    category: 'Commandes',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'commandes.edit',
+    label: 'Modifier les commandes',
+    icon: <IconEdit size={16} />,
+    description: 'Modifier les commandes existantes',
+    category: 'Commandes',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'commandes.delete',
+    label: 'Supprimer des commandes',
+    icon: <IconTrash size={16} />,
+    description: 'Supprimer des commandes',
+    category: 'Commandes',
+    defaultRoles: ['admin']
+  },
+  {
+    id: 'commandes.validate',
+    label: 'Valider les commandes',
+    icon: <IconShieldCheck size={16} />,
+    description: 'Valider et confirmer les commandes',
+    category: 'Commandes',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  // Factures
+  {
+    id: 'factures.view',
+    label: 'Voir les factures',
+    icon: <IconFileInvoice size={16} />,
+    description: 'Consulter la liste des factures',
+    category: 'Factures',
+    defaultRoles: ['admin', 'gestionnaire', 'commercial']
+  },
+  {
+    id: 'factures.create',
+    label: 'Créer des factures',
+    icon: <IconPlus size={16} />,
+    description: 'Générer des factures',
+    category: 'Factures',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'factures.delete',
+    label: 'Supprimer des factures',
+    icon: <IconTrash size={16} />,
+    description: 'Supprimer des factures',
+    category: 'Factures',
+    defaultRoles: ['admin']
+  },
+  // Ventes
+  {
+    id: 'ventes.view',
+    label: 'Voir les ventes',
+    icon: <IconReceipt size={16} />,
+    description: 'Consulter la liste des ventes',
+    category: 'Ventes',
+    defaultRoles: ['admin', 'gestionnaire', 'caissier']
+  },
+  {
+    id: 'ventes.create',
+    label: 'Créer des ventes',
+    icon: <IconPlus size={16} />,
+    description: 'Enregistrer de nouvelles ventes',
+    category: 'Ventes',
+    defaultRoles: ['admin', 'gestionnaire', 'caissier']
+  },
+  {
+    id: 'ventes.delete',
+    label: 'Supprimer des ventes',
+    icon: <IconTrash size={16} />,
+    description: 'Supprimer des ventes',
+    category: 'Ventes',
+    defaultRoles: ['admin']
+  },
+  // Revendeurs
+  {
+    id: 'revendeurs.view',
+    label: 'Voir les revendeurs',
+    icon: <IconTruck size={16} />,
+    description: 'Consulter les informations des revendeurs',
+    category: 'Revendeurs',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'revendeurs.commandes',
+    label: 'Gérer les commandes revendeurs',
+    icon: <IconShoppingCart size={16} />,
+    description: 'Gérer les commandes des revendeurs',
+    category: 'Revendeurs',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'revendeurs.factures',
+    label: 'Gérer les factures revendeurs',
+    icon: <IconFileInvoice size={16} />,
+    description: 'Gérer les factures des revendeurs',
+    category: 'Revendeurs',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'revendeurs.stock',
+    label: 'Gérer le stock revendeurs',
+    icon: <IconPackage size={16} />,
+    description: 'Gérer le stock des revendeurs',
+    category: 'Revendeurs',
+    defaultRoles: ['admin']
+  },
+  {
+    id: 'revendeurs.decomptes',
+    label: 'Gérer les décomptes',
+    icon: <IconReceipt size={16} />,
+    description: 'Gérer les décomptes des revendeurs',
+    category: 'Revendeurs',
+    defaultRoles: ['admin']
+  },
+  // Caisse
+  {
+    id: 'caisse.view',
+    label: 'Voir le journal de caisse',
+    icon: <IconCash size={16} />,
+    description: 'Consulter le journal de caisse',
+    category: 'Caisse',
+    defaultRoles: ['admin', 'gestionnaire', 'caissier']
+  },
+  {
+    id: 'caisse.charges',
+    label: 'Gérer les charges',
+    icon: <IconCreditCard size={16} />,
+    description: 'Gérer les charges de fonctionnement',
+    category: 'Caisse',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  // Finances
+  {
+    id: 'finances.reglements',
+    label: 'Gérer les règlements',
+    icon: <IconReceipt size={16} />,
+    description: 'Gérer les règlements des factures',
+    category: 'Finances',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'finances.credits',
+    label: 'Gérer les crédits',
+    icon: <IconCreditCard size={16} />,
+    description: 'Gérer les crédits clients et fournisseurs',
+    category: 'Finances',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  {
+    id: 'finances.remboursements',
+    label: 'Gérer les remboursements',
+    icon: <IconCash size={16} />,
+    description: 'Gérer les remboursements de crédits',
+    category: 'Finances',
+    defaultRoles: ['admin', 'gestionnaire']
+  },
+  // Administration
+  {
+    id: 'admin.users',
+    label: 'Gérer les utilisateurs',
+    icon: <IconUserShield size={16} />,
+    description: 'Gérer les utilisateurs et leurs droits',
+    category: 'Administration',
+    defaultRoles: ['admin']
+  },
+  {
+    id: 'admin.parametres',
+    label: 'Gérer les paramètres',
+    icon: <IconSettings size={16} />,
+    description: 'Configurer les paramètres de l\'application',
+    category: 'Administration',
+    defaultRoles: ['admin']
+  },
+  {
+    id: 'admin.config',
+    label: 'Gérer la configuration',
+    icon: <IconSettings size={16} />,
+    description: 'Configurer l\'application',
+    category: 'Administration',
+    defaultRoles: ['admin']
+  },
+  {
+    id: 'admin.diagnostic',
+    label: 'Accéder au diagnostic',
+    icon: <IconList size={16} />,
+    description: 'Accéder aux outils de diagnostic',
+    category: 'Administration',
+    defaultRoles: ['admin']
+  },
+];
+
+// =====================================================
+// COMPOSANT PRINCIPAL
+// =====================================================
 
 const ListeUtilisateurs: React.FC = () => {
   const [utilisateurs, setUtilisateurs] = useState<Utilisateur[]>([]);
@@ -35,27 +343,69 @@ const ListeUtilisateurs: React.FC = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<Utilisateur | null>(null);
   const [editing, setEditing] = useState<Utilisateur | null>(null);
-  const [formData, setFormData] = useState({
-    nom: "",
-    email: "",
-    login: "",
-    password: "",
-    role: "commercial",
-    telephone: ""
-  });
   const [saving, setSaving] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['Toutes']));
+  const [selectAll, setSelectAll] = useState(true);
+  
+  const [formData, setFormData] = useState({
+    nom: "",
+    login: "",
+    password: "",
+    role: "admin",
+    telephone: "",
+    permissions: {} as Record<string, boolean>
+  });
+
   const itemsPerPage = 10;
+
+  // Initialiser toutes les permissions à true par défaut
+  useEffect(() => {
+    if (modalOpen && !editing) {
+      const allPermissions: Record<string, boolean> = {};
+      PERMISSIONS.forEach(p => { allPermissions[p.id] = true; });
+      setFormData(prev => ({ ...prev, permissions: allPermissions }));
+      setSelectAll(true);
+    }
+  }, [modalOpen, editing]);
+
+  // Charger les permissions d'un utilisateur existant
+  useEffect(() => {
+    if (editing && modalOpen) {
+      try {
+        const perms = editing.permissions ? JSON.parse(editing.permissions) : {};
+        const allPermissions: Record<string, boolean> = {};
+        PERMISSIONS.forEach(p => {
+          allPermissions[p.id] = perms[p.id] !== undefined ? perms[p.id] : true;
+        });
+        setFormData(prev => ({ ...prev, permissions: allPermissions }));
+        const allChecked = Object.values(allPermissions).every(v => v === true);
+        setSelectAll(allChecked);
+      } catch (e) {
+        // En cas d'erreur, tout cocher
+        const allPermissions: Record<string, boolean> = {};
+        PERMISSIONS.forEach(p => { allPermissions[p.id] = true; });
+        setFormData(prev => ({ ...prev, permissions: allPermissions }));
+        setSelectAll(true);
+      }
+    }
+  }, [editing, modalOpen]);
 
   const chargerUtilisateurs = async () => {
     setLoading(true);
     try {
       const db = await getDb();
-      const result = await db.select<Utilisateur[]>(`
-        SELECT id, nom, email, mot_de_passe, role, telephone, created_at 
-        FROM users 
-        ORDER BY nom
-      `);
+      // Vérifier si la colonne permissions existe
+      const tableInfo = await db.select<any[]>(`PRAGMA table_info(users)`);
+      const hasPermissionsCol = tableInfo.some(col => col.name === 'permissions');
+      
+      let query = 'SELECT id, nom, email, mot_de_passe, role, telephone, created_at';
+      if (hasPermissionsCol) {
+        query += ', permissions';
+      }
+      query += ' FROM users ORDER BY nom';
+      
+      const result = await db.select<Utilisateur[]>(query);
       setUtilisateurs(result || []);
     } catch (error) {
       console.error("Erreur chargement:", error);
@@ -65,7 +415,26 @@ const ListeUtilisateurs: React.FC = () => {
     }
   };
 
-  useEffect(() => { chargerUtilisateurs(); }, []);
+  // Ajouter la colonne permissions si elle n'existe pas
+  const ensurePermissionsColumn = async () => {
+    try {
+      const db = await getDb();
+      const tableInfo = await db.select<any[]>(`PRAGMA table_info(users)`);
+      const hasPermissionsCol = tableInfo.some(col => col.name === 'permissions');
+      
+      if (!hasPermissionsCol) {
+        await db.execute(`ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'`);
+        console.log('✅ Colonne permissions ajoutée à la table users');
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'ajout de la colonne permissions:', error);
+    }
+  };
+
+  useEffect(() => {
+    ensurePermissionsColumn();
+    chargerUtilisateurs();
+  }, []);
 
   const handleSave = async () => {
     if (!formData.nom.trim() || !formData.login.trim()) {
@@ -96,35 +465,43 @@ const ListeUtilisateurs: React.FC = () => {
         return;
       }
 
+      const permissionsJson = JSON.stringify(formData.permissions);
+
       if (editing) {
         if (formData.password) {
-          // Si un nouveau mot de passe est fourni, le hasher
           const hash = await bcrypt.hash(formData.password, 10);
           await db.execute(`
             UPDATE users 
-            SET nom=?, email=?, mot_de_passe=?, role=?, telephone=? 
+            SET nom=?, email=?, mot_de_passe=?, role=?, telephone=?, permissions=? 
             WHERE id=?
-          `, [formData.nom, formData.login, hash, formData.role, formData.telephone, editing.id]);
+          `, [formData.nom, formData.login, hash, formData.role, formData.telephone, permissionsJson, editing.id]);
         } else {
-          // Garder l'ancien mot de passe
           await db.execute(`
             UPDATE users 
-            SET nom=?, email=?, role=?, telephone=? 
+            SET nom=?, email=?, role=?, telephone=?, permissions=? 
             WHERE id=?
-          `, [formData.nom, formData.login, formData.role, formData.telephone, editing.id]);
+          `, [formData.nom, formData.login, formData.role, formData.telephone, permissionsJson, editing.id]);
         }
         notifications.show({ title: 'Succès', message: 'Utilisateur modifié', color: 'green' });
       } else {
         const hash = await bcrypt.hash(formData.password, 10);
         await db.execute(`
-          INSERT INTO users (nom, email, mot_de_passe, role, telephone) 
-          VALUES (?, ?, ?, ?, ?)
-        `, [formData.nom, formData.login, hash, formData.role, formData.telephone]);
+          INSERT INTO users (nom, email, mot_de_passe, role, telephone, permissions) 
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [formData.nom, formData.login, hash, formData.role, formData.telephone, permissionsJson]);
         notifications.show({ title: 'Succès', message: 'Utilisateur créé', color: 'green' });
       }
+      
       setModalOpen(false);
       setEditing(null);
-      setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
+      setFormData({ 
+        nom: "", 
+        login: "", 
+        password: "", 
+        role: "admin", 
+        telephone: "",
+        permissions: {}
+      });
       chargerUtilisateurs();
     } catch (err) {
       console.error(err);
@@ -151,6 +528,59 @@ const ListeUtilisateurs: React.FC = () => {
     } catch (err) {
       notifications.show({ title: 'Erreur', message: "Erreur lors de la suppression", color: 'red' });
     }
+  };
+
+  const handlePermissionToggle = (permissionId: string) => {
+    setFormData(prev => {
+      const newPermissions = { ...prev.permissions };
+      newPermissions[permissionId] = !newPermissions[permissionId];
+      return { ...prev, permissions: newPermissions };
+    });
+  };
+
+  const handleSelectAll = () => {
+    const newState = !selectAll;
+    setSelectAll(newState);
+    const newPermissions: Record<string, boolean> = {};
+    PERMISSIONS.forEach(p => {
+      newPermissions[p.id] = newState;
+    });
+    setFormData(prev => ({ ...prev, permissions: newPermissions }));
+  };
+
+  const handleRoleChange = (role: string) => {
+    setFormData(prev => ({ ...prev, role }));
+    
+    // Charger les permissions par défaut pour le rôle sélectionné
+    const defaultPerms: Record<string, boolean> = {};
+    PERMISSIONS.forEach(p => {
+      defaultPerms[p.id] = p.defaultRoles.includes(role);
+    });
+    setFormData(prev => ({ ...prev, permissions: defaultPerms }));
+    
+    const allChecked = Object.values(defaultPerms).every(v => v === true);
+    setSelectAll(allChecked);
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+  };
+
+  const getCategoryPermissions = (category: string) => {
+    return PERMISSIONS.filter(p => p.category === category);
+  };
+
+  const getCategories = () => {
+    const cats = new Set(PERMISSIONS.map(p => p.category));
+    return Array.from(cats);
   };
 
   const utilisateursFiltres = utilisateurs.filter(u => {
@@ -189,7 +619,8 @@ const ListeUtilisateurs: React.FC = () => {
     total: utilisateurs.length,
     admins: utilisateurs.filter(u => u.role === "admin").length,
     gestionnaires: utilisateurs.filter(u => u.role === "gestionnaire").length,
-    commerciaux: utilisateurs.filter(u => u.role === "commercial").length
+    commerciaux: utilisateurs.filter(u => u.role === "commercial").length,
+    caissiers: utilisateurs.filter(u => u.role === "caissier").length
   };
 
   const resetFilters = () => {
@@ -244,15 +675,14 @@ const ListeUtilisateurs: React.FC = () => {
             </Group>
           </Flex>
 
-          {/* Cartes statistiques */}
-          <SimpleGrid cols={4} spacing="md" mt="xl">
+          <SimpleGrid cols={5} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
                 <ThemeIcon color="white" variant="light" size="lg">
                   <IconUsers size={20} />
                 </ThemeIcon>
                 <div>
-                  <Text c="white" size="xs">Total utilisateurs</Text>
+                  <Text c="white" size="xs">Total</Text>
                   <Text c="white" fw={700} size="xl">{stats.total}</Text>
                 </div>
               </Group>
@@ -263,7 +693,7 @@ const ListeUtilisateurs: React.FC = () => {
                   <IconUserShield size={20} />
                 </ThemeIcon>
                 <div>
-                  <Text c="white" size="xs">Administrateurs</Text>
+                  <Text c="white" size="xs">Admins</Text>
                   <Text c="white" fw={700} size="xl">{stats.admins}</Text>
                 </div>
               </Group>
@@ -271,7 +701,7 @@ const ListeUtilisateurs: React.FC = () => {
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
                 <ThemeIcon color="orange" variant="light" size="lg">
-                  <IconBuildingStore size={20} />
+                  <IconUserCheck size={20} />
                 </ThemeIcon>
                 <div>
                   <Text c="white" size="xs">Gestionnaires</Text>
@@ -282,11 +712,22 @@ const ListeUtilisateurs: React.FC = () => {
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
                 <ThemeIcon color="blue" variant="light" size="lg">
-                  <IconUser size={20} />
+                  <IconBuildingStore size={20} />
                 </ThemeIcon>
                 <div>
                   <Text c="white" size="xs">Commerciaux</Text>
                   <Text c="white" fw={700} size="xl">{stats.commerciaux}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="green" variant="light" size="lg">
+                  <IconCash size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Caissiers</Text>
+                  <Text c="white" fw={700} size="xl">{stats.caissiers}</Text>
                 </div>
               </Group>
             </Card>
@@ -330,7 +771,14 @@ const ListeUtilisateurs: React.FC = () => {
                 leftSection={<IconPlus size={16} />}
                 onClick={() => {
                   setEditing(null);
-                  setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
+                  setFormData({ 
+                    nom: "", 
+                    login: "", 
+                    password: "", 
+                    role: "admin", 
+                    telephone: "",
+                    permissions: {}
+                  });
                   setModalOpen(true);
                 }}
                 variant="gradient"
@@ -409,12 +857,25 @@ const ListeUtilisateurs: React.FC = () => {
                               setEditing(u);
                               setFormData({
                                 nom: u.nom || "",
-                                email: u.email || "",
                                 login: u.email || "",
                                 password: "",
-                                role: u.role || "commercial",
-                                telephone: u.telephone || ""
+                                role: u.role || "admin",
+                                telephone: u.telephone || "",
+                                permissions: {}
                               });
+                              // Charger les permissions de l'utilisateur
+                              try {
+                                const perms = u.permissions ? JSON.parse(u.permissions) : {};
+                                const allPermissions: Record<string, boolean> = {};
+                                PERMISSIONS.forEach(p => {
+                                  allPermissions[p.id] = perms[p.id] !== undefined ? perms[p.id] : true;
+                                });
+                                setFormData(prev => ({ ...prev, permissions: allPermissions }));
+                              } catch (e) {
+                                const allPermissions: Record<string, boolean> = {};
+                                PERMISSIONS.forEach(p => { allPermissions[p.id] = true; });
+                                setFormData(prev => ({ ...prev, permissions: allPermissions }));
+                              }
                               setModalOpen(true);
                             }}
                           >
@@ -448,7 +909,14 @@ const ListeUtilisateurs: React.FC = () => {
                 variant="light"
                 onClick={() => {
                   setEditing(null);
-                  setFormData({ nom: "", email: "", login: "", password: "", role: "commercial", telephone: "" });
+                  setFormData({ 
+                    nom: "", 
+                    login: "", 
+                    password: "", 
+                    role: "admin", 
+                    telephone: "",
+                    permissions: {}
+                  });
                   setModalOpen(true);
                 }}
                 leftSection={<IconPlus size={16} />}
@@ -471,105 +939,202 @@ const ListeUtilisateurs: React.FC = () => {
         </Card>
       </Stack>
 
-      {/* MODAL UTILISATEUR */}
+      {/* MODAL UTILISATEUR AVEC PERMISSIONS */}
       <Modal
         opened={modalOpen}
         onClose={() => { setModalOpen(false); setEditing(null); }}
+        size="xl"
+        centered
+        padding={0}
+        styles={{
+          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 700, fontSize: '1.2rem', width: '100%' },
+          body: { padding: 0 }
+        }}
         title={
-          <Group gap="md">
+          <Group gap="md" style={{ width: '100%' }}>
             <ThemeIcon size="lg" radius="md" color="blue" variant="light">
               <IconUserShield size={24} />
             </ThemeIcon>
             <div>
               <Text size="lg" fw={700} c="white">{editing ? "Modifier l'utilisateur" : "Nouvel utilisateur"}</Text>
               <Text size="xs" c="gray.4">
-                {editing ? "Modifiez les informations de l'utilisateur" : "Créez un nouveau compte utilisateur"}
+                {editing ? "Modifiez les informations et les permissions" : "Créez un nouveau compte avec des permissions personnalisées"}
               </Text>
             </div>
           </Group>
         }
-        size="md"
-        centered
-        padding="xl"
-        styles={{
-          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 700, fontSize: '1.2rem', width: '100%' },
-          body: { padding: 0 }
-        }}
       >
-        <Paper p="xl" radius={0}>
-          <Stack gap="md">
-            <TextInput
-              label="Nom complet"
-              placeholder="Nom de l'utilisateur"
-              value={formData.nom}
-              onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
-              required
-              size="md"
-            />
+        <ScrollArea h="calc(100vh - 200px)" type="auto">
+          <Paper p="xl" radius={0}>
+            <Stack gap="lg">
+              {/* Informations de base */}
+              <Card withBorder p="md" radius="md">
+                <Title order={4} size="sm" mb="md">Informations de l'utilisateur</Title>
+                <Grid>
+                  <Grid.Col span={6}>
+                    <TextInput
+                      label="Nom complet"
+                      placeholder="Nom de l'utilisateur"
+                      value={formData.nom}
+                      onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
+                      required
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={6}>
+                    <TextInput
+                      label="Login (identifiant)"
+                      placeholder="Nom d'utilisateur pour la connexion"
+                      value={formData.login}
+                      onChange={(e) => setFormData({ ...formData, login: e.target.value })}
+                      required
+                      leftSection={<IconUser size={16} />}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={6}>
+                    <PasswordInput
+                      label="Mot de passe"
+                      placeholder={editing ? "Laisser vide pour conserver" : "Nouveau mot de passe"}
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      required={!editing}
+                      leftSection={<IconLock size={16} />}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={6}>
+                    <TextInput
+                      label="Téléphone"
+                      placeholder="Numéro de téléphone"
+                      value={formData.telephone}
+                      onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
+                      leftSection={<IconMail size={16} />}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={12}>
+                    <Select
+                      label="Rôle par défaut"
+                      placeholder="Sélectionner un rôle"
+                      data={[
+                        { value: "admin", label: "👑 Admin - Accès total" },
+                        { value: "gestionnaire", label: "📊 Gestionnaire - Gestion commerciale" },
+                        { value: "caissier", label: "💰 Caissier - Ventes uniquement" },
+                        { value: "commercial", label: "🏪 Commercial - Clients et commandes" }
+                      ]}
+                      value={formData.role}
+                      onChange={(val) => handleRoleChange(val || "admin")}
+                    />
+                    <Text size="xs" c="dimmed" mt={4}>
+                      ⚡ Changer le rôle charge automatiquement les permissions par défaut
+                    </Text>
+                  </Grid.Col>
+                </Grid>
+              </Card>
 
-            <TextInput
-              label="Login (identifiant)"
-              placeholder="Nom d'utilisateur pour la connexion"
-              value={formData.login}
-              onChange={(e) => setFormData({ ...formData, login: e.target.value })}
-              required
-              size="md"
-              leftSection={<IconUser size={16} />}
-              description="Utilisé pour se connecter à l'application"
-            />
+              {/* Permissions */}
+              <Card withBorder p="md" radius="md">
+                <Group justify="space-between" mb="md">
+                  <Group>
+                    <IconShieldCheck size={20} color="#1b365d" />
+                    <Title order={4} size="sm">Permissions</Title>
+                    <Badge size="sm" variant="light" color="blue">
+                      {Object.values(formData.permissions).filter(v => v).length}/{PERMISSIONS.length}
+                    </Badge>
+                  </Group>
+                  <Group>
+                    <Chip
+                      checked={selectAll}
+                      onChange={handleSelectAll}
+                      size="sm"
+                      color="blue"
+                    >
+                      Tout {selectAll ? 'désélectionner' : 'sélectionner'}
+                    </Chip>
+                  </Group>
+                </Group>
 
-            <TextInput
-              label="Téléphone"
-              placeholder="Numéro de téléphone"
-              value={formData.telephone}
-              onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
-              size="md"
-              leftSection={<IconMail size={16} />}
-            />
+                <Divider mb="md" />
 
-            <PasswordInput
-              label="Mot de passe"
-              placeholder={editing ? "Laisser vide pour conserver" : "Nouveau mot de passe"}
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required={!editing}
-              size="md"
-              leftSection={<IconLock size={16} />}
-            />
+                {getCategories().map((category) => {
+                  const perms = getCategoryPermissions(category);
+                  const checkedCount = perms.filter(p => formData.permissions[p.id]).length;
+                  const allChecked = checkedCount === perms.length;
+                  const isExpanded = expandedCategories.has(category);
 
-            <Select
-              label="Rôle"
-              placeholder="Sélectionner un rôle"
-              data={[
-                { value: "admin", label: "👑 Admin - Accès total" },
-                { value: "gestionnaire", label: "📊 Gestionnaire - Gestion commerciale" },
-                { value: "caissier", label: "💰 Caissier - Ventes uniquement" },
-                { value: "commercial", label: "🏪 Commercial - Clients et commandes" }
-              ]}
-              value={formData.role}
-              onChange={(val) => setFormData({ ...formData, role: val || "commercial" })}
-              size="md"
-            />
+                  return (
+                    <Box key={category} mb="sm">
+                      <Group 
+                        justify="space-between" 
+                        p="xs" 
+                        style={{ 
+                          cursor: 'pointer', 
+                          backgroundColor: isExpanded ? 'rgba(27, 54, 93, 0.05)' : 'transparent',
+                          borderRadius: 6,
+                          transition: 'background 0.2s'
+                        }}
+                        onClick={() => toggleCategory(category)}
+                      >
+                        <Group>
+                          <Text size="sm" fw={600} c={isExpanded ? '#1b365d' : 'dimmed'}>
+                            {category}
+                          </Text>
+                          <Badge size="xs" variant="light" color={allChecked ? 'green' : 'orange'}>
+                            {checkedCount}/{perms.length}
+                          </Badge>
+                        </Group>
+                        <Group>
+                          {isExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                        </Group>
+                      </Group>
 
-            <Divider />
+                      {isExpanded && (
+                        <Box pl="md" pt="xs">
+                          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="xs">
+                            {perms.map((perm) => (
+                              <Checkbox
+                                key={perm.id}
+                                label={
+                                  <Group gap={6}>
+                                    <Box style={{ color: '#4a6cf7' }}>{perm.icon}</Box>
+                                    <Text size="xs">{perm.label}</Text>
+                                    <Tooltip label={perm.description} position="top">
+                                      <IconInfoCircle size={12} color="#868e96" style={{ cursor: 'help' }} />
+                                    </Tooltip>
+                                  </Group>
+                                }
+                                checked={formData.permissions[perm.id] || false}
+                                onChange={() => handlePermissionToggle(perm.id)}
+                                size="xs"
+                              />
+                            ))}
+                          </SimpleGrid>
+                        </Box>
+                      )}
+                      <Divider mt="xs" />
+                    </Box>
+                  );
+                })}
+              </Card>
 
-            <Group justify="flex-end">
-              <Button variant="outline" onClick={() => setModalOpen(false)} size="md">
-                Annuler
-              </Button>
-              <Button
-                onClick={handleSave}
-                loading={saving}
-                variant="gradient"
-                gradient={{ from: "blue", to: "cyan" }}
-                size="md"
-              >
-                {editing ? "Modifier" : "Créer"}
-              </Button>
-            </Group>
-          </Stack>
-        </Paper>
+              <Divider />
+
+              <Group justify="flex-end">
+                <Button variant="outline" onClick={() => setModalOpen(false)} size="md">
+                  Annuler
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  loading={saving}
+                  variant="gradient"
+                  gradient={{ from: "blue", to: "cyan" }}
+                  size="md"
+                  leftSection={<IconCheck size={16} />}
+                >
+                  {editing ? "Modifier" : "Créer"}
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        </ScrollArea>
       </Modal>
 
       {/* MODAL CONFIRMATION SUPPRESSION */}
@@ -617,12 +1182,14 @@ const ListeUtilisateurs: React.FC = () => {
       >
         <Stack gap="md">
           <Text size="sm">1. Créez des utilisateurs avec différents rôles</Text>
-          <Text size="sm">2. Admin : accès total à l'application</Text>
-          <Text size="sm">3. Gestionnaire : gestion commerciale (clients, commandes, factures)</Text>
-          <Text size="sm">4. Caissier : accès aux ventes uniquement</Text>
-          <Text size="sm">5. Commercial : gestion des clients et commandes</Text>
+          <Text size="sm">2. Chaque rôle a des permissions par défaut</Text>
+          <Text size="sm">3. Vous pouvez personnaliser les permissions individuellement</Text>
+          <Text size="sm">4. Admin : accès total à l'application</Text>
+          <Text size="sm">5. Gestionnaire : gestion commerciale (clients, commandes, factures)</Text>
+          <Text size="sm">6. Caissier : accès aux ventes uniquement</Text>
+          <Text size="sm">7. Commercial : gestion des clients et commandes</Text>
           <Divider />
-          <Text size="xs" c="dimmed" ta="center">Version 1.0.0 - Gestion Commerciale Pro</Text>
+          <Text size="xs" c="dimmed" ta="center">Version 2.0.0 - Gestion Commerciale Pro</Text>
         </Stack>
       </Modal>
     </>

@@ -1,5 +1,4 @@
 // src/components/common/Navbar.tsx
-
 import { useState } from 'react';
 import {
   ScrollArea,
@@ -19,6 +18,7 @@ import {
   ActionIcon,
   Tooltip,
   Button,
+  Grid,
 } from '@mantine/core';
 import {
   IconDashboard,
@@ -50,6 +50,9 @@ import {
   IconEdit,
   IconLock,
   IconShield,
+  IconDatabase,
+  IconBug,
+  IconDashboard as IconDashboardRevendeur,
 } from '@tabler/icons-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -268,7 +271,6 @@ export default function Navbar({
   const isAdmin = userRole === 'admin';
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
-
   const getRoleColor = () => {
     switch (userRole) {
       case 'admin':
@@ -289,6 +291,19 @@ export default function Navbar({
       default:
         return 'Utilisateur';
     }
+  };
+
+  // Vérifie si la section revendeurs est active
+  const isRevendeursSectionActive = () => {
+    const revendeursPaths = [
+      '/commandes-revendeur',
+      '/factures-revendeur',
+      '/stock-revendeurs',
+      '/decomptes',
+      '/revendeurs/historique',
+      '/dashboard-revendeurs'
+    ];
+    return revendeursPaths.some(path => location.pathname === path);
   };
 
   return (
@@ -350,12 +365,10 @@ export default function Navbar({
           style={{ flex: 1 }}
           styles={{
             scrollbar: {
-              '&[data-orientation="vertical"]': {
-                width: 3,
-              },
-              '& .mantine-ScrollArea-thumb': {
-                backgroundColor: 'rgba(255,255,255,0.08)',
-              },
+              width: 3,
+            },
+            thumb: {
+              backgroundColor: 'rgba(255,255,255,0.08)',
             },
           }}
         >
@@ -421,7 +434,11 @@ export default function Navbar({
             {/* REVENDEURS */}
             {isAdmin && (
               <>
-                <NavSection title="Revendeurs" icon={<IconTruckDelivery size={18} />}>
+                <NavSection 
+                  title="Revendeurs" 
+                  icon={<IconTruckDelivery size={18} />} 
+                  defaultOpen={isRevendeursSectionActive()}
+                >
                   <NavItem
                     to="/commandes-revendeur"
                     label="Commandes"
@@ -451,6 +468,12 @@ export default function Navbar({
                     label="Historique"
                     icon={<IconHistory size={18} />}
                     active={location.pathname === '/revendeurs/historique'}
+                  />
+                  <NavItem
+                    to="/dashboard-revendeurs"
+                    label="Dashboard Revendeurs"
+                    icon={<IconDashboardRevendeur size={18} />}
+                    active={location.pathname === '/dashboard-revendeurs'}
                   />
                 </NavSection>
 
@@ -537,17 +560,28 @@ export default function Navbar({
                   icon={<IconSettings size={18} />}
                   active={location.pathname === '/parametres'}
                 />
+                <NavItem
+                  to="/diagnostic"
+                  label="Diagnostic DB"
+                  icon={<IconDatabase size={18} />}
+                  active={location.pathname === '/diagnostic'}
+                  badge="Admin"
+                  badgeColor="red"
+                />
+                <NavItem
+                  to="/debug"
+                  label="Débogage"
+                  icon={<IconBug size={18} />}
+                  active={location.pathname === '/debug'}
+                  badge="Dev"
+                  badgeColor="violet"
+                />
               </NavSection>
             )}
           </Stack>
         </ScrollArea>
 
-        <NavItem
-          to="/diagnostic"
-          label="Diagnostic DB"
-          icon={<IconReportAnalytics size={18} />}
-        />
-        {/* FOOTER - Version avec clic sur l'utilisateur */}
+        {/* FOOTER */}
         <Box
           p="md"
           style={{
@@ -555,7 +589,6 @@ export default function Navbar({
             background: 'rgba(0,0,0,0.15)',
           }}
         >
-          {/* Profil utilisateur cliquable */}
           <UnstyledButton
             onClick={() => setProfileModalOpen(true)}
             style={{
@@ -602,7 +635,6 @@ export default function Navbar({
             </Box>
           </UnstyledButton>
 
-          {/* Déconnexion */}
           <UnstyledButton
             onClick={onLogout}
             style={{
@@ -659,7 +691,6 @@ export default function Navbar({
         }}
       >
         <Stack gap="md">
-          {/* Avatar et informations principales */}
           <Paper withBorder p="lg" radius="md" style={{ textAlign: 'center' }}>
             <Avatar
               radius="xl"
@@ -681,7 +712,6 @@ export default function Navbar({
             </Badge>
           </Paper>
 
-          {/* Informations détaillées */}
           <SimpleGrid cols={2} spacing="sm">
             <Paper withBorder p="sm" radius="md">
               <Group gap="xs">
@@ -732,23 +762,24 @@ export default function Navbar({
             </Paper>
 
             {userCompany && (
-              <Paper withBorder p="sm" radius="md" >
-                <Group gap="xs">
-                  <ThemeIcon color="gray" variant="light" size="sm">
-                    <IconBuilding size={14} />
-                  </ThemeIcon>
-                  <Box>
-                    <Text size="xs" c="dimmed">Entreprise</Text>
-                    <Text size="sm" fw={500}>{userCompany}</Text>
-                  </Box>
-                </Group>
-              </Paper>
+              <Grid.Col span={2}>
+                <Paper withBorder p="sm" radius="md">
+                  <Group gap="xs">
+                    <ThemeIcon color="gray" variant="light" size="sm">
+                      <IconBuilding size={14} />
+                    </ThemeIcon>
+                    <Box>
+                      <Text size="xs" c="dimmed">Entreprise</Text>
+                      <Text size="sm" fw={500}>{userCompany}</Text>
+                    </Box>
+                  </Group>
+                </Paper>
+              </Grid.Col>
             )}
           </SimpleGrid>
 
           <Divider />
 
-          {/* Actions */}
           <Group justify="space-between">
             <Group>
               <Tooltip label="Modifier le profil">
@@ -764,19 +795,12 @@ export default function Navbar({
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Changer le mot de passe">
-                <ActionIcon
-                  variant="light"
-                  color="orange"
-                >
+                <ActionIcon variant="light" color="orange">
                   <IconLock size={18} />
                 </ActionIcon>
               </Tooltip>
             </Group>
-            <Button
-              variant="light"
-              onClick={() => setProfileModalOpen(false)}
-              size="sm"
-            >
+            <Button variant="light" onClick={() => setProfileModalOpen(false)} size="sm">
               Fermer
             </Button>
           </Group>

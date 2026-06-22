@@ -19,10 +19,12 @@ import { useProducts } from '../../hooks/useProducts';
 import { useCommandes } from '../../hooks/useCommandes';
 import { FormulaireClient } from '../clients/FormulaireClient';
 
-import { generateCommandeCode } from '../../utils/codeGenerator';
-import { stockService } from '../../database/repositories/stockService';
+import { generateCommandeCode } from '../../services/codeGeneratorService';
+import StockService from '../../services/StockService';
+import StockRevendeurService from '../../services/StockRevendeurService';
 import FormulaireProduit from '../products/FormulaireProduit';
 import { getDb } from '../../database/db';
+import { useDebug } from '../../hooks/useDebug';
 
 interface FormulaireCommandeProps {
   opened: boolean;
@@ -47,6 +49,8 @@ interface CartItem {
 type PrixType = 'DETAIL' | 'GROS';
 
 export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, onClose }) => {
+  const debug = useDebug('FormulaireCommande');
+
   const { clients, loading: clientsLoading, refresh: refreshClients } = useClients();
   const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
   const { loading } = useCommandes();
@@ -67,7 +71,6 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
   const [, setDbError] = useState<string | null>(null);
   
-  // ✅ Prix par défaut : DÉTAIL
   const [prixType, setPrixType] = useState<PrixType>('DETAIL');
   const [editingPrix, setEditingPrix] = useState<Record<number, boolean>>({});
   const [prixModifies, setPrixModifies] = useState<Record<number, boolean>>({});
@@ -81,8 +84,9 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         try {
           const code = await generateCommandeCode();
           setCodeCommande(code);
+          debug.logInfo('Code commande généré', { code });
         } catch (error) {
-          console.error("Erreur génération code:", error);
+          debug.logError('Erreur génération code', error as Error);
           setCodeCommande(`CMD-${Date.now()}`);
         }
       }
@@ -91,23 +95,30 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   }, [opened]);
 
   useEffect(() => {
+    debug.logMount();
+    debug.logInfo('Formulaire initialisé', { opened });
+    
     if (selectedClientId && clients.length > 0) {
       const client = clients.find(c => c.idClient.toString() === selectedClientId);
       setSelectedClientDetails(client);
 
       if (client) {
-        if (client.TypeClient === 'revendeur') {
-          setTypeCommande('REVENDEUR');
-          // ✅ On garde le prix en détail par défaut, même pour les revendeurs
-          // L'utilisateur peut basculer manuellement vers "Gros" si besoin
-        } else {
-          setTypeCommande('STANDARD');
-          // ✅ On garde 'DETAIL' par défaut
-        }
+        const newType = client.TypeClient === 'revendeur' ? 'REVENDEUR' : 'STANDARD';
+        setTypeCommande(newType);
+        debug.logInfo('Client sélectionné', { 
+          clientId: selectedClientId, 
+          clientName: client.NomComplet,
+          type: newType 
+        });
       }
     } else {
       setSelectedClientDetails(null);
     }
+    
+    return () => {
+      debug.logUnmount();
+      debug.logInfo('Formulaire fermé');
+    };
   }, [selectedClientId, clients]);
 
   useEffect(() => {
@@ -123,10 +134,10 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       setCommissionPourcentage(0);
       setQuantiteInput({});
       setDbError(null);
-      // ✅ Réinitialiser à 'DETAIL' quand on ferme
       setPrixType('DETAIL');
       setPrixModifies({});
       setEditingPrix({});
+      debug.logInfo('Formulaire réinitialisé');
     }
   }, [opened]);
 
@@ -134,7 +145,6 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   useEffect(() => {
     if (cart.length > 0 && prixType) {
       const updatedCart = cart.map(item => {
-        // Si le prix a été modifié manuellement, on le garde
         if (prixModifies[item.idProduit]) {
           return item;
         }
@@ -144,6 +154,13 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
           const newPrix = prixType === 'DETAIL' 
             ? (product.prix_vente_detail || 0) 
             : (product.prix_vente_gros || 0);
+          
+          debug.logDebug('Prix mis à jour', { 
+            produit: item.designation, 
+            ancienPrix: item.prix_vente, 
+            nouveauPrix: newPrix,
+            type: prixType 
+          });
           
           return {
             ...item,
@@ -159,12 +176,14 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     }
   }, [prixType, products, prixModifies]);
 
+  // Filtrer les produits disponibles (qte_stock > 0)
   const filteredProducts = products.filter(product => {
     const matchesSearch = searchTerm === '' ||
       product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory ? product.categorie === selectedCategory : true;
-    return matchesSearch && matchesCategory;
+    const inStock = (product.qte_stock || 0) > 0;
+    return matchesSearch && matchesCategory && inStock;
   });
 
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -176,8 +195,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const categories = [...new Set(products.map(p => p.categorie).filter(Boolean))];
 
   const formatPrice = (value: number | undefined | null): string => {
-    if (value === undefined || value === null) return '0';
-    return value.toLocaleString();
+    return (value || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   const getPrixProduit = (product: any): number => {
@@ -188,12 +206,9 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     }
   };
 
-  const getPrixLabel = (): string => {
-    return prixType === 'DETAIL' ? 'Détail' : 'Gros';
-  };
-
   const addToCart = (product: any, quantite: number) => {
     if (quantite <= 0) {
+      debug.logWarning('Tentative d\'ajout avec quantité invalide', { quantite });
       notifications.show({
         title: 'Erreur',
         message: 'Veuillez saisir une quantité valide',
@@ -207,6 +222,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     const prix = getPrixProduit(product);
 
     if (prix <= 0) {
+      debug.logWarning('Prix non défini', { 
+        product: product.designation, 
+        prixType,
+        prix 
+      });
       notifications.show({
         title: 'Erreur',
         message: `Le prix ${prixType === 'DETAIL' ? 'de détail' : 'de gros'} du produit "${product.designation}" n'est pas défini`,
@@ -218,6 +238,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     if (existingItem) {
       const newQuantite = existingItem.quantite_commande + quantite;
       if (newQuantite > stock) {
+        debug.logWarning('Stock insuffisant', { 
+          product: product.designation, 
+          demande: newQuantite, 
+          disponible: stock 
+        });
         notifications.show({
           title: 'Stock insuffisant',
           message: `Stock disponible: ${stock}`,
@@ -225,6 +250,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         });
         return;
       }
+      debug.logInfo('Quantité mise à jour dans le panier', { 
+        product: product.designation, 
+        ancienneQuantite: existingItem.quantite_commande,
+        nouvelleQuantite: newQuantite 
+      });
       setCart(cart.map(item =>
         item.idProduit === product.idProduit
           ? {
@@ -236,6 +266,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       ));
     } else {
       if (quantite > stock) {
+        debug.logWarning('Stock insuffisant pour nouvel ajout', { 
+          product: product.designation, 
+          demande: quantite, 
+          disponible: stock 
+        });
         notifications.show({
           title: 'Stock insuffisant',
           message: `Stock disponible: ${stock}`,
@@ -243,6 +278,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         });
         return;
       }
+      debug.logInfo('Produit ajouté au panier', { 
+        product: product.designation, 
+        quantite, 
+        prix,
+        prixType 
+      });
       setCart([
         ...cart,
         {
@@ -268,6 +309,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const updateQuantity = (index: number, newQuantite: number) => {
     const item = cart[index];
     if (newQuantite > item.quantite_stock) {
+      debug.logWarning('Tentative de mise à jour quantité dépassant le stock', {
+        product: item.designation,
+        demande: newQuantite,
+        disponible: item.quantite_stock
+      });
       notifications.show({
         title: 'Stock insuffisant',
         message: `Stock disponible: ${item.quantite_stock}`,
@@ -275,6 +321,11 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       });
       return;
     }
+    debug.logInfo('Quantité mise à jour', {
+      product: item.designation,
+      ancienneQuantite: item.quantite_commande,
+      nouvelleQuantite: newQuantite
+    });
     const newCart = [...cart];
     newCart[index].quantite_commande = newQuantite;
     newCart[index].total = newQuantite * newCart[index].prix_vente;
@@ -283,6 +334,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
 
   const updatePrix = (index: number, newPrix: number) => {
     if (newPrix < 0) return;
+    const item = cart[index];
+    debug.logInfo('Prix modifié manuellement', {
+      product: item.designation,
+      ancienPrix: item.prix_vente,
+      nouveauPrix: newPrix
+    });
     const newCart = [...cart];
     newCart[index].prix_vente = newPrix;
     newCart[index].total = newPrix * newCart[index].quantite_commande;
@@ -292,10 +349,15 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
 
   const toggleEditPrix = (idProduit: number) => {
     setEditingPrix(prev => ({ ...prev, [idProduit]: !prev[idProduit] }));
+    debug.logDebug('Mode édition prix basculé', { 
+      idProduit, 
+      actif: !editingPrix[idProduit] 
+    });
   };
 
   const removeFromCart = (index: number) => {
     const item = cart[index];
+    debug.logInfo('Produit retiré du panier', { product: item.designation });
     setPrixModifies(prev => {
       const newPrixModifies = { ...prev };
       delete newPrixModifies[item.idProduit];
@@ -305,6 +367,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   };
 
   const resetPrixModifies = () => {
+    debug.logInfo('Réinitialisation des prix modifiés');
     setPrixModifies({});
     const updatedCart = cart.map(item => {
       const product = products.find(p => p.idProduit === item.idProduit);
@@ -327,13 +390,16 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const handleOpenProduitModal = (product?: any) => {
     if (product) {
       setProduitToEdit(product);
+      debug.logInfo('Ouverture modal produit pour édition', { product: product.designation });
     } else {
       setProduitToEdit(null);
+      debug.logInfo('Ouverture modal produit pour création');
     }
     setProduitModalOpened(true);
   };
 
   const handleProduitModalClose = () => {
+    debug.logInfo('Fermeture modal produit');
     setProduitModalOpened(false);
     setProduitToEdit(null);
     refreshProducts();
@@ -346,7 +412,6 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const commissionTotale = typeCommande === 'REVENDEUR' ? montantTotal * (commissionPourcentage / 100) : 0;
   const montantApresCommission = montantTotal - commissionTotale;
 
-  // Calculer le prix moyen pour le panier
   const getPrixMoyen = () => {
     if (cart.length === 0) return 0;
     const total = cart.reduce((sum, item) => sum + (item.prix_vente * item.quantite_commande), 0);
@@ -354,68 +419,188 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     return totalQte > 0 ? total / totalQte : 0;
   };
 
+  // ✅ Fonction pour générer un code unique avec vérification
+  const generateUniqueCode = async (baseCode: string): Promise<string> => {
+    const db = await getDb();
+    let code = baseCode;
+    let isUnique = false;
+    let attempt = 0;
+    const maxAttempts = 20;
+
+    while (!isUnique && attempt < maxAttempts) {
+      const check = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM commandes WHERE code_commande = ?`,
+        [code]
+      );
+
+      if (check[0]?.count === 0) {
+        isUnique = true;
+      } else {
+        // Générer un nouveau code
+        const prefix = 'CMD';
+        const timestamp = Date.now().toString().slice(-6);
+        const random = String(Math.floor(Math.random() * 100000)).padStart(5, '0');
+        code = `${prefix}-${timestamp}-${random}`;
+        attempt++;
+        debug.logWarning('Code dupliqué, nouvelle tentative', { 
+          tentative: attempt, 
+          code 
+        });
+      }
+    }
+
+    if (!isUnique) {
+      code = `CMD-${Date.now()}`;
+    }
+
+    return code;
+  };
+
+  // ✅ Fonction handleSubmit complète
   const handleSubmit = async () => {
     if (!selectedClientId) {
+      debug.logWarning('Tentative de soumission sans client sélectionné');
       notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
       return;
     }
 
     if (cart.length === 0) {
+      debug.logWarning('Tentative de soumission sans produits');
       notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
       return;
     }
 
+    debug.logAction('Soumission de la commande', {
+      clientId: selectedClientId,
+      produits: cart.length,
+      total: montantTotal,
+      type: typeCommande
+    });
+
     setSubmitting(true);
+    let db = null;
+    let finalCode = '';
 
     try {
-      const db = await getDb();
-      
+      db = await getDb();
       await db.execute('BEGIN TRANSACTION');
 
-      const montantHT = montantTotal / 1.18;
+      finalCode = await generateUniqueCode(codeCommande);
+      
+      if (finalCode !== codeCommande) {
+        setCodeCommande(finalCode);
+        debug.logInfo('Code commande mis à jour', { ancien: codeCommande, nouveau: finalCode });
+      }
 
+      const montantHT = montantTotal / 1.18;
+      const dateCommande = new Date().toISOString();
+
+      const clientCheck = await db.select<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM clients WHERE idClient = ?`,
+        [parseInt(selectedClientId)]
+      );
+
+      if (!clientCheck[0]?.count) {
+        throw new Error('Client introuvable dans la base de données');
+      }
+
+      // Insérer la commande
       const result = await db.execute(`
-        INSERT INTO commandes (code_commande, idClient, type_commande, montant_ht, montant_ttc, statut)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO commandes (
+          code_commande, 
+          idClient, 
+          type_commande, 
+          date_commande,
+          montant_ht, 
+          montant_ttc, 
+          statut,
+          montant_tva,
+          montant_net,
+          source
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        codeCommande,
+        finalCode,
         parseInt(selectedClientId),
         typeCommande,
+        dateCommande,
         montantHT,
         typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-        'CONFIRMEE'
+        'CONFIRMEE',
+        montantTotal - montantHT,
+        typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
+        'DIRECT'
       ]);
 
       const idCommande = Number(result.lastInsertId);
+      debug.logInfo('Commande créée', { idCommande, code: finalCode });
 
+      // Insérer les détails
       for (const item of cart) {
         await db.execute(`
-          INSERT INTO commande_details (idCommande, idProduit, qte_commande, prix_unitaire_vente)
-          VALUES (?, ?, ?, ?)
-        `, [idCommande, item.idProduit, item.quantite_commande, item.prix_vente]);
+          INSERT INTO commande_details (
+            idCommande, 
+            idProduit, 
+            qte_commande, 
+            prix_unitaire_vente,
+            remise
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `, [
+          idCommande, 
+          item.idProduit, 
+          item.quantite_commande, 
+          item.prix_vente,
+          0
+        ]);
       }
 
       await db.execute('COMMIT');
+      debug.logInfo('Transaction validée');
+
+      // ============================================
+      // Gestion de la sortie de stock et mise à jour stock_revendeur
+      // ============================================
 
       if (typeCommande === 'STANDARD') {
-        const results = [];
-        for (const item of cart) {
-          const resultStock = await stockService.sortieStock({
-            idProduit: item.idProduit,
-            quantite: item.quantite_commande,
-            prix_vente: item.prix_vente,
-            reference: `COMMANDE-${codeCommande}`,
-            notes: `Commande standard - ${codeCommande} - Client: ${selectedClientDetails?.NomComplet || selectedClientDetails?.Societe || 'N/A'} - Prix: ${prixType}`
-          });
+        // ✅ Commande standard - sortie de stock central
+        let beneficeTotal = 0;
+        let coutTotalAchat = 0;
 
-          if (!resultStock.success) {
-            throw new Error(`Erreur pour ${item.designation}: ${resultStock.message}`);
+        for (const item of cart) {
+          try {
+            const product = await db.select<{ prix_achat_base: number }[]>(
+              `SELECT prix_achat_base FROM products WHERE idProduit = ?`,
+              [item.idProduit]
+            );
+            
+            const prixAchat = product[0]?.prix_achat_base || 0;
+            coutTotalAchat += prixAchat * item.quantite_commande;
+            beneficeTotal += (item.prix_vente - prixAchat) * item.quantite_commande;
+
+            const resultStock = await StockService.decreaseStock(
+              item.idProduit,
+              item.quantite_commande,
+              `Commande ${finalCode} - ${selectedClientDetails?.NomComplet || 'Client'}`
+            );
+
+            if (!resultStock.success) {
+              throw new Error(resultStock.message || 'Erreur lors de la sortie de stock');
+            }
+            
+            debug.logInfo('Stock mis à jour', { 
+              produit: item.designation, 
+              quantite: item.quantite_commande 
+            });
+            
+          } catch (stockError: any) {
+            const rollbackDb = await getDb();
+            await rollbackDb.execute(`DELETE FROM commandes WHERE idCommande = ?`, [idCommande]);
+            await rollbackDb.execute(`DELETE FROM commande_details WHERE idCommande = ?`, [idCommande]);
+            throw new Error(`Erreur stock pour ${item.designation}: ${stockError.message}`);
           }
-          results.push(resultStock);
         }
 
-        const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
-        const coutTotalAchat = results.reduce((sum, r) => sum + (r.coutAchatTotal || 0), 0);
         const chiffreAffaire = beneficeTotal + coutTotalAchat;
 
         notifications.show({
@@ -424,39 +609,105 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             `💰 CA: ${chiffreAffaire.toLocaleString()} FCFA\n` +
             `📊 Coût d'achat: ${coutTotalAchat.toLocaleString()} FCFA\n` +
             `📈 Bénéfice: ${beneficeTotal.toLocaleString()} FCFA\n` +
-            `📋 Code: ${codeCommande}`,
+            `📋 Code: ${finalCode}`,
           color: 'green',
           autoClose: 8000
         });
+
       } else {
+        // ✅ Commande revendeur - mettre à jour stock_revendeur avec StockRevendeurService
+        try {
+          for (const item of cart) {
+            // ✅ Utiliser StockRevendeurService pour ajouter au stock du revendeur
+            await StockRevendeurService.increaseStock(
+              parseInt(selectedClientId),
+              item.idProduit,
+              item.quantite_commande
+            );
+            
+            debug.logInfo('Stock revendeur mis à jour', { 
+              produit: item.designation, 
+              quantite: item.quantite_commande,
+              revendeur: selectedClientId
+            });
+
+            // Ajouter un mouvement revendeur (ENTREE)
+            await db.execute(`
+              INSERT INTO mouvements_revendeur (
+                idProduit,
+                idRevendeur,
+                idCommande,
+                type_mouvement,
+                qte_mouvement
+              )
+              VALUES (?, ?, ?, ?, ?)
+            `, [
+              item.idProduit,
+              parseInt(selectedClientId),
+              idCommande,
+              "ENTREE",
+              item.quantite_commande
+            ]);
+          }
+
+          debug.logInfo('Stock revendeur et mouvements créés avec succès');
+
+        } catch (stockError: any) {
+          debug.logError('Erreur mise à jour stock revendeur', stockError as Error);
+          notifications.show({
+            title: '⚠️ Attention',
+            message: 'Commande créée mais le stock revendeur n\'a pas pu être mis à jour',
+            color: 'orange'
+          });
+        }
+
         notifications.show({
           title: '✅ Commande revendeur enregistrée',
-          message: `Commande revendeur ${codeCommande} créée.\n` +
+          message: `Commande revendeur ${finalCode} créée.\n` +
             `📦 ${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
             `💰 Montant total: ${montantTotal.toLocaleString()} FCFA\n` +
             `📊 Commission (${commissionPourcentage}%): ${commissionTotale.toLocaleString()} FCFA\n` +
-            `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA`,
+            `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA\n` +
+            `📦 Stock revendeur mis à jour`,
           color: 'green',
           autoClose: 8000
         });
       }
 
       await refreshProducts();
+      debug.logInfo('Produits rafraîchis');
       onClose();
 
     } catch (error: any) {
       try {
-        const db = await getDb();
-        await db.execute('ROLLBACK');
-      } catch (e) {}
-      
-      notifications.show({
-        title: '❌ Erreur',
-        message: error?.message || 'Erreur lors de la création de la commande',
-        color: 'red',
-      });
+        if (db) {
+          await db.execute('ROLLBACK');
+          debug.logInfo('Transaction annulée (ROLLBACK)');
+        }
+      } catch (rollbackError) {
+        console.warn('Erreur lors du rollback:', rollbackError);
+      }
+
+      if (error?.message?.includes('UNIQUE constraint failed')) {
+        notifications.show({
+          title: '❌ Erreur de code',
+          message: 'Un problème est survenu avec le code de la commande. Veuillez réessayer.',
+          color: 'red',
+        });
+        const newCode = `CMD-${Date.now()}`;
+        setCodeCommande(newCode);
+      } else {
+        notifications.show({
+          title: '❌ Erreur',
+          message: error?.message || 'Erreur lors de la création de la commande',
+          color: 'red',
+        });
+      }
+
+      debug.logError('Erreur lors de la création de la commande', error as Error);
     } finally {
       setSubmitting(false);
+      debug.logDebug('Soumission terminée');
     }
   };
 
@@ -492,9 +743,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       >
         <ScrollArea h="calc(100vh - 180px)" type="auto" p="lg">
           <Stack gap="md">
-            {/* ============================================ */}
-            {/* LIGNE 1: Client - Compactée */}
-            {/* ============================================ */}
+            {/* LIGNE 1: Client */}
             <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Grid align="flex-end">
                 <Grid.Col span={3}>
@@ -576,9 +825,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               </Grid>
             </Card>
 
-            {/* ============================================ */}
-            {/* LIGNE 2: Type de commande - Compactée */}
-            {/* ============================================ */}
+            {/* LIGNE 2: Type de commande */}
             <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Grid align="center">
                 <Grid.Col span={3}>
@@ -683,26 +930,24 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               {typeCommande === 'REVENDEUR' && commissionPourcentage > 0 && cart.length > 0 && (
                 <Alert color="green" variant="light" mt="xs" p="xs">
                   <Group justify="space-between" gap="xs">
-                    <Text size="xs">💰 Total: {montantTotal.toLocaleString()} F</Text>
-                    <Text size="xs" c="orange">📊 Comm. {commissionPourcentage}%: -{commissionTotale.toLocaleString()} F</Text>
+                    <Text size="xs">💰 Total: {montantTotal.toLocaleString()} FCFA</Text>
+                    <Text size="xs" c="orange">📊 Comm. {commissionPourcentage}%: -{commissionTotale.toLocaleString()} FCFA</Text>
                     <Divider orientation="vertical" />
-                    <Text size="xs" fw={700} c="green">💵 Net: {montantApresCommission.toLocaleString()} F</Text>
+                    <Text size="xs" fw={700} c="green">💵 Net: {montantApresCommission.toLocaleString()} FCFA</Text>
                   </Group>
                 </Alert>
               )}
             </Card>
 
-            {/* ============================================ */}
-            {/* LIGNE 3: Produits - Compactée */}
-            {/* ============================================ */}
+            {/* LIGNE 3: Produits disponibles */}
             <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Group gap="xs" mb="xs" justify="space-between">
                 <Group gap="xs">
                   <ThemeIcon color="grape" variant="light" radius="md" size="sm">
-                    <IconSearch size={14} />
+                    <IconPackage size={14} />
                   </ThemeIcon>
-                  <Text fw={600} size="sm" c="#1b365d">Produits</Text>
-                  <Badge color="blue" variant="light" size="xs">{products.length}</Badge>
+                  <Text fw={600} size="sm" c="#1b365d">Produits disponibles</Text>
+                  <Badge color="green" variant="light" size="xs">{filteredProducts.length} en stock</Badge>
                   <Badge color={prixType === 'DETAIL' ? 'blue' : 'green'} variant="light" size="xs">
                     {prixType === 'DETAIL' ? 'Prix détail' : 'Prix gros'}
                   </Badge>
@@ -759,99 +1004,106 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               </Grid>
 
               <ScrollArea h={250} mt="xs">
-                <Table striped highlightOnHover verticalSpacing="xs">
-                  <Table.Thead>
-                    <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                      <Table.Th c="white" style={{ width: '30%' }}>Désignation</Table.Th>
-                      <Table.Th c="white" style={{ width: '12%' }}>Catégorie</Table.Th>
-                      <Table.Th c="white" style={{ width: '8%' }} ta="center">Stock</Table.Th>
-                      <Table.Th c="white" style={{ width: '14%' }} ta="right">Prix {prixType === 'DETAIL' ? 'Détail' : 'Gros'}</Table.Th>
-                      <Table.Th c="white" style={{ width: '18%' }} ta="center">Quantité</Table.Th>
-                      <Table.Th c="white" style={{ width: '18%' }} ta="center">Action</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {paginatedProducts.map((product) => {
-                      const isRupture = (product.qte_stock || 0) <= 0;
-                      const prix = getPrixProduit(product);
-                      const hasPrix = prix > 0;
-                      return (
-                        <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
-                          <Table.Td>
-                            <Text fw={500} size="xs">{product.designation}</Text>
-                            <Text size="xs" c="dimmed">{product.code_produit}</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge variant="light" size="xs">{product.categorie || '-'}</Badge>
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <Badge
-                              color={isRupture ? 'red' : (product.qte_stock || 0) < (product.seuil_alerte || 10) ? 'orange' : 'green'}
-                              variant={isRupture ? 'filled' : 'light'}
-                              size="xs"
-                            >
-                              {product.qte_stock || 0}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td ta="right">
-                            {hasPrix ? (
-                              <Text fw={600} c="blue" size="xs">{formatPrice(prix)}</Text>
-                            ) : (
-                              <Text size="xs" c="red">Prix non défini</Text>
-                            )}
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            {isRupture ? (
-                              <Button size="xs" variant="subtle" color="grape" onClick={() => handleOpenProduitModal(product)}>
-                                Ajouter
-                              </Button>
-                            ) : !hasPrix ? (
-                              <Button size="xs" variant="subtle" color="orange" onClick={() => handleOpenProduitModal(product)}>
-                                Définir prix
-                              </Button>
-                            ) : (
-                              <Group gap="xs" justify="center" wrap="nowrap">
-                                <NumberInput
-                                  size="xs"
-                                  min={1}
-                                  max={product.qte_stock || 0}
-                                  value={quantiteInput[product.idProduit] || 0}
-                                  onChange={(val) => setQuantiteInput({ ...quantiteInput, [product.idProduit]: Number(val) || 0 })}
-                                  style={{ width: 60 }}
-                                  placeholder="Qté"
-                                />
-                                <ActionIcon
-                                  size="sm"
-                                  variant="light"
-                                  color="green"
-                                  onClick={() => addToCart(product, quantiteInput[product.idProduit] || 0)}
-                                  disabled={!quantiteInput[product.idProduit] || quantiteInput[product.idProduit] <= 0}
-                                >
-                                  <IconPlus size={12} />
-                                </ActionIcon>
-                              </Group>
-                            )}
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <Badge size="xs" variant="outline" color="gray">
-                              {product.unite_base || 'pc'}
-                            </Badge>
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    })}
-                  </Table.Tbody>
-                </Table>
+                {filteredProducts.length === 0 ? (
+                  <Center py="xl">
+                    <Stack align="center" gap="xs">
+                      <IconPackage size={32} color="#adb5bd" />
+                      <Text c="dimmed" size="sm">Aucun produit disponible en stock</Text>
+                      <Text c="dimmed" size="xs">Ajoutez des produits ou approvisionnez le stock</Text>
+                      <Button 
+                        size="xs" 
+                        variant="light" 
+                        color="grape"
+                        onClick={() => handleOpenProduitModal()}
+                      >
+                        Créer un produit
+                      </Button>
+                    </Stack>
+                  </Center>
+                ) : (
+                  <Table striped highlightOnHover verticalSpacing="xs">
+                    <Table.Thead>
+                      <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                        <Table.Th c="white" style={{ width: '30%' }}>Désignation</Table.Th>
+                        <Table.Th c="white" style={{ width: '12%' }}>Catégorie</Table.Th>
+                        <Table.Th c="white" style={{ width: '8%' }} ta="center">Stock</Table.Th>
+                        <Table.Th c="white" style={{ width: '14%' }} ta="right">Prix {prixType === 'DETAIL' ? 'Détail' : 'Gros'}</Table.Th>
+                        <Table.Th c="white" style={{ width: '18%' }} ta="center">Quantité</Table.Th>
+                        <Table.Th c="white" style={{ width: '18%' }} ta="center">Action</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {paginatedProducts.map((product) => {
+                        const isRupture = (product.qte_stock || 0) <= 0;
+                        const prix = getPrixProduit(product);
+                        const hasPrix = prix > 0;
+                        return (
+                          <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
+                            <Table.Td>
+                              <Text fw={500} size="xs">{product.designation}</Text>
+                              <Text size="xs" c="dimmed">{product.code_produit}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge variant="light" size="xs">{product.categorie || '-'}</Badge>
+                            </Table.Td>
+                            <Table.Td ta="center">
+                              <Badge
+                                color={isRupture ? 'red' : (product.qte_stock || 0) < (product.seuil_alerte || 10) ? 'orange' : 'green'}
+                                variant={isRupture ? 'filled' : 'light'}
+                                size="xs"
+                              >
+                                {product.qte_stock || 0}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td ta="right">
+                              {hasPrix ? (
+                                <Text fw={600} c="blue" size="xs">{formatPrice(prix)} FCFA</Text>
+                              ) : (
+                                <Text size="xs" c="red">Prix non défini</Text>
+                              )}
+                            </Table.Td>
+                            <Table.Td ta="center">
+                              {isRupture ? (
+                                <Text size="xs" c="dimmed">Rupture</Text>
+                              ) : !hasPrix ? (
+                                <Button size="xs" variant="subtle" color="orange" onClick={() => handleOpenProduitModal(product)}>
+                                  Définir prix
+                                </Button>
+                              ) : (
+                                <Group gap="xs" justify="center" wrap="nowrap">
+                                  <NumberInput
+                                    size="xs"
+                                    min={1}
+                                    max={product.qte_stock || 0}
+                                    value={quantiteInput[product.idProduit] || 0}
+                                    onChange={(val) => setQuantiteInput({ ...quantiteInput, [product.idProduit]: Number(val) || 0 })}
+                                    style={{ width: 60 }}
+                                    placeholder="Qté"
+                                  />
+                                  <ActionIcon
+                                    size="sm"
+                                    variant="light"
+                                    color="green"
+                                    onClick={() => addToCart(product, quantiteInput[product.idProduit] || 0)}
+                                    disabled={!quantiteInput[product.idProduit] || quantiteInput[product.idProduit] <= 0}
+                                  >
+                                    <IconPlus size={12} />
+                                  </ActionIcon>
+                                </Group>
+                              )}
+                            </Table.Td>
+                            <Table.Td ta="center">
+                              <Badge size="xs" variant="outline" color="gray">
+                                {product.unite_base || 'pc'}
+                              </Badge>
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
+                    </Table.Tbody>
+                  </Table>
+                )}
               </ScrollArea>
-
-              {filteredProducts.length === 0 && (
-                <Center py="md">
-                  <Stack align="center" gap="xs">
-                    <IconSearch size={24} color="#ccc" />
-                    <Text c="dimmed" size="xs">Aucun produit trouvé</Text>
-                  </Stack>
-                </Center>
-              )}
 
               {totalPages > 1 && (
                 <Group justify="center" mt="xs">
@@ -860,9 +1112,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               )}
             </Card>
 
-            {/* ============================================ */}
-            {/* LIGNE 4: Panier - Compactée avec prix modifiables */}
-            {/* ============================================ */}
+            {/* LIGNE 4: Panier */}
             {cart.length > 0 && (
               <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
                 <Group gap="xs" mb="xs" justify="space-between">
@@ -877,7 +1127,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                     </Badge>
                   </Group>
                   <Group gap="xs">
-                    <Text size="xs" c="dimmed">Prix moyen: {formatPrice(getPrixMoyen())} F</Text>
+                    <Text size="xs" c="dimmed">Prix moyen: {formatPrice(getPrixMoyen())} FCFA</Text>
                     <Tooltip label="Réinitialiser les prix modifiés">
                       <ActionIcon 
                         size="sm" 
@@ -934,7 +1184,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                                   step={100}
                                 />
                               ) : (
-                                <Text size="xs" fw={600}>{formatPrice(item.prix_vente)}</Text>
+                                <Text size="xs" fw={600}>{formatPrice(item.prix_vente)} FCFA</Text>
                               )}
                               <ActionIcon
                                 size="sm"
@@ -947,7 +1197,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                             </Group>
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Text fw={600} c="blue" size="xs">{formatPrice(item.total)}</Text>
+                            <Text fw={600} c="blue" size="xs">{formatPrice(item.total)} FCFA</Text>
                           </Table.Td>
                           <Table.Td ta="center">
                             <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
@@ -974,9 +1224,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               </Card>
             )}
 
-            {/* ============================================ */}
-            {/* Boutons d'action - Compactés */}
-            {/* ============================================ */}
+            {/* Boutons d'action */}
             <Group justify="flex-end" gap="xs" pb="xs">
               <Button
                 variant="outline"

@@ -18,7 +18,9 @@ import {
   SimpleGrid,
   Divider,
   ScrollArea,
-  Modal} from "@mantine/core";
+  Modal,
+  Alert
+} from "@mantine/core";
 import {
   IconArrowLeft,
   IconPrinter,
@@ -30,32 +32,51 @@ import {
   IconPercentage,
   IconTruck,
   IconPackage,
-  IconEye
+  IconEye,
+  IconAlertCircle,
+  IconRefresh
 } from "@tabler/icons-react";
 import { useReactToPrint } from "react-to-print";
-import { useDecomptes } from "../../hooks/useDecomptes";
+import { decompteRepository } from "../../database/repositories/decompteRepository";
 import RecuDecompte from "../../components/decomptes/RecuDecompte";
 
 export default function DetailDecompte() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getDecompteById } = useDecomptes();
   const [decompte, setDecompte] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [recuModalOpen, setRecuModalOpen] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await getDecompteById(Number(id));
+        setLoading(true);
+        setError(null);
+        
+        if (!id) {
+          setError("ID du décompte manquant");
+          return;
+        }
+
+        const data = await decompteRepository.getById(Number(id));
+        
+        if (!data) {
+          setError("Décompte non trouvé");
+          return;
+        }
+        
         setDecompte(data);
+      } catch (error: any) {
+        console.error('Erreur chargement décompte:', error);
+        setError(error?.message || "Erreur lors du chargement du décompte");
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [id, getDecompteById]);
+  }, [id]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -66,6 +87,37 @@ export default function DetailDecompte() {
     return (
       <Center py={100}>
         <Loader size="xl" />
+      </Center>
+    );
+  }
+
+  if (error) {
+    return (
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert 
+            icon={<IconAlertCircle size={16} />} 
+            title="Erreur" 
+            color="red"
+            withCloseButton
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+          <Button 
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => window.location.reload()}
+            variant="light"
+          >
+            Réessayer
+          </Button>
+          <Button 
+            variant="subtle"
+            onClick={() => navigate("/decomptes")}
+          >
+            Retour à la liste
+          </Button>
+        </Stack>
       </Center>
     );
   }
@@ -87,34 +139,46 @@ export default function DetailDecompte() {
   // Récupérer le taux de commission du décompte (ou 60% par défaut)
   const tauxCommission = decompte.taux_commission || 60;
 
-  const totalVente = decompte.details?.reduce((sum: number, d: any) => sum + (d.qte_decompte * d.prix_vente), 0) || 0;
-  const totalAchat = decompte.details?.reduce((sum: number, d: any) => sum + (d.qte_decompte * d.prix_achat), 0) || 0;
+  // Calcul des totaux avec gestion des valeurs null/undefined
+  const totalVente = decompte.details?.reduce((sum: number, d: any) => {
+    const qte = d.qte_decompte || 0;
+    const prix = d.prix_vente || 0;
+    return sum + (qte * prix);
+  }, 0) || 0;
+
+  const totalAchat = decompte.details?.reduce((sum: number, d: any) => {
+    const qte = d.qte_decompte || 0;
+    const prix = d.prix_achat || 0;
+    return sum + (qte * prix);
+  }, 0) || 0;
+
   const totalBenefice = totalVente - totalAchat;
   const totalCommission = (totalBenefice * tauxCommission) / 100;
+  const totalNet = totalVente - totalCommission;
 
   const getStatutColor = (statut: string) => {
-    switch (statut) {
-      case "PAYE":
-        return { color: "green", bg: "#e8f5e9", label: "Payé" };
-      case "EN_ATTENTE":
-        return { color: "orange", bg: "#fff3e0", label: "En attente" };
-      default:
-        return { color: "gray", bg: "#f5f5f5", label: statut };
-    }
+    const statusMap: Record<string, { color: string; bg: string; label: string }> = {
+      "PAYE": { color: "green", bg: "#e8f5e9", label: "Payé" },
+      "VALIDE": { color: "green", bg: "#e8f5e9", label: "Validé" },
+      "EN_ATTENTE": { color: "orange", bg: "#fff3e0", label: "En attente" },
+      "brouillon": { color: "orange", bg: "#fff3e0", label: "Brouillon" },
+      "annule": { color: "red", bg: "#ffebee", label: "Annulé" },
+    };
+    return statusMap[statut] || { color: "gray", bg: "#f5f5f5", label: statut };
   };
 
   const statutInfo = getStatutColor(decompte.statut);
 
   // Préparer les données pour le reçu
   const recuDetails = (decompte.details || []).map((d: any) => ({
-    designation: d.designation,
+    designation: d.designation || 'Produit',
     categorie: d.categorie || '-',
     unite: d.unite_base || 'pièce',
-    qte: d.qte_decompte,
+    qte: d.qte_decompte || 0,
     prix_achat: d.prix_achat || 0,
     prix_vente: d.prix_vente || 0,
-    benefice: (d.prix_vente - d.prix_achat) * d.qte_decompte,
-    total_vente: d.qte_decompte * d.prix_vente
+    benefice: ((d.prix_vente || 0) - (d.prix_achat || 0)) * (d.qte_decompte || 0),
+    total_vente: (d.qte_decompte || 0) * (d.prix_vente || 0)
   }));
 
   return (
@@ -194,7 +258,7 @@ export default function DetailDecompte() {
               <Group gap="xs">
                 <IconUser size={14} color="#1b365d" />
                 <Text size="xs" c="dimmed">Revendeur:</Text>
-                <Text size="xs" fw={500}>{decompte.NomComplet}</Text>
+                <Text size="xs" fw={500}>{decompte.NomComplet || 'Inconnu'}</Text>
               </Group>
               <Group gap="xs">
                 <IconBuildingStore size={14} color="#1b365d" />
@@ -217,6 +281,11 @@ export default function DetailDecompte() {
             {decompte.observation && (
               <Text size="xs" c="dimmed" mt="xs">
                 <strong>Obs:</strong> {decompte.observation}
+              </Text>
+            )}
+            {decompte.notes && (
+              <Text size="xs" c="dimmed" mt="xs">
+                <strong>Notes:</strong> {decompte.notes}
               </Text>
             )}
           </Card>
@@ -248,8 +317,11 @@ export default function DetailDecompte() {
                 </Table.Thead>
                 <Table.Tbody>
                   {(decompte.details || []).map((detail: any, idx: number) => {
-                    const totalVenteLigne = detail.qte_decompte * detail.prix_vente;
-                    const totalAchatLigne = detail.qte_decompte * detail.prix_achat;
+                    const qte = detail.qte_decompte || 0;
+                    const prixAchat = detail.prix_achat || 0;
+                    const prixVente = detail.prix_vente || 0;
+                    const totalVenteLigne = qte * prixVente;
+                    const totalAchatLigne = qte * prixAchat;
                     const beneficeLigne = totalVenteLigne - totalAchatLigne;
                     const commissionLigne = (beneficeLigne * tauxCommission) / 100;
 
@@ -257,11 +329,12 @@ export default function DetailDecompte() {
                       <Table.Tr key={detail.idDetailRevendeur || idx}>
                         <Table.Td ta="center">{idx + 1}</Table.Td>
                         <Table.Td>
-                          <Text size="xs" fw={500}>{detail.designation}</Text>
+                          <Text size="xs" fw={500}>{detail.designation || 'Produit'}</Text>
+                          <Text size="xs" c="dimmed">{detail.code_produit}</Text>
                         </Table.Td>
-                        <Table.Td ta="center">{detail.qte_decompte}</Table.Td>
-                        <Table.Td ta="right">{detail.prix_achat?.toLocaleString()}</Table.Td>
-                        <Table.Td ta="right" fw={600}>{detail.prix_vente?.toLocaleString()}</Table.Td>
+                        <Table.Td ta="center">{qte}</Table.Td>
+                        <Table.Td ta="right">{prixAchat.toLocaleString()}</Table.Td>
+                        <Table.Td ta="right" fw={600}>{prixVente.toLocaleString()}</Table.Td>
                         <Table.Td ta="right" c={beneficeLigne >= 0 ? "green" : "red"}>
                           {beneficeLigne.toLocaleString()}
                         </Table.Td>
@@ -320,7 +393,7 @@ export default function DetailDecompte() {
                   <Text fw={700} size="sm" c="green.8">Net à reverser</Text>
                 </Group>
                 <Text fw={800} size="lg" c="green.8">
-                  {(totalVente - totalCommission).toLocaleString()} FCFA
+                  {totalNet.toLocaleString()} FCFA
                 </Text>
               </Flex>
             </Paper>
@@ -340,7 +413,7 @@ export default function DetailDecompte() {
         <RecuDecompte
           numero={decompte.code_decompte}
           date={decompte.date_decompte}
-          client={decompte.NomComplet || decompte.Societe || ''}
+          client={decompte.NomComplet || decompte.Societe || 'Client'}
           details={recuDetails}
           factureOriginale={{ taux_commission_revendeur: tauxCommission }}
         />
@@ -357,6 +430,10 @@ export default function DetailDecompte() {
           body {
             padding: 0;
             margin: 0;
+          }
+          .mantine-Paper-root {
+            box-shadow: none !important;
+            border: none !important;
           }
         }
       `}</style>

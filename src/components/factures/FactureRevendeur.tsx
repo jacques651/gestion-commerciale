@@ -1,278 +1,336 @@
 // src/components/factures/FactureRevendeur.tsx
-import React, { useMemo, useRef, useEffect } from 'react';
-import {
-  Paper, Text, Table, Group, Box,
-  Button, Image, Divider, SimpleGrid, Badge, Flex
-} from '@mantine/core';
-import {
-  IconPrinter, IconDownload, IconPercentage
-} from '@tabler/icons-react';
-import { useReactToPrint } from 'react-to-print';
-import { useAtelierConfig } from '../../hooks/useAtelierConfig';
+import { Box, Paper, Text, Title, Table, Group, Badge, Divider, Grid, Flex, SimpleGrid } from '@mantine/core';
 
+// ✅ Interface alignée avec la structure réelle
 interface FactureRevendeurProps {
-  facture: any;
+  facture: {
+    idFactureRevendeur?: number;
+    code_facture?: string;
+    date_facture?: string;
+    idRevendeur?: number;
+    idCommande?: number;
+    montant_ht?: number;
+    montant_ttc?: number;
+    commission?: number;
+    statut?: string;
+    taux_commission?: number;
+    // Informations du revendeur
+    NomComplet?: string;
+    Societe?: string;
+    Tel?: string;
+    Adresse?: string;
+    // Détails de la facture
+    details?: Array<{
+      idDetailFactureRevendeur?: number;
+      idProduit?: number;
+      qte_commande?: number;
+      prix_achat_base?: number;
+      prix_unitaire_vente?: number;
+      designation?: string;
+      code_produit?: string;
+    }>;
+    code_commande?: string;
+    [key: string]: any;
+  };
 }
 
-interface DetailCalcul {
-  numero: number;
-  designation: string;
-  categorie: string;
-  unite: string;
-  qte: number;
-  prix_achat: number;
-  prix_vente: number;
-  benefice_ligne: number;
-  commission_ligne: number;
-  total_vente: number;
-}
-
-export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({ facture }) => {
-  const printRef = useRef<HTMLDivElement>(null);
-  const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
-
-  // Récupérer le taux de commission UNIQUE de la facture/commande
-  const tauxCommissionUnique = useMemo(() => {
-    const taux = facture?.taux_commission_revendeur 
-      || facture?.commande?.commission_pourcentage
-      || facture?.commission_pourcentage 
-      || 60;
-    
-    return Number(taux);
-  }, [facture]);
-
-  useEffect(() => {
-    console.log('=== 🔍 FACTURE REVENDEUR ===');
-    console.log('Taux commission unique:', tauxCommissionUnique, '%');
-  }, [facture, tauxCommissionUnique]);
-
-  const { detailsWithCalculs, totalVente, totalCommission, totalBenefice } = useMemo(() => {
-    const details = facture?.details || [];
-    let totalVenteValue = 0;
-    let totalCommissionValue = 0;
-    let totalBeneficeValue = 0;
-
-    const detailsWithCalculsValue: DetailCalcul[] = details.map((detail: any, idx: number) => {
-      const qte = Number(detail.qte_commande || detail.quantite || 1);
-      const prixAchat = Number(detail.prix_achat_base || detail.prix_achat || 0);
-      const prixVente = Number(detail.prix_unitaire_vente || detail.prix_vente || 0);
-      const unite = detail.unite_base || detail.unite_mesure || detail.unite || 'pièce';
-      
-      const totalVenteLigne = prixVente * qte;
-      const totalAchatLigne = prixAchat * qte;
-      const beneficeLigne = totalVenteLigne - totalAchatLigne;
-      const commissionLigne = (beneficeLigne * tauxCommissionUnique) / 100;
-
-      totalVenteValue += totalVenteLigne;
-      totalCommissionValue += commissionLigne;
-      totalBeneficeValue += beneficeLigne;
-
-      return {
-        numero: idx + 1,
-        designation: detail.designation || detail.produit_designation || 'Produit',
-        categorie: detail.categorie || '-',
-        unite,
-        qte,
-        prix_achat: prixAchat,
-        prix_vente: prixVente,
-        benefice_ligne: beneficeLigne,
-        commission_ligne: commissionLigne,
-        total_vente: totalVenteLigne,
-      };
-    });
-
-    return {
-      detailsWithCalculs: detailsWithCalculsValue,
-      totalVente: totalVenteValue,
-      totalCommission: totalCommissionValue,
-      totalBenefice: totalBeneficeValue,
-    };
-  }, [facture, tauxCommissionUnique]);
-
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    documentTitle: `Facture_${facture?.code_facture || 'facture'}`,
+// ✅ Fonction de formatage des montants
+const formatMontant = (value: number): string => {
+  return (value || 0).toLocaleString('fr-FR', { 
+    minimumFractionDigits: 0, 
+    maximumFractionDigits: 0 
   });
+};
 
-  const formatMontant = (value: number | string | undefined | null): string => {
-    if (!value) return '0';
-    const num = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(num)) return '0';
-    return num.toLocaleString('fr-FR');
+// ✅ Fonction de formatage de la date
+const formatDate = (dateStr?: string): string => {
+  if (!dateStr) return 'N/A';
+  try {
+    return new Date(dateStr).toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  } catch {
+    return 'N/A';
+  }
+};
+
+// ✅ Fonction pour le statut
+const getStatutInfo = (statut?: string) => {
+  const statusMap: Record<string, { color: string; label: string }> = {
+    'payée': { color: 'green', label: 'PAYÉE' },
+    'paye': { color: 'green', label: 'PAYÉE' },
+    'en_attente': { color: 'orange', label: 'EN ATTENTE' },
+    'en cours': { color: 'orange', label: 'EN COURS' },
+    'annulee': { color: 'red', label: 'ANNULÉE' },
+    'annulée': { color: 'red', label: 'ANNULÉE' },
+    'valide': { color: 'blue', label: 'VALIDÉE' },
+    'brouillon': { color: 'gray', label: 'BROUILLON' },
   };
+  
+  const defaultStatus = { color: 'gray', label: 'EN ATTENTE' };
+  return statusMap[statut?.toLowerCase() || ''] || defaultStatus;
+};
 
-  const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return '-';
-    try {
-      return new Date(dateStr).toLocaleDateString('fr-FR');
-    } catch {
-      return '-';
-    }
-  };
-
-  const atelier = atelierConfig || {
-    nom_atelier: 'MON ATELIER',
-    telephone: '',
-    adresse: '',
-    email: '',
-    message_facture: 'Merci de votre confiance',
-    logo_base64: ''
-  };
-
-  if (atelierLoading || !facture) {
+export default function FactureRevendeur({ facture }: FactureRevendeurProps) {
+  if (!facture) {
     return (
-      <Paper p="xl" ta="center">
-        <Text>Chargement...</Text>
+      <Paper p="xl" withBorder>
+        <Text ta="center" c="dimmed">Aucune facture à afficher</Text>
       </Paper>
     );
   }
 
-  const factureData = {
-    code_facture: facture.code_facture || '-',
-    date_facture: facture.date_facture || new Date().toISOString(),
-    client_nom: facture.NomComplet || facture.client_nom || 'Revendeur',
-    client_societe: facture.Societe || facture.client_societe || '',
-  };
+  const statutInfo = getStatutInfo(facture.statut);
+  const tauxCommission = facture.taux_commission || 60;
 
-  const netAReverser = totalVente - totalCommission;
+  // ✅ Calcul du total TTC
+  const totalTTC = facture.montant_ttc || facture.total_ttc || 0;
+
+  // ✅ Calcul du bénéfice total
+  const totalBenefice = facture.details?.reduce((sum, d) => {
+    const qte = d.qte_commande || 0;
+    const prixVente = d.prix_unitaire_vente || 0;
+    const prixAchat = d.prix_achat_base || 0;
+    return sum + ((prixVente - prixAchat) * qte);
+  }, 0) || 0;
+
+  // ✅ 🔥 CORRECTION : Commission = 0 si bénéfice négatif
+  const commission = totalBenefice > 0 ? (totalBenefice * tauxCommission) / 100 : 0;
+  
+  // ✅ Net à reverser = Total TTC - Commission (jamais négative)
+  const netAReverser = totalTTC - commission;
+
+  // ✅ Récupérer les infos du revendeur
+  const revendeurNom = facture.NomComplet || facture.nom_revendeur || 'N/A';
+  const revendeurSociete = facture.Societe || facture.societe_revendeur || '';
+  const revendeurTel = facture.Tel || facture.telephone_revendeur || '';
+  const revendeurAdresse = facture.Adresse || facture.adresse_revendeur || '';
+
+  // ✅ Transformer les détails pour l'affichage
+  const lignes = (facture.details || []).map((detail: any, index: number) => {
+    const qte = detail.qte_commande || detail.quantite || 0;
+    const prixAchat = detail.prix_achat_base || detail.prix_achat || 0;
+    const prixVente = detail.prix_unitaire_vente || detail.prix_vente || 0;
+    const totalLigne = prixVente * qte;
+    const beneficeLigne = (prixVente - prixAchat) * qte;
+
+    return {
+      numero: index + 1,
+      designation: detail.designation || detail.nom_produit || 'Produit',
+      categorie: detail.categorie || detail.categorie_produit || '-',
+      unite: detail.unite_base || detail.unite_mesure || 'pièce',
+      qte,
+      prix_achat: prixAchat,
+      prix_vente: prixVente,
+      benefice_ligne: beneficeLigne,
+      total_vente: totalLigne
+    };
+  });
+
+  // ✅ Couleurs des montants
+  const couleurBenefice = totalBenefice >= 0 ? "green" : "red";
+  const couleurCommission = commission > 0 ? "orange" : "gray";
+  const couleurNet = netAReverser >= 0 ? "green" : "red";
 
   return (
-    <Box>
-      {/* Boutons d'action */}
-      <Group justify="flex-end" mb="xs" className="no-print">
-        <Button size="xs" variant="subtle" onClick={handlePrint} leftSection={<IconPrinter size={12} />}>
-          Imprimer
-        </Button>
-        <Button size="xs" variant="subtle" color="teal" onClick={handlePrint} leftSection={<IconDownload size={12} />}>
-          PDF
-        </Button>
+    <Paper p="xl" withBorder shadow="sm" mt="md" radius="lg">
+      {/* En-tête de la facture */}
+      <Box style={{ textAlign: 'center' }} mb="xl">
+        <Title 
+          order={1} 
+          size="h2" 
+          c="blue"
+          style={{
+            fontFamily: 'Georgia, Times New Roman, serif',
+            letterSpacing: '2px'
+          }}
+        >
+          FACTURE REVENDEUR
+        </Title>
+        <Text size="sm" c="dimmed" mt="xs">
+          N° {facture.code_facture || 'N/A'}
+        </Text>
+        {facture.code_commande && (
+          <Text size="xs" c="dimmed">
+            Commande associée: {facture.code_commande}
+          </Text>
+        )}
+        <Badge 
+          color={statutInfo.color} 
+          size="lg" 
+          variant="filled"
+          mt="xs"
+          style={{ textTransform: 'uppercase' }}
+        >
+          {statutInfo.label}
+        </Badge>
+      </Box>
+
+      <Divider my="md" />
+
+      {/* Informations du revendeur */}
+      <Grid grow mb="xl">
+        <Grid.Col span={6}>
+          <Text size="xs" c="dimmed" fw={600} tt="uppercase">Revendeur</Text>
+          <Text fw={700} size="lg">{revendeurNom}</Text>
+          {revendeurSociete && (
+            <Text size="sm" c="dimmed" mt={2}>{revendeurSociete}</Text>
+          )}
+          {revendeurAdresse && (
+            <Text size="sm" c="dimmed" mt={2}>{revendeurAdresse}</Text>
+          )}
+          {revendeurTel && (
+            <Text size="sm" c="dimmed" mt={2}>📞 {revendeurTel}</Text>
+          )}
+        </Grid.Col>
+        <Grid.Col span={6} style={{ textAlign: 'right' }}>
+          <Text size="xs" c="dimmed" fw={600} tt="uppercase">Date</Text>
+          <Text size="lg" fw={600}>{formatDate(facture.date_facture)}</Text>
+          <Text size="xs" c="dimmed" mt="xs" tt="uppercase">Taux Commission</Text>
+          <Text size="sm" fw={600} c="orange">{tauxCommission}%</Text>
+        </Grid.Col>
+      </Grid>
+
+      <Divider my="md" />
+
+      {/* Tableau des produits */}
+      <Title order={4} mb="md" fw={600}>Détail des articles</Title>
+      
+      {lignes.length > 0 ? (
+        <Table striped highlightOnHover withColumnBorders>
+          <Table.Thead>
+            <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+              <Table.Th c="white" w={40}>#</Table.Th>
+              <Table.Th c="white">Désignation</Table.Th>
+              <Table.Th c="white">Catégorie</Table.Th>
+              <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
+              <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
+              <Table.Th c="white" ta="right" w={90}>P.A (F)</Table.Th>
+              <Table.Th c="white" ta="right" w={90}>P.V (F)</Table.Th>
+              <Table.Th c="white" ta="right" w={100}>Bénéf (F)</Table.Th>
+              <Table.Th c="white" ta="right" w={100}>Total (F)</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {lignes.map((ligne) => (
+              <Table.Tr key={ligne.numero}>
+                <Table.Td ta="center">{ligne.numero}</Table.Td>
+                <Table.Td>
+                  <Text size="sm" fw={500}>{ligne.designation}</Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm" c="dimmed">{ligne.categorie}</Text>
+                </Table.Td>
+                <Table.Td ta="center">
+                  <Badge size="xs" variant="light" color="gray" style={{ fontSize: '12px' }}>
+                    {ligne.unite}
+                  </Badge>
+                </Table.Td>
+                <Table.Td ta="center">{ligne.qte}</Table.Td>
+                <Table.Td ta="right">{formatMontant(ligne.prix_achat)}</Table.Td>
+                <Table.Td ta="right" fw={600}>{formatMontant(ligne.prix_vente)}</Table.Td>
+                <Table.Td ta="right" c={ligne.benefice_ligne >= 0 ? "green" : "red"}>
+                  {formatMontant(ligne.benefice_ligne)}
+                </Table.Td>
+                <Table.Td ta="right" fw={700}>{formatMontant(ligne.total_vente)}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : (
+        <Paper p="md" withBorder style={{ textAlign: 'center', background: '#f8f9fa' }}>
+          <Text c="dimmed">Aucun article dans cette facture</Text>
+        </Paper>
+      )}
+
+      <Divider my="xl" />
+
+      {/* Récapitulatif - avec couleurs correctes */}
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md" mb="md">
+        <Paper p="md" withBorder bg="gray.0">
+          <Flex justify="space-between" align="center">
+            <Text size="sm" c="dimmed">Total Ventes</Text>
+            <Text size="lg" fw={700} c="blue">{formatMontant(totalTTC)} FCFA</Text>
+          </Flex>
+        </Paper>
+        <Paper p="md" withBorder bg={totalBenefice >= 0 ? "green.0" : "red.0"}>
+          <Flex justify="space-between" align="center">
+            <Text size="sm" fw={600} c={couleurBenefice}>Bénéfice Total</Text>
+            <Text size="lg" fw={700} c={couleurBenefice}>
+              {formatMontant(totalBenefice)} FCFA
+              {totalBenefice < 0 && " ⚠️"}
+            </Text>
+          </Flex>
+        </Paper>
+        <Paper p="md" withBorder bg={commission > 0 ? "orange.0" : "gray.0"}>
+          <Flex justify="space-between" align="center">
+            <Text size="sm" fw={600} c={couleurCommission}>
+              Commission ({tauxCommission}%)
+              {commission === 0 && " (0 car bénéfice ≤ 0)"}
+            </Text>
+            <Text size="lg" fw={700} c={couleurCommission}>
+              {formatMontant(commission)} FCFA
+            </Text>
+          </Flex>
+        </Paper>
+        <Paper p="md" withBorder bg={netAReverser >= 0 ? "teal.0" : "red.0"}>
+          <Flex justify="space-between" align="center">
+            <Text size="sm" fw={600} c={couleurNet}>Net à reverser</Text>
+            <Text size="lg" fw={800} c={couleurNet}>{formatMontant(netAReverser)} FCFA</Text>
+          </Flex>
+        </Paper>
+      </SimpleGrid>
+
+      {/* Net à reverser en grand */}
+      <Paper p="md" style={{ 
+        backgroundColor: netAReverser >= 0 ? '#e8f5e9' : '#ffebee', 
+        borderRadius: '8px', 
+        border: `2px solid ${netAReverser >= 0 ? '#4caf50' : '#ef5350'}`
+      }}>
+        <Flex justify="space-between" align="center">
+          <Text fw={700} size="xl" c={netAReverser >= 0 ? "green.8" : "red.8"}>
+            NET À REVERSER :
+          </Text>
+          <Text fw={800} size="xl" c={netAReverser >= 0 ? "green.8" : "red.8"} style={{ fontSize: '2rem' }}>
+            {formatMontant(netAReverser)} FCFA
+          </Text>
+        </Flex>
+      </Paper>
+
+      <Divider my="xl" />
+
+      {/* Statut */}
+      <Group justify="center" mt="xl">
+        <Badge 
+          size="xl" 
+          color={statutInfo.color}
+          variant="filled"
+          style={{ 
+            padding: '10px 32px', 
+            fontSize: '16px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px'
+          }}
+        >
+          {statutInfo.label}
+        </Badge>
       </Group>
 
-      <div ref={printRef}>
-        <Paper p="xs" style={{ maxWidth: '1300px', margin: '0 auto', backgroundColor: 'white' }}>
-          
-          {/* En-tête compact */}
-          <Flex justify="space-between" align="center" wrap="wrap" gap="xs" style={{ borderBottom: '1px solid #1b365d', paddingBottom: 6, marginBottom: 8 }}>
-            <Flex align="center" gap="xs">
-              {atelier.logo_base64 && (
-                <Image src={atelier.logo_base64} alt="Logo" style={{ height: '30px', objectFit: 'contain' }} />
-              )}
-              <Box>
-                <Text fw={700} size="xs">{atelier.nom_atelier}</Text>
-                <Text size="xs" c="dimmed">{atelier.telephone}</Text>
-              </Box>
-            </Flex>
-            <Box style={{ textAlign: 'right' }}>
-              <Text size="xs" fw={600}>N°{factureData.code_facture}</Text>
-              <Text size="xs" c="dimmed">{formatDate(factureData.date_facture)}</Text>
-            </Box>
-          </Flex>
-
-          {/* Titre */}
-          <Text ta="center" fw={700} size="xs" style={{ backgroundColor: '#f2d2bc', padding: '2px', borderRadius: '4px', marginBottom: 8 }}>
-            FACTURE REVENDEUR
-          </Text>
-
-          {/* Infos client */}
-          <Flex justify="space-between" wrap="wrap" gap="xs" mb="xs" style={{ fontSize: '14px' }}>
-            <Text><Text span fw={600}>Revendeur:</Text> {factureData.client_nom}</Text>
-            <Text><Text span fw={600}>Société:</Text> {factureData.client_societe || '-'}</Text>
-          </Flex>
-
-          <Divider my={4} />
-
-          {/* Tableau */}
-          <Table withColumnBorders style={{ fontSize: '14px', marginBottom: 12 }}>
-            <Table.Thead>
-              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                <Table.Th c="white" ta="center" w={25}>#</Table.Th>
-                <Table.Th c="white">Désignation</Table.Th>
-                <Table.Th c="white">Catégorie</Table.Th>
-                <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
-                <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
-                <Table.Th c="white" ta="right" w={90}>P.A (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={90}>P.V (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={100}>Bénéf (F)</Table.Th>
-                <Table.Th c="white" ta="right" w={100}>Total (F)</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {detailsWithCalculs.map((detail) => (
-                <Table.Tr key={detail.numero}>
-                  <Table.Td ta="center">{detail.numero}</Table.Td>
-                  <Table.Td>
-                    <Text size="xs" fw={500}>{detail.designation}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">{detail.categorie}</Text>
-                  </Table.Td>
-                  <Table.Td ta="center">
-                    <Badge size="xs" variant="light" color="gray" style={{ fontSize: '12px' }}>
-                      {detail.unite}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td ta="center">{detail.qte}</Table.Td>
-                  <Table.Td ta="right">{formatMontant(detail.prix_achat)}</Table.Td>
-                  <Table.Td ta="right" fw={600}>{formatMontant(detail.prix_vente)}</Table.Td>
-                  <Table.Td ta="right" c="green.7">{formatMontant(detail.benefice_ligne)}</Table.Td>
-                  <Table.Td ta="right" fw={700}>{formatMontant(detail.total_vente)}</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-
-          <Divider my={4} />
-
-          {/* Section bas compacte - 2 lignes seulement */}
-          {/* Ligne 1: Totaux */}
-          <SimpleGrid cols={3} spacing={6} mb={6}>
-            <Paper p="xs" withBorder>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Total Ventes:</Text>
-                <Text size="xs" fw={700}>{formatMontant(totalVente)} FCFA</Text>
-              </Flex>
-            </Paper>
-            <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9' }}>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Bénéfice Total:</Text>
-                <Text size="xs" fw={600} c="green">{formatMontant(totalBenefice)} FCFA</Text>
-              </Flex>
-            </Paper>
-            <Paper p="xs" withBorder style={{ backgroundColor: '#fff3e0' }}>
-              <Flex justify="space-between" gap={8}>
-                <Text size="xs" fw={600}>Commission ({tauxCommissionUnique}%):</Text>
-                <Text size="xs" fw={600} c="orange">{formatMontant(totalCommission)} FCFA</Text>
-              </Flex>
-            </Paper>
-          </SimpleGrid>
-
-          {/* Ligne 2: Net à reverser */}
-          <Paper p="xs" style={{ backgroundColor: '#e8f5e9', borderRadius: '4px', border: '1px solid #c8e6c9' }}>
-            <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
-              <Group gap="xs">
-                <IconPercentage size={16} color="#2e7d32" />
-                <Text fw={700} size="sm">NET À REVERSER :</Text>
-              </Group>
-              <Text fw={800} size="lg" c="green">{formatMontant(netAReverser)} FCFA</Text>
-            </Flex>
-          </Paper>
-
-          {/* Message */}
-          <Text size="xs" ta="center" fs="italic" c="dimmed" mt="sm">
-            {atelier.message_facture}
-          </Text>
-        </Paper>
-      </div>
-
-      <style>{`
-        @media print {
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
-    </Box>
+      {/* Pied de page */}
+      <Box mt="xl" style={{ textAlign: 'center', borderTop: '2px solid #e9ecef', paddingTop: '20px' }}>
+        <Text size="xs" c="dimmed" fw={500}>
+          Merci de votre confiance - Gestion Pro
+        </Text>
+        <Text size="xs" c="dimmed" mt={2}>
+          Généré le {new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} 
+          à {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+        <Text size="xs" c="dimmed" mt={4} fs="italic">
+          Tous les montants sont en FCFA
+        </Text>
+      </Box>
+    </Paper>
   );
-};
-
-export default FactureRevendeur;
+}

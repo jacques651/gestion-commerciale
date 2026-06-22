@@ -21,7 +21,8 @@ import {
   Tooltip,
   ActionIcon,
   Divider,
-  Modal
+  Modal,
+  Alert
 } from "@mantine/core";
 import '@mantine/dates/styles.css';
 import {
@@ -38,13 +39,13 @@ import {
   IconFileTypePdf,
   IconEye,
   IconReceipt,
-  IconFileInvoice
+  IconFileInvoice,
+  IconAlertCircle
 } from "@tabler/icons-react";
 import { getDb } from "../../../database/db";
 import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
 import { useReactToPrint } from "react-to-print";
 import { notifications } from "@mantine/notifications";
-
 
 interface Client {
   idClient: number;
@@ -63,6 +64,7 @@ interface StockItem {
   prix_achat_base: number;
   prix_vente_gros: number;
   categorie: string;
+  unite_base?: string;
 }
 
 export default function ListeStockRevendeur() {
@@ -75,10 +77,9 @@ export default function ListeStockRevendeur() {
   const [loadingStock, setLoadingStock] = useState(false);
   const [valeurStock, setValeurStock] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
-  const [] = useState<Date | null>(null);
-  const [] = useState<Date | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<StockItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadRevendeurs();
@@ -87,6 +88,7 @@ export default function ListeStockRevendeur() {
   const loadRevendeurs = async () => {
     try {
       setLoading(true);
+      setError(null);
       const db = await getDb();
       
       const data = await db.select<Client[]>(`
@@ -101,11 +103,16 @@ export default function ListeStockRevendeur() {
         ORDER BY NomComplet
       `);
       
-      console.log("Revendeurs chargés:", data);
+      console.log("✅ Revendeurs chargés:", data.length);
       setClients(data);
     } catch (error) {
-      console.error(error);
-      notifications.show({ title: "Erreur", message: "Impossible de charger les revendeurs", color: "red" });
+      console.error('❌ Erreur chargement revendeurs:', error);
+      setError("Impossible de charger les revendeurs");
+      notifications.show({ 
+        title: "Erreur", 
+        message: "Impossible de charger les revendeurs", 
+        color: "red" 
+      });
     } finally {
       setLoading(false);
     }
@@ -114,13 +121,23 @@ export default function ListeStockRevendeur() {
   const loadStock = async (idRevendeur: number) => {
     try {
       setLoadingStock(true);
+      setError(null);
+      
       const data = await stockRevendeurRepository.getByRevendeur(idRevendeur);
+      console.log(`✅ Stock chargé: ${data.length} produits`);
       setStock(data);
+      
       const valeur = await stockRevendeurRepository.getValeurStock(idRevendeur);
       setValeurStock(valeur);
+      
     } catch (error) {
-      console.error(error);
-      notifications.show({ title: "Erreur", message: "Impossible de charger le stock", color: "red" });
+      console.error('❌ Erreur chargement stock:', error);
+      setError("Impossible de charger le stock");
+      notifications.show({ 
+        title: "Erreur", 
+        message: "Impossible de charger le stock", 
+        color: "red" 
+      });
     } finally {
       setLoadingStock(false);
     }
@@ -128,6 +145,9 @@ export default function ListeStockRevendeur() {
 
   const handleClientChange = (value: string | null) => {
     setSelectedClient(value);
+    setSearchTerm("");
+    setError(null);
+    
     if (value) {
       const client = clients.find(c => c.idClient.toString() === value);
       if (client && client.TypeClient === 'revendeur') {
@@ -144,7 +164,6 @@ export default function ListeStockRevendeur() {
           color: "red"
         });
       }
-      setSearchTerm("");
     } else {
       setSelectedClientDetails(null);
       setStock([]);
@@ -159,37 +178,16 @@ export default function ListeStockRevendeur() {
       label: client.NomComplet || client.Societe || "Revendeur sans nom"
     }));
 
-  // Voir les détails d'un produit
   const handleViewDetails = (product: StockItem) => {
     setSelectedProduct(product);
     setShowDetailsModal(true);
   };
 
-  // Générer la facture pour un produit (à implémenter si nécessaire)
-  const handleGenererFacture = async () => {
-    notifications.show({
-      title: "Information",
-      message: "Cette fonctionnalité sera disponible prochainement",
-      color: "blue"
-    });
-  };
-
-  // Créer un décompte pour un produit
-  const handleCreerDecompte = (product: StockItem) => {
-    notifications.show({
-      title: "Décompte",
-      message: `Créer un décompte pour ${product.designation}`,
-      color: "blue"
-    });
-  };
-
-  // Impression
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Stock_${selectedClientDetails?.NomComplet || selectedClientDetails?.Societe || "Revendeur"}_${new Date().toLocaleDateString()}`,
   });
 
-  // Export CSV
   const handleExportCSV = () => {
     if (filteredStock.length === 0) {
       notifications.show({ title: "Info", message: "Aucune donnée à exporter", color: "blue" });
@@ -221,21 +219,16 @@ export default function ListeStockRevendeur() {
     notifications.show({ title: "Succès", message: "Export CSV terminé", color: "green" });
   };
 
-  // Export PDF (via impression)
   const handleExportPDF = () => {
     handlePrint();
   };
 
-  // Filtrer le stock par recherche et dates
   const filteredStock = stock.filter(item => {
     const matchSearch = item.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+      item.code_produit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.categorie?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    // Note: Les dates ne sont pas disponibles dans stock_revendeur
-    // Cette fonctionnalité peut être ajoutée si nécessaire
-    const matchDate = true;
-    
-    return matchSearch && matchDate;
+    return matchSearch;
   });
 
   const stats = {
@@ -250,6 +243,32 @@ export default function ListeStockRevendeur() {
     return (
       <Center py={100}>
         <Loader size="xl" />
+        <Text ml="md" c="dimmed">Chargement des revendeurs...</Text>
+      </Center>
+    );
+  }
+
+  if (error && clients.length === 0) {
+    return (
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert 
+            icon={<IconAlertCircle size={16} />} 
+            title="Erreur" 
+            color="red"
+            withCloseButton
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+          <Button 
+            leftSection={<IconRefresh size={16} />}
+            onClick={loadRevendeurs}
+            variant="light"
+          >
+            Réessayer
+          </Button>
+        </Stack>
       </Center>
     );
   }
@@ -392,7 +411,7 @@ export default function ListeStockRevendeur() {
       {selectedClient && stock.length > 0 && (
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <TextInput
-            placeholder="Rechercher par produit ou code..."
+            placeholder="Rechercher par produit, code ou catégorie..."
             leftSection={<IconSearch size={16} />}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -401,12 +420,24 @@ export default function ListeStockRevendeur() {
         </Card>
       )}
 
-      {/* Tableau des stocks - Zone imprimable */}
+      {/* Tableau des stocks */}
       {selectedClient && (
         <Card withBorder radius="lg" shadow="sm" p="md">
           {loadingStock ? (
             <Center py={50}>
               <Loader size="xl" />
+            </Center>
+          ) : stock.length === 0 ? (
+            <Center py={50}>
+              <Stack align="center" gap="sm">
+                <IconPackage size={48} color="#868e96" />
+                <Text c="dimmed" size="lg" fw={500}>
+                  Aucun stock pour ce revendeur
+                </Text>
+                <Text c="dimmed" size="sm">
+                  Le revendeur n'a pas encore de produits en stock
+                </Text>
+              </Stack>
             </Center>
           ) : (
             <>
@@ -423,7 +454,7 @@ export default function ListeStockRevendeur() {
 
               {/* Zone à imprimer */}
               <div ref={printRef}>
-                {/* En-tête pour impression (visible seulement à l'impression) */}
+                {/* En-tête pour impression */}
                 <div style={{ textAlign: "center", marginBottom: 20, display: "none" }}>
                   <Title order={2}>Stock Revendeur</Title>
                   <Text>Revendeur: {selectedClientDetails?.NomComplet || selectedClientDetails?.Societe}</Text>
@@ -569,44 +600,54 @@ export default function ListeStockRevendeur() {
         title={`Détails du produit - ${selectedProduct?.designation || ''}`}
         size="md"
         centered
+        styles={{
+          header: {
+            backgroundColor: '#1b365d',
+            padding: '16px 20px',
+            borderTopLeftRadius: '12px',
+            borderTopRightRadius: '12px',
+          },
+          title: { color: 'white', fontWeight: 600 },
+          body: { padding: '20px' }
+        }}
       >
         {selectedProduct && (
           <Stack gap="md">
             <SimpleGrid cols={2} spacing="md">
-              <div>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Code produit</Text>
                 <Text fw={600}>{selectedProduct.code_produit}</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Catégorie</Text>
                 <Text fw={600}>{selectedProduct.categorie || '-'}</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Stock actuel</Text>
                 <Badge color={selectedProduct.qte_stock <= 0 ? 'red' : 'green'} size="lg">
                   {selectedProduct.qte_stock} unités
                 </Badge>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Prix d'achat</Text>
                 <Text fw={600} c="orange">{selectedProduct.prix_achat_base.toLocaleString()} F</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Prix de vente</Text>
                 <Text fw={600} c="blue">{selectedProduct.prix_vente_gros.toLocaleString()} F</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Marge unitaire</Text>
                 <Text fw={600} c="green">{(selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base).toLocaleString()} F</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Valeur stock</Text>
                 <Text fw={700} c="green">{(selectedProduct.qte_stock * selectedProduct.prix_achat_base).toLocaleString()} F</Text>
-              </div>
-              <div>
+              </Paper>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Bénéfice potentiel</Text>
                 <Text fw={700} c="blue">{(selectedProduct.qte_stock * (selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base)).toLocaleString()} F</Text>
-              </div>
+              </Paper>
             </SimpleGrid>
 
             <Divider />
@@ -616,7 +657,14 @@ export default function ListeStockRevendeur() {
                 variant="light"
                 color="blue"
                 leftSection={<IconReceipt size={16} />}
-                onClick={() => handleCreerDecompte(selectedProduct)}
+                onClick={() => {
+                  setShowDetailsModal(false);
+                  notifications.show({
+                    title: "Décompte",
+                    message: `Créer un décompte pour ${selectedProduct.designation}`,
+                    color: "blue"
+                  });
+                }}
               >
                 Créer décompte
               </Button>
@@ -624,7 +672,14 @@ export default function ListeStockRevendeur() {
                 variant="light"
                 color="green"
                 leftSection={<IconFileInvoice size={16} />}
-                onClick={() => handleGenererFacture()}
+                onClick={() => {
+                  setShowDetailsModal(false);
+                  notifications.show({
+                    title: "Information",
+                    message: "Cette fonctionnalité sera disponible prochainement",
+                    color: "blue"
+                  });
+                }}
               >
                 Générer facture
               </Button>
