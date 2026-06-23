@@ -1,773 +1,662 @@
 // src/components/decomptes/NouveauDecompte.tsx
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from 'react';
 import {
-  Stack, Card, Text, Group, Button, Select, Table, NumberInput,
-  Divider, Alert, Badge, ScrollArea, ActionIcon,
-  TextInput, Flex, ThemeIcon, Center, Loader,
-  Paper, Grid, Tooltip, Modal
-} from "@mantine/core";
+  Card,
+  Stack,
+  Title,
+  Text,
+  Paper,
+  ThemeIcon,
+  Group,
+  Button,
+  Loader,
+  Center,
+  Alert,
+  Select,
+  TextInput,
+  NumberInput,
+  Table,
+  ActionIcon,
+  Badge,
+  ScrollArea,
+  Divider,
+  Flex} from '@mantine/core';
 import {
-  IconArrowLeft, IconTrash, IconPhone,
-  IconPackage, IconSearch, IconRefresh,
-  IconFileText, IconShoppingCart, 
-  IconTruck,
-  IconAlertCircle,
-  IconPercentage,
-  IconUser,
-  IconBuildingStore,
-  IconCheck,
+  IconReceipt,
   IconPlus,
-  IconCash
-} from "@tabler/icons-react";
-import { getDb } from "../../database/db";
-import { notifications } from "@mantine/notifications";
-import { stockRevendeurRepository } from "../../database/repositories/stockRevendeurRepository";
-import { generateDecompteCode } from "../../services/codeGeneratorService";
-import { journalCaisseService } from "../../services/journalCaisseService";
-
-interface Client {
-  idClient: number;
-  NomComplet: string;
-  Societe: string | null;
-  Tel: string | null;
-  TypeClient: string;
-}
-
-interface ProduitRevendeur {
-  idProduit: number;
-  designation: string;
-  categorie?: string;
-  unite_base?: string;
-  qte_stock: number;
-  prix_achat_base: number;
-  prix_vente_gros: number;
-}
-
-interface PanierItem {
-  idProduit: number;
-  designation: string;
-  categorie?: string;
-  unite_mesure?: string;
-  quantite: number;
-  prix_vente: number;
-  prix_achat: number;
-  total: number;
-}
-
-interface FacturePredefinie {
-  idFactureRevendeur: number;
-  code_facture: string;
-  idRevendeur: number;
-  date_facture: string;
-  montant_ht: number;
-  montant_ttc: number;
-  commission: number;
-  statut: string;
-  client_nom?: string;
-  client_societe?: string;
-  details?: any[];
-  taux_commission?: number;
-}
+  IconTrash,
+  IconAlertCircle,
+  IconUser,
+  IconPackage,
+  IconArrowLeft
+} from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { useNavigate } from 'react-router-dom';
+import { getDb } from '../../database/db';
+import { clientRepository } from '../../database/repositories/clientRepository';
+import { decompteRepository } from '../../database/repositories/decompteRepository';
+import { format } from 'date-fns';
 
 interface NouveauDecompteProps {
-  onSuccess: () => void;
-  onCancel: () => void;
-  facturePredefinie?: FacturePredefinie;
+  decompteId?: number;
+  onSuccess?: () => void;
+  onCancel?: () => void;
 }
 
-const NouveauDecompte: React.FC<NouveauDecompteProps> = ({ onSuccess, onCancel, facturePredefinie }) => {
+interface Produit {
+  idProduit: number;
+  designation: string;
+  code_produit: string;
+  categorie: string;
+  prix_achat: number;
+  prix_vente: number;
+  commission_pourcentage: number;
+  qte_stock: number;
+  unite_base?: string;
+}
+
+interface DecompteDetail {
+  idProduit: number;
+  designation: string;
+  code_produit: string;
+  categorie: string;
+  prix_achat: number;
+  prix_vente: number;
+  commission_pourcentage: number;
+  qte_stock: number;
+  qte_decompte: number;
+  total: number;
+  unite_base?: string;
+}
+
+export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: NouveauDecompteProps) {
   const navigate = useNavigate();
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [produits, setProduits] = useState<ProduitRevendeur[]>([]);
-  const [panier, setPanier] = useState<PanierItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingProduits, setLoadingProduits] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [recherche, setRecherche] = useState("");
-  const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
-  const [objet, setObjet] = useState("");
-  const [tauxCommission, setTauxCommission] = useState<number>(60);
-  const [initialized, setInitialized] = useState(false);
-  const [codeDecompte, setCodeDecompte] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  
+  // États pour le formulaire
+  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  const [selectedClientName, setSelectedClientName] = useState<string>('');
+  const [revendeurs, setRevendeurs] = useState<{ value: string; label: string }[]>([]);
+  const [observation, setObservation] = useState('');
+  
+  // États pour les produits
+  const [produitsDisponibles, setProduitsDisponibles] = useState<Produit[]>([]);
+  const [selectedProduit, setSelectedProduit] = useState<Produit | null>(null);
+  const [quantite, setQuantite] = useState<number>(1);
+  const [details, setDetails] = useState<DecompteDetail[]>([]);
+  
+  // États pour le chargement des données en modification
+  const [loadingDecompte, setLoadingDecompte] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
 
+  // Chargement initial
   useEffect(() => {
-    const loadClients = async () => {
-      try {
-        const db = await getDb();
-        const result = await db.select<Client[]>(`
-          SELECT idClient, NomComplet, Societe, Tel, TypeClient
-          FROM clients 
-          WHERE TypeClient = 'revendeur'
-          ORDER BY NomComplet
-        `);
-        setClients(result);
-        
-        const code = await generateDecompteCode();
-        setCodeDecompte(code);
-      } catch (error) {
-        console.error('Erreur chargement clients:', error);
-        notifications.show({ title: 'Erreur', message: 'Impossible de charger les clients', color: 'red' });
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadClients();
-  }, []);
+    loadRevendeurs();
+    if (decompteId) {
+      loadDecompteToEdit(decompteId);
+    } else {
+      setLoading(false);
+    }
+  }, [decompteId]);
 
-  const loadStockRevendeur = async (idRevendeur: number) => {
-    setLoadingProduits(true);
+  const loadRevendeurs = async () => {
     try {
-      const result = await stockRevendeurRepository.getByRevendeur(idRevendeur);
-      
-      const produitsAvecInfos = result.map(p => ({
-        ...p,
-        categorie: p.categorie || 'Non catégorisé',
-        unite_base: p.unite_base || 'pièce'
-      }));
-      
-      setProduits(produitsAvecInfos);
-      console.log(`✅ ${produitsAvecInfos.length} produits chargés pour le revendeur`);
-      return produitsAvecInfos;
+      const data = await clientRepository.getByType("revendeur");
+      setRevendeurs(data.map(c => ({
+        value: c.idClient.toString(),
+        label: c.NomComplet || c.Societe || 'Revendeur sans nom'
+      })));
     } catch (error) {
-      console.error('Erreur chargement produits:', error);
-      notifications.show({ title: 'Erreur', message: 'Impossible de charger les produits', color: 'red' });
-      return [];
-    } finally {
-      setLoadingProduits(false);
+      console.error('Erreur chargement revendeurs:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les revendeurs',
+        color: 'red'
+      });
     }
   };
 
-  // ✅ Pré-remplir UNIQUEMENT les informations du client - LE PANIER RESTE VIDE
-  useEffect(() => {
-    const prefillFromFacture = async () => {
-      if (facturePredefinie && facturePredefinie.idRevendeur && clients.length > 0 && !initialized) {
-        console.log('📄 Facture pré-définie reçue:', facturePredefinie.code_facture);
-        
-        // 1. Trouver le client
-        const client = clients.find(c => c.idClient === facturePredefinie.idRevendeur);
-        if (client) {
-          setSelectedClient(client);
-          console.log('✅ Client sélectionné:', client.NomComplet);
-          
-          // 2. Charger le stock du revendeur
-          await loadStockRevendeur(client.idClient);
-          
-          // 3. ✅ LE PANIER RESTE VIDE - l'utilisateur choisira les produits manuellement
-          setPanier([]);
-          
-          // 4. Pré-remplir l'objet
-          setObjet(`Décompte pour facture ${facturePredefinie.code_facture}`);
-          
-          // 5. Récupérer le taux de commission de la facture
-          if (facturePredefinie.taux_commission) {
-            setTauxCommission(facturePredefinie.taux_commission);
-          }
-          
-          setInitialized(true);
-        }
-      }
-    };
-    
-    if (clients.length > 0 && facturePredefinie && !initialized) {
-      prefillFromFacture();
-    }
-  }, [facturePredefinie, clients, initialized]);
-
-  const ajouterAuPanier = (produit: ProduitRevendeur, quantite: number) => {
-    if (quantite <= 0) {
-      setError("Veuillez saisir une quantité valide");
-      return;
-    }
-    if (quantite > produit.qte_stock) {
-      setError(`Stock insuffisant. Maximum: ${produit.qte_stock}`);
-      return;
-    }
-
-    const existingIndex = panier.findIndex(p => p.idProduit === produit.idProduit);
-    const total = quantite * produit.prix_vente_gros;
-
-    if (existingIndex >= 0) {
-      const newQuantite = panier[existingIndex].quantite + quantite;
-      if (newQuantite > produit.qte_stock) {
-        setError(`Quantité totale dépasse le stock disponible`);
+  const loadDecompteToEdit = async (id: number) => {
+    try {
+      setLoadingDecompte(true);
+      setIsEditMode(true);
+      
+      const db = await getDb();
+      
+      // Récupérer le décompte
+      const decompteData = await db.select<any[]>(
+        `SELECT d.*, c.NomComplet 
+         FROM decomptes d
+         INNER JOIN clients c ON c.idClient = d.idClient
+         WHERE d.idDecompte = ?`,
+        [id]
+      );
+      
+      if (decompteData.length === 0) {
+        setError('Décompte non trouvé');
+        setLoading(false);
         return;
       }
-      const updated = [...panier];
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        quantite: newQuantite,
-        total: newQuantite * produit.prix_vente_gros,
-      };
-      setPanier(updated);
-    } else {
-      setPanier([...panier, {
-        idProduit: produit.idProduit,
-        designation: produit.designation,
-        categorie: produit.categorie || 'Non catégorisé',
-        unite_mesure: produit.unite_base || 'pièce',
-        quantite: quantite,
-        prix_vente: produit.prix_vente_gros,
-        prix_achat: produit.prix_achat_base || 0,
-        total: total,
-      }]);
+      
+      const decompte = decompteData[0];
+      setSelectedClientId(decompte.idClient);
+      setSelectedClientName(decompte.NomComplet);
+      setObservation(decompte.observation || '');
+      
+      // Récupérer les détails
+      const detailsData = await db.select<any[]>(
+        `
+        SELECT 
+          dd.*,
+          p.designation,
+          p.code_produit,
+          p.categorie,
+          p.unite_base,
+          p.commission_pourcentage,
+          COALESCE(
+            (
+              SELECT sr.qte_stock 
+              FROM stock_revendeur sr 
+              WHERE sr.idRevendeur = d.idClient 
+                AND sr.idProduit = dd.idProduit
+            ), 
+            0
+          ) as qte_stock
+        FROM decompte_details dd
+        INNER JOIN products p ON p.idProduit = dd.idProduit
+        INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
+        WHERE dd.idDecompte = ?
+        `,
+        [id]
+      );
+      
+      const detailsFormatted = detailsData.map(d => ({
+        idProduit: d.idProduit,
+        designation: d.designation || d.produit_designation || 'Produit',
+        code_produit: d.code_produit || '',
+        categorie: d.categorie || 'Non catégorisé',
+        prix_achat: d.prix_achat || 0,
+        prix_vente: d.prix_vente || 0,
+        commission_pourcentage: d.commission_pourcentage || 0,
+        qte_stock: d.qte_stock || 0,
+        qte_decompte: d.qte_decompte || 0,
+        total: (d.prix_vente || 0) * (d.qte_decompte || 0),
+        unite_base: d.unite_base || 'pièce'
+      }));
+      
+      setDetails(detailsFormatted);
+      
+      // Charger les produits disponibles pour le client
+      await loadProduitsForClient(decompte.idClient);
+      
+      setLoading(false);
+      
+    } catch (error) {
+      console.error('Erreur chargement décompte:', error);
+      setError('Impossible de charger le décompte à modifier');
+      setLoading(false);
+    } finally {
+      setLoadingDecompte(false);
     }
-    setError("");
-    setQuantiteInput({ ...quantiteInput, [produit.idProduit]: 0 });
   };
 
-  const retirerDuPanier = (index: number) => {
-    const updated = [...panier];
-    updated.splice(index, 1);
-    setPanier(updated);
-  };
-
-  const viderPanier = () => {
-    setPanier([]);
-    setQuantiteInput({});
-    notifications.show({ title: "Panier vidé", message: "Tous les produits ont été retirés du panier", color: "blue" });
-  };
-
-  const totalAchat = panier.reduce((s, i) => s + (i.prix_achat * i.quantite), 0);
-  const totalVente = panier.reduce((s, i) => s + i.total, 0);
-  const totalBenefice = totalVente - totalAchat;
-  const totalCommission = (totalBenefice * tauxCommission) / 100;
-  const netAPayer = totalVente - totalCommission;
-
-  const handleSubmit = async () => {
-    if (!selectedClient) {
-      notifications.show({ title: "Erreur", message: "Sélectionnez un revendeur", color: "red" });
-      return;
-    }
-    if (panier.length === 0) {
-      notifications.show({ title: "Erreur", message: "Ajoutez au moins un produit", color: "red" });
-      return;
-    }
-    if (tauxCommission < 0 || tauxCommission > 100) {
-      notifications.show({ title: "Erreur", message: "Le taux de commission doit être entre 0 et 100%", color: "red" });
-      return;
-    }
-
-    setSaving(true);
-    
+  const loadProduitsForClient = async (clientId: number) => {
     try {
       const db = await getDb();
       
-      const dateDecompte = new Date().toISOString().split('T')[0];
+      // Récupérer les produits en stock du revendeur
+      const produits = await db.select<any[]>(
+        `
+        SELECT 
+          p.idProduit,
+          p.designation,
+          p.code_produit,
+          p.categorie,
+          p.prix_achat_base,
+          p.prix_vente_gros,
+          p.commission_pourcentage,
+          p.unite_base,
+          sr.qte_stock
+        FROM stock_revendeur sr
+        INNER JOIN products p ON p.idProduit = sr.idProduit
+        WHERE sr.idRevendeur = ?
+          AND sr.qte_stock > 0
+        ORDER BY p.designation
+        `,
+        [clientId]
+      );
       
-      const insertResult = await db.execute(`
-        INSERT INTO decomptes (
-          idClient, 
-          code_decompte, 
-          date_decompte, 
-          montant_achat,
-          montant_vente, 
-          montant_benefice,
-          montant_commission, 
-          montant_net, 
-          statut, 
-          observation,
-          taux_commission
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        selectedClient.idClient,
-        codeDecompte,
-        dateDecompte,
-        totalAchat,
-        totalVente,
-        totalBenefice,
-        totalCommission,
-        netAPayer,
-        'VALIDE',
-        objet || null,
-        tauxCommission
-      ]);
+      const produitsFormatted = produits.map(p => ({
+        idProduit: p.idProduit,
+        designation: p.designation || 'Produit',
+        code_produit: p.code_produit || '',
+        categorie: p.categorie || 'Non catégorisé',
+        prix_achat: p.prix_achat_base || 0,
+        prix_vente: p.prix_vente_gros || 0,
+        commission_pourcentage: p.commission_pourcentage || 0,
+        qte_stock: p.qte_stock || 0,
+        unite_base: p.unite_base || 'pièce'
+      }));
+      
+      setProduitsDisponibles(produitsFormatted);
+      
+    } catch (error) {
+      console.error('Erreur chargement produits:', error);
+    }
+  };
 
-      const idDecompte = Number(insertResult.lastInsertId);
+  const handleClientChange = async (value: string | null) => {
+    if (!value) {
+      setSelectedClientId(null);
+      setSelectedClientName('');
+      setProduitsDisponibles([]);
+      setDetails([]);
+      return;
+    }
+    
+    const clientId = parseInt(value);
+    setSelectedClientId(clientId);
+    
+    const client = revendeurs.find(r => r.value === value);
+    setSelectedClientName(client?.label || '');
+    
+    await loadProduitsForClient(clientId);
+    
+    if (!isEditMode) {
+      setDetails([]);
+    }
+  };
 
-      for (const item of panier) {
-        await db.execute(`
-          INSERT INTO decompte_details (
-            idDecompte, 
-            idProduit, 
-            qte_decompte, 
-            prix_achat, 
-            prix_vente,
-            commission_pourcentage,
-            designation
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [
-          idDecompte,
-          item.idProduit,
-          item.quantite,
-          item.prix_achat,
-          item.prix_vente,
-          tauxCommission,
-          item.designation
-        ]);
-
-        await db.execute(`
-          UPDATE stock_revendeur 
-          SET qte_stock = qte_stock - ? 
-          WHERE idProduit = ? AND idRevendeur = ?
-        `, [item.quantite, item.idProduit, selectedClient.idClient]);
-
-        await db.execute(`
-          INSERT INTO mouvements_revendeur (
-            idProduit,
-            idRevendeur,
-            idDecompte,
-            type_mouvement,
-            qte_mouvement
-          )
-          VALUES (?, ?, ?, ?, ?)
-        `, [
-          item.idProduit,
-          selectedClient.idClient,
-          idDecompte,
-          "SORTIE",
-          item.quantite
-        ]);
-      }
-
-      try {
-        await journalCaisseService.ajouterDecompteRevendeur({
-          montant: netAPayer,
-          idDecompte: idDecompte,
-          codeDecompte: codeDecompte,
-          revendeurNom: selectedClient.NomComplet
-        });
-        console.log('✅ Journal de caisse mis à jour pour le décompte', codeDecompte);
-      } catch (journalError) {
-        console.error('Erreur journal de caisse:', journalError);
-      }
-
+  const addProduit = () => {
+    if (!selectedProduit) {
       notifications.show({
-        title: "✅ Succès",
-        message: `Décompte ${codeDecompte} créé avec succès (Commission: ${tauxCommission}%)`,
-        color: "green"
+        title: 'Erreur',
+        message: 'Sélectionnez un produit',
+        color: 'red'
       });
-
-      onSuccess();
-      navigate(`/decomptes/${idDecompte}/print`);
-
-    } catch (error: any) {
-      console.error("❌ Erreur création décompte:", error);
+      return;
+    }
+    
+    if (quantite <= 0) {
       notifications.show({
-        title: "❌ Erreur",
-        message: error.message || "Erreur lors de la création du décompte",
-        color: "red"
+        title: 'Erreur',
+        message: 'La quantité doit être supérieure à 0',
+        color: 'red'
+      });
+      return;
+    }
+    
+    if (quantite > selectedProduit.qte_stock) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Stock disponible: ${selectedProduit.qte_stock}`,
+        color: 'red'
+      });
+      return;
+    }
+    
+    const existing = details.find(d => d.idProduit === selectedProduit.idProduit);
+    if (existing) {
+      const nouvelleQuantite = existing.qte_decompte + quantite;
+      if (nouvelleQuantite > existing.qte_stock) {
+        notifications.show({
+          title: 'Stock insuffisant',
+          message: `Stock disponible: ${existing.qte_stock}`,
+          color: 'red'
+        });
+        return;
+      }
+      
+      setDetails(details.map(d => 
+        d.idProduit === selectedProduit.idProduit
+          ? {
+              ...d,
+              qte_decompte: nouvelleQuantite,
+              total: d.prix_vente * nouvelleQuantite
+            }
+          : d
+      ));
+    } else {
+      setDetails([...details, {
+        ...selectedProduit,
+        qte_decompte: quantite,
+        total: selectedProduit.prix_vente * quantite
+      }]);
+    }
+    
+    setSelectedProduit(null);
+    setQuantite(1);
+  };
+
+  const removeProduit = (idProduit: number) => {
+    setDetails(details.filter(d => d.idProduit !== idProduit));
+  };
+
+  const updateQuantite = (idProduit: number, qte: number) => {
+    if (qte <= 0) {
+      removeProduit(idProduit);
+      return;
+    }
+    
+    const produit = details.find(d => d.idProduit === idProduit);
+    if (!produit) return;
+    
+    if (qte > produit.qte_stock) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Stock disponible: ${produit.qte_stock}`,
+        color: 'red'
+      });
+      return;
+    }
+    
+    setDetails(details.map(d =>
+      d.idProduit === idProduit
+        ? { ...d, qte_decompte: qte, total: d.prix_vente * qte }
+        : d
+    ));
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedClientId) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Sélectionnez un revendeur',
+        color: 'red'
+      });
+      return;
+    }
+    
+    if (details.length === 0) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Ajoutez au moins un produit',
+        color: 'red'
+      });
+      return;
+    }
+    
+    setSaving(true);
+    setError(null);
+    
+    try {
+      const decompteInput = {
+        idClient: selectedClientId,
+        observation: observation || undefined,
+        periode_debut: format(new Date(), 'yyyy-MM-dd'),
+        periode_fin: format(new Date(), 'yyyy-MM-dd'),
+        notes: undefined
+      };
+      
+      const detailsInput = details.map(d => ({
+        idProduit: d.idProduit,
+        qte_decompte: d.qte_decompte
+      }));
+      
+      await decompteRepository.create(decompteInput, detailsInput);
+      
+      notifications.show({
+        title: '✅ Succès',
+        message: isEditMode ? 'Décompte modifié avec succès' : 'Décompte créé avec succès',
+        color: 'green'
+      });
+      
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        navigate('/decomptes');
+      }
+      
+    } catch (error: any) {
+      console.error('Erreur création décompte:', error);
+      setError(error?.message || 'Erreur lors de la création du décompte');
+      notifications.show({
+        title: '❌ Erreur',
+        message: error?.message || 'Erreur lors de la création du décompte',
+        color: 'red'
       });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
+  const totalVente = details.reduce((sum, d) => sum + d.total, 0);
+  const totalAchat = details.reduce((sum, d) => sum + (d.prix_achat * d.qte_decompte), 0);
+  const totalBenefice = totalVente - totalAchat;
+  const totalCommission = details.reduce((sum, d) => sum + ((d.prix_vente - d.prix_achat) * d.qte_decompte * (d.commission_pourcentage / 100)), 0);
+  const montantNet = totalVente - totalCommission;
+
+  if (loading || loadingDecompte) {
     return (
-      <Center h={400}>
+      <Center py={100}>
         <Loader size="xl" />
-        <Text ml="md">Chargement des clients...</Text>
+        <Text ml="md" c="dimmed">Chargement...</Text>
       </Center>
     );
   }
 
-  const clientData = clients.map(c => ({
-    value: c.idClient.toString(),
-    label: c.NomComplet || c.Societe || 'Client sans nom'
-  }));
-
-  const produitsFiltres = produits.filter(p =>
-    p.designation.toLowerCase().includes(recherche.toLowerCase()) &&
-    p.qte_stock > 0
-  );
-
   return (
-    <Modal
-      opened={true}
-      onClose={onCancel}
-      size="80%"
-      padding="xl"
-      radius="lg"
-      styles={{
-        header: { 
-          backgroundColor: '#1b365d', 
-          padding: '16px 24px', 
-          borderTopLeftRadius: '12px', 
-          borderTopRightRadius: '12px' 
-        },
-        title: { color: 'white', fontWeight: 700, fontSize: '1.3rem' },
-        body: { padding: 0 }
-      }}
-      title={
-        <Group gap="md">
-          <ThemeIcon size="lg" radius="md" color="white" variant="light">
-            <IconFileText size={24} />
-          </ThemeIcon>
-          <div>
-            <Text size="lg" fw={700} c="white">
-              {facturePredefinie ? `Décompte - Facture ${facturePredefinie.code_facture}` : 'Nouveau décompte'}
-            </Text>
-            <Text size="xs" opacity={0.7} c="white">Créez un décompte pour un revendeur</Text>
-          </div>
+    <Stack gap="md" p="md">
+      {/* En-tête */}
+      <Paper p="lg" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+        <Group justify="space-between">
+          <Group gap="md">
+            <ThemeIcon size={40} radius="md" color="red" variant="filled">
+              <IconReceipt size={24} />
+            </ThemeIcon>
+            <div>
+              <Title order={2} c="white">
+                {isEditMode ? 'Modifier le décompte' : 'Nouveau décompte'}
+              </Title>
+              <Text c="gray.3" size="sm">
+                {isEditMode ? 'Modifier un décompte existant' : 'Créer un nouveau décompte pour un revendeur'}
+              </Text>
+            </div>
+          </Group>
+          <Button
+            variant="light"
+            color="gray"
+            leftSection={<IconArrowLeft size={16} />}
+            onClick={() => navigate('/decomptes')}
+          >
+            Retour
+          </Button>
         </Group>
-      }
-    >
-      <ScrollArea h="calc(100vh - 160px)" type="auto" p="lg">
-        <Stack gap="md">
-          {/* LIGNE 1: Client */}
-          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-            <Grid align="flex-end">
-              <Grid.Col span={3}>
-                <Select
-                  label="Revendeur"
-                  placeholder="Sélectionner..."
-                  data={clientData}
-                  value={selectedClient?.idClient?.toString() || null}
-                  onChange={async (val) => {
-                    const client = clients.find(c => c.idClient.toString() === val);
-                    setSelectedClient(client || null);
-                    if (client) {
-                      await loadStockRevendeur(client.idClient);
-                      setPanier([]);
-                      setQuantiteInput({});
-                    }
-                  }}
-                  searchable
-                  size="xs"
-                  leftSection={<IconUser size={14} />}
-                  disabled={!!facturePredefinie}
-                />
-              </Grid.Col>
+      </Paper>
 
-              <Grid.Col span={2}>
-                <TextInput
-                  label="Contact"
-                  value={selectedClient?.Tel || ''}
-                  readOnly
-                  size="xs"
-                  leftSection={<IconPhone size={14} />}
-                  placeholder="Tél"
-                />
-              </Grid.Col>
+      {error && (
+        <Alert icon={<IconAlertCircle size={16} />} title="Erreur" color="red" withCloseButton onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
-              <Grid.Col span={2}>
-                <Select
-                  label="Type"
-                  value="revendeur"
-                  data={[{ value: 'revendeur', label: 'Revendeur' }]}
-                  readOnly
-                  size="xs"
-                  leftSection={<IconBuildingStore size={14} />}
-                />
-              </Grid.Col>
+      {/* Sélection du revendeur */}
+      <Card withBorder radius="lg" shadow="sm" p="lg">
+        <Select
+          label="Revendeur"
+          placeholder="Sélectionnez un revendeur"
+          searchable
+          clearable
+          data={revendeurs}
+          value={selectedClientId?.toString() || null}
+          onChange={handleClientChange}
+          leftSection={<IconUser size={16} />}
+          required
+          disabled={isEditMode}
+        />
+        {selectedClientName && (
+          <Text size="sm" c="dimmed" mt="xs">
+            Revendeur sélectionné: <strong>{selectedClientName}</strong>
+          </Text>
+        )}
+      </Card>
 
-              <Grid.Col span={2}>
-                <TextInput
-                  label="Code"
-                  value={codeDecompte}
-                  readOnly
-                  disabled
-                  size="xs"
-                  leftSection={<IconFileText size={14} />}
-                />
-              </Grid.Col>
+      {/* Ajout de produits */}
+      {selectedClientId && (
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Group gap="sm" mb="md">
+            <ThemeIcon color="blue" variant="light" size="sm">
+              <IconPackage size={14} />
+            </ThemeIcon>
+            <Text fw={600}>Ajouter des produits</Text>
+            <Badge color="green" variant="light">{produitsDisponibles.length} produits en stock</Badge>
+          </Group>
 
-              <Grid.Col span={3}>
-                <NumberInput
-                  label="Commission %"
-                  value={tauxCommission}
-                  onChange={(val) => setTauxCommission(typeof val === 'number' ? val : 0)}
-                  min={0}
-                  max={100}
-                  step={5}
-                  size="xs"
-                  leftSection={<IconPercentage size={14} />}
-                />
-              </Grid.Col>
-            </Grid>
+          <Group align="flex-end" gap="sm">
+            <Select
+              placeholder="Rechercher un produit..."
+              searchable
+              clearable
+              data={produitsDisponibles.map(p => ({
+                value: p.idProduit.toString(),
+                label: `${p.code_produit} - ${p.designation} (${p.qte_stock} ${p.unite_base})`
+              }))}
+              value={selectedProduit?.idProduit?.toString() || null}
+              onChange={(value) => {
+                const produit = produitsDisponibles.find(p => p.idProduit.toString() === value);
+                setSelectedProduit(produit || null);
+              }}
+              style={{ flex: 1 }}
+              size="sm"
+            />
+            <NumberInput
+              placeholder="Qté"
+              value={quantite}
+              onChange={(val) => setQuantite(Number(val) || 0)}
+              min={1}
+              max={selectedProduit?.qte_stock || 999}
+              style={{ width: 100 }}
+              size="sm"
+            />
+            <Button
+              color="green"
+              leftSection={<IconPlus size={16} />}
+              onClick={addProduit}
+              disabled={!selectedProduit}
+              size="sm"
+            >
+              Ajouter
+            </Button>
+          </Group>
 
-            {selectedClient && (
-              <Paper p="xs" withBorder radius="md" mt="xs" style={{ backgroundColor: '#f8f9fa' }}>
-                <Group justify="space-between">
-                  <Group gap="xs">
-                    <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
-                      <IconTruck size={12} />
-                    </ThemeIcon>
-                    <Text size="xs" fw={500}>{selectedClient.NomComplet}</Text>
-                    {selectedClient.Societe && <Text size="xs" c="dimmed">| {selectedClient.Societe}</Text>}
-                  </Group>
-                  <Badge color="green" variant="light" size="xs">Revendeur</Badge>
-                </Group>
-              </Paper>
-            )}
-          </Card>
+          {produitsDisponibles.length === 0 && (
+            <Text c="dimmed" size="sm" mt="md" ta="center">
+              Aucun produit en stock pour ce revendeur
+            </Text>
+          )}
+        </Card>
+      )}
 
-          {/* LIGNE 2: Produits disponibles */}
-          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-            <Group gap="xs" mb="xs" justify="space-between">
-              <Group gap="xs">
-                <ThemeIcon color="grape" variant="light" radius="md" size="sm">
-                  <IconPackage size={14} />
-                </ThemeIcon>
-                <Text fw={600} size="sm" c="#1b365d">Produits disponibles</Text>
-                <Badge color="green" variant="light" size="xs">{produitsFiltres.length} en stock</Badge>
-              </Group>
-              <Group gap="xs">
-                <TextInput
-                  placeholder="Rechercher..."
-                  size="xs"
-                  value={recherche}
-                  onChange={(e) => setRecherche(e.target.value)}
-                  style={{ width: 200 }}
-                  leftSection={<IconSearch size={12} />}
-                />
-                <Tooltip label="Actualiser">
-                  <ActionIcon size="sm" variant="light" onClick={() => selectedClient && loadStockRevendeur(selectedClient.idClient)}>
-                    <IconRefresh size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
+      {/* Liste des produits du décompte */}
+      {details.length > 0 && (
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Group gap="sm" mb="md">
+            <ThemeIcon color="orange" variant="light" size="sm">
+              <IconReceipt size={14} />
+            </ThemeIcon>
+            <Text fw={600}>Produits du décompte</Text>
+            <Badge color="orange" variant="light">{details.length} produits</Badge>
+          </Group>
+
+          <ScrollArea h={300}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr style={{ backgroundColor: '#f8f9fa' }}>
+                  <Table.Th>Code</Table.Th>
+                  <Table.Th>Désignation</Table.Th>
+                  <Table.Th>Catégorie</Table.Th>
+                  <Table.Th ta="center">Stock</Table.Th>
+                  <Table.Th ta="center">Qté</Table.Th>
+                  <Table.Th ta="right">PA</Table.Th>
+                  <Table.Th ta="right">PV</Table.Th>
+                  <Table.Th ta="right">Total</Table.Th>
+                  <Table.Th ta="center">Action</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {details.map((detail) => (
+                  <Table.Tr key={detail.idProduit}>
+                    <Table.Td><Text size="xs" fw={500}>{detail.code_produit}</Text></Table.Td>
+                    <Table.Td><Text size="xs">{detail.designation}</Text></Table.Td>
+                    <Table.Td><Badge variant="light" size="xs">{detail.categorie}</Badge></Table.Td>
+                    <Table.Td ta="center">
+                      <Badge color={detail.qte_stock <= 0 ? 'red' : 'green'} size="xs">
+                        {detail.qte_stock}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td ta="center">
+                      <NumberInput
+                        value={detail.qte_decompte}
+                        onChange={(val) => updateQuantite(detail.idProduit, Number(val) || 0)}
+                        min={1}
+                        max={detail.qte_stock}
+                        size="xs"
+                        style={{ width: 70 }}
+                        hideControls
+                      />
+                    </Table.Td>
+                    <Table.Td ta="right">{detail.prix_achat.toLocaleString()} F</Table.Td>
+                    <Table.Td ta="right" fw={600} c="blue">{detail.prix_vente.toLocaleString()} F</Table.Td>
+                    <Table.Td ta="right" fw={700} c="green">{detail.total.toLocaleString()} F</Table.Td>
+                    <Table.Td ta="center">
+                      <ActionIcon color="red" onClick={() => removeProduit(detail.idProduit)} size="sm" variant="subtle">
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+
+          <Divider my="sm" />
+
+          {/* Résumé */}
+          <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+            <Group gap="xs">
+              <Badge size="sm" variant="light" color="blue">Total Vente: {totalVente.toLocaleString()} F</Badge>
+              <Badge size="sm" variant="light" color="green">Bénéfice: {totalBenefice.toLocaleString()} F</Badge>
+              <Badge size="sm" variant="light" color="orange">Commission: {totalCommission.toLocaleString()} F</Badge>
+              <Badge size="sm" variant="filled" color="green">Net: {montantNet.toLocaleString()} F</Badge>
             </Group>
+          </Flex>
+        </Card>
+      )}
 
-            {loadingProduits ? (
-              <Center py={30}><Loader size="sm" /><Text size="xs" ml="sm">Chargement...</Text></Center>
-            ) : produitsFiltres.length === 0 ? (
-              <Center py={30}>
-                <Stack align="center" gap="xs">
-                  <IconPackage size={32} color="#adb5bd" />
-                  <Text c="dimmed" size="sm">Aucun produit disponible en stock</Text>
-                  <Text c="dimmed" size="xs">Le revendeur n'a pas encore de stock</Text>
-                </Stack>
-              </Center>
-            ) : (
-              <ScrollArea h={220}>
-                <Table striped highlightOnHover verticalSpacing="xs">
-                  <Table.Thead>
-                    <Table.Tr style={{ backgroundColor: "#1b365d" }}>
-                      <Table.Th c="white" style={{ width: '25%' }}>Produit</Table.Th>
-                      <Table.Th c="white" style={{ width: '15%' }}>Catégorie</Table.Th>
-                      <Table.Th c="white" style={{ width: '10%' }}>Unité</Table.Th>
-                      <Table.Th c="white" style={{ width: '12%' }} ta="right">Prix</Table.Th>
-                      <Table.Th c="white" style={{ width: '10%' }} ta="center">Stock</Table.Th>
-                      <Table.Th c="white" style={{ width: '14%' }} ta="center">Qté</Table.Th>
-                      <Table.Th c="white" style={{ width: '14%' }} ta="center">Action</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {produitsFiltres.map((p) => (
-                      <Table.Tr key={p.idProduit}>
-                        <Table.Td>
-                          <Text size="xs" fw={500} lineClamp={1}>{p.designation}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge variant="light" size="xs" color="grape">
-                            {p.categorie || '-'}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" c="dimmed">{p.unite_base || 'pièce'}</Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="xs" fw={600} c="blue">{p.prix_vente_gros.toLocaleString()} F</Text>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Badge color={p.qte_stock <= 0 ? "red" : p.qte_stock <= 5 ? "orange" : "green"} variant="light">
-                            {p.qte_stock}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <NumberInput
-                            size="xs"
-                            min={0}
-                            max={p.qte_stock}
-                            value={quantiteInput[p.idProduit] || 0}
-                            onChange={(val) => setQuantiteInput({ ...quantiteInput, [p.idProduit]: Number(val) || 0 })}
-                            w={60}
-                            placeholder="Qté"
-                          />
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Button 
-                            size="xs" 
-                            variant="light" 
-                            color="green" 
-                            onClick={() => ajouterAuPanier(p, quantiteInput[p.idProduit] || 0)} 
-                            disabled={!quantiteInput[p.idProduit] || quantiteInput[p.idProduit] <= 0 || p.qte_stock <= 0}
-                            leftSection={<IconPlus size={12} />}
-                          >
-                            Ajouter
-                          </Button>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-            )}
-          </Card>
+      {/* Observation */}
+      <Card withBorder radius="lg" shadow="sm" p="lg">
+        <TextInput
+          label="Observation"
+          placeholder="Ajouter une observation (optionnel)"
+          value={observation}
+          onChange={(e) => setObservation(e.currentTarget.value)}
+        />
+      </Card>
 
-          {/* LIGNE 3: Panier */}
-          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
-            <Group justify="space-between" mb="xs">
-              <Group gap="xs">
-                <ThemeIcon color="orange" variant="light" radius="md" size="sm">
-                  <IconShoppingCart size={14} />
-                </ThemeIcon>
-                <Text fw={600} size="sm" c="#1b365d">Panier</Text>
-                <Badge color="orange" variant="light" size="xs">{panier.length} produits</Badge>
-              </Group>
-              <Group gap="xs">
-                {panier.length > 0 && (
-                  <Text size="xs" c="dimmed">Total: {totalVente.toLocaleString()} F</Text>
-                )}
-                <Button variant="subtle" color="red" size="xs" onClick={viderPanier} leftSection={<IconTrash size={12} />}>
-                  Vider
-                </Button>
-              </Group>
-            </Group>
-
-            {panier.length === 0 ? (
-              <Center py={30}>
-                <Stack align="center" gap="xs">
-                  <IconShoppingCart size={32} color="#adb5bd" />
-                  <Text c="dimmed" size="sm">Panier vide</Text>
-                  <Text c="dimmed" size="xs">Ajoutez des produits depuis la liste ci-dessus</Text>
-                </Stack>
-              </Center>
-            ) : (
-              <>
-                <ScrollArea h={150}>
-                  <Table striped highlightOnHover verticalSpacing="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th style={{ width: '25%' }}>Produit</Table.Th>
-                        <Table.Th style={{ width: '12%' }}>Catégorie</Table.Th>
-                        <Table.Th style={{ width: '10%' }}>Unité</Table.Th>
-                        <Table.Th style={{ width: '13%' }} ta="center">Qté</Table.Th>
-                        <Table.Th style={{ width: '13%' }} ta="right">Prix</Table.Th>
-                        <Table.Th style={{ width: '15%' }} ta="right">Total</Table.Th>
-                        <Table.Th style={{ width: '12%' }} ta="center">Action</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {panier.map((item, idx) => (
-                        <Table.Tr key={idx}>
-                          <Table.Td>
-                            <Text size="xs" fw={500} lineClamp={1}>{item.designation}</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge variant="light" size="xs" color="grape">
-                              {item.categorie || '-'}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" c="dimmed">{item.unite_mesure || 'pièce'}</Text>
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <Badge size="xs" color="blue" variant="light" radius="xl">{item.quantite}</Badge>
-                          </Table.Td>
-                          <Table.Td ta="right">
-                            <Text size="xs">{item.prix_vente.toLocaleString()} F</Text>
-                          </Table.Td>
-                          <Table.Td ta="right">
-                            <Text size="xs" fw={600} c="blue">{item.total.toLocaleString()} F</Text>
-                          </Table.Td>
-                          <Table.Td ta="center">
-                            <ActionIcon color="red" variant="subtle" size="sm" onClick={() => retirerDuPanier(idx)}>
-                              <IconTrash size={12} />
-                            </ActionIcon>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-
-                <Divider my="xs" />
-
-                <Grid>
-                  <Grid.Col span={3}>
-                    <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
-                      <Text size="xs" c="dimmed">Achats</Text>
-                      <Text size="sm" fw={600}>{totalAchat.toLocaleString()} F</Text>
-                    </Paper>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Paper p="xs" withBorder radius="md" bg="gray.0" ta="center">
-                      <Text size="xs" c="dimmed">Ventes</Text>
-                      <Text size="sm" fw={600} c="blue">{totalVente.toLocaleString()} F</Text>
-                    </Paper>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Paper p="xs" withBorder radius="md" bg="green.0" ta="center">
-                      <Text size="xs" c="dimmed">Bénéfice</Text>
-                      <Text size="sm" fw={700} c="green">{totalBenefice.toLocaleString()} F</Text>
-                    </Paper>
-                  </Grid.Col>
-                  <Grid.Col span={3}>
-                    <Paper p="xs" withBorder radius="md" bg="orange.0" ta="center">
-                      <Text size="xs" c="dimmed">Comm. {tauxCommission}%</Text>
-                      <Text size="sm" fw={700} c="orange">-{totalCommission.toLocaleString()} F</Text>
-                    </Paper>
-                  </Grid.Col>
-                </Grid>
-
-                <Paper p="sm" withBorder radius="md" bg="green.0" mt="xs">
-                  <Flex justify="space-between" align="center">
-                    <Group gap="xs">
-                      <IconCash size={18} color="#2e7d32" />
-                      <Text fw={700} size="sm" c="green.8">NET À PAYER :</Text>
-                    </Group>
-                    <Text fw={800} size="lg" c="green.8">{netAPayer.toLocaleString()} FCFA</Text>
-                  </Flex>
-                </Paper>
-              </>
-            )}
-          </Card>
-
-          {/* Objet + Boutons */}
-          <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
-            <Grid align="flex-end">
-              <Grid.Col span={6}>
-                <TextInput
-                  label="Objet"
-                  placeholder="Motif du décompte (optionnel)"
-                  value={objet}
-                  onChange={(e) => setObjet(e.target.value)}
-                  size="xs"
-                  leftSection={<IconFileText size={14} />}
-                />
-              </Grid.Col>
-              <Grid.Col span={6}>
-                <Group justify="flex-end" gap="xs">
-                  <Button variant="outline" color="gray" size="xs" onClick={onCancel} leftSection={<IconArrowLeft size={12} />}>
-                    Annuler
-                  </Button>
-                  <Button 
-                    onClick={handleSubmit} 
-                    loading={saving} 
-                    size="xs" 
-                    color="green" 
-                    disabled={!selectedClient || panier.length === 0}
-                    leftSection={<IconCheck size={14} />}
-                  >
-                    Enregistrer
-                  </Button>
-                </Group>
-              </Grid.Col>
-            </Grid>
-          </Card>
-
-          {error && <Alert color="red" variant="light" p="xs" icon={<IconAlertCircle size={12} />}>{error}</Alert>}
-        </Stack>
-      </ScrollArea>
-    </Modal>
+      {/* Boutons d'action */}
+      <Group justify="flex-end" gap="sm">
+        <Button
+          variant="light"
+          onClick={() => {
+            if (onCancel) onCancel();
+            else navigate('/decomptes');
+          }}
+          disabled={saving}
+        >
+          Annuler
+        </Button>
+        <Button
+          color="green"
+          leftSection={<IconReceipt size={16} />}
+          onClick={handleSubmit}
+          loading={saving}
+          disabled={details.length === 0 || !selectedClientId}
+        >
+          {isEditMode ? 'Modifier' : 'Créer'} le décompte
+        </Button>
+      </Group>
+    </Stack>
   );
-};
-
-export default NouveauDecompte;
+}

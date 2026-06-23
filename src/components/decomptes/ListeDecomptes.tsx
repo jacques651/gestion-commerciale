@@ -16,35 +16,67 @@ import {
   TextInput,
   Button,
   Pagination,
-  Flex,
   ActionIcon,
-  Tooltip,
   ScrollArea,
-  Select,
   Modal,
   Divider,
-  Alert
+  Alert,
+  Grid,
+  Checkbox,
+  Select,
+  Flex,
+  Tooltip
 } from '@mantine/core';
 import {
   IconReceipt,
   IconSearch,
   IconRefresh,
   IconPrinter,
-  IconEye,
   IconPlus,
   IconAlertCircle,
-  IconX,
   IconTruck,
-  IconCalendar
+  IconFileInvoice,
+  IconPencil,
+  IconTrash,
+  IconCalendar,
+  IconX,
+  IconEye
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { decompteRepository } from '../../database/repositories/decompteRepository';
 import { clientRepository } from '../../database/repositories/clientRepository';
+import { getDb } from '../../database/db';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 
-// Interface alignée avec la structure réelle de la base de données
+// Interface pour les détails du décompte (produits)
+interface DecompteDetail {
+  idDetailRevendeur: number;
+  idDecompte: number;
+  idProduit: number;
+  qte_decompte: number;
+  prix_achat: number;
+  prix_vente: number;
+  commission_pourcentage: number;
+  designation: string;
+  total: number;
+  codeFacture: string;
+  categorie: string;
+  qteInitiale: number;
+  qteVendue: number;
+  qteRestante: number;
+  prixAchat: number;
+  prixVente: number;
+  totalAchat: number;
+  totalVente: number;
+  benefice: number;
+  commission: number;
+  produit_designation?: string;
+  produit_categorie?: string;
+}
+
+// Interface pour le décompte avec ses détails
 interface Decompte {
   idDecompte: number;
   idClient: number;
@@ -60,9 +92,9 @@ interface Decompte {
   periode_debut?: string;
   periode_fin?: string;
   notes?: string;
-  nom_revendeur?: string;
   NomComplet?: string;
   Societe?: string;
+  details?: DecompteDetail[];
 }
 
 interface Client {
@@ -90,7 +122,9 @@ export default function ListeDecomptes() {
   const [filteredDecomptes, setFilteredDecomptes] = useState<Decompte[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchNom, setSearchNom] = useState('');
+  const [searchCode, setSearchCode] = useState('');
+  const [filterCodeFacture, setFilterCodeFacture] = useState<string | null>(null);
   const [statutFilter, setStatutFilter] = useState<string | null>(null);
   const [revendeurFilter, setRevendeurFilter] = useState<string | null>(null);
   const [dateDebut, setDateDebut] = useState<string>('');
@@ -99,6 +133,8 @@ export default function ListeDecomptes() {
   const [selectedDecompte, setSelectedDecompte] = useState<Decompte | null>(null);
   const [detailModalOpened, setDetailModalOpened] = useState(false);
   const [revendeurs, setRevendeurs] = useState<Client[]>([]);
+  const [codeFactureOptions, setCodeFactureOptions] = useState<{ value: string; label: string }[]>([]);
+  const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [statistiques, setStatistiques] = useState<Statistiques>({
     total: 0,
     totalValide: 0,
@@ -113,6 +149,24 @@ export default function ListeDecomptes() {
 
   const itemsPerPage = 15;
 
+  // Fonctions de navigation
+  const handleViewReceipt = (decompte: Decompte) => {
+    navigate(`/decomptes/${decompte.idDecompte}/reçu`);
+  };
+
+  const handleEdit = (decompte: Decompte) => {
+    navigate(`/decomptes/${decompte.idDecompte}/modifier`);
+  };
+
+  const handleViewDetail = (decompte: Decompte) => {
+    setSelectedDecompte(decompte);
+    setDetailModalOpened(true);
+  };
+
+  const handlePrint = (decompte: Decompte) => {
+    navigate(`/decomptes/${decompte.idDecompte}/print`);
+  };
+
   // Chargement initial
   useEffect(() => {
     loadRevendeurs();
@@ -123,13 +177,25 @@ export default function ListeDecomptes() {
   useEffect(() => {
     let filtered = [...decomptes];
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
+    if (searchNom) {
+      const term = searchNom.toLowerCase();
       filtered = filtered.filter(d =>
-        d.code_decompte?.toLowerCase().includes(term) ||
-        d.nom_revendeur?.toLowerCase().includes(term) ||
-        d.observation?.toLowerCase().includes(term) ||
-        d.notes?.toLowerCase().includes(term)
+        d.NomComplet?.toLowerCase().includes(term)
+      );
+    }
+
+    if (searchCode) {
+      const term = searchCode.toLowerCase();
+      filtered = filtered.filter(d =>
+        d.code_decompte?.toLowerCase().includes(term)
+      );
+    }
+
+    if (filterCodeFacture) {
+      filtered = filtered.filter(d =>
+        d.details?.some(detail =>
+          detail.codeFacture === filterCodeFacture
+        )
       );
     }
 
@@ -162,7 +228,7 @@ export default function ListeDecomptes() {
     setFilteredDecomptes(filtered);
     setCurrentPage(1);
     calculerStatistiques(filtered);
-  }, [decomptes, searchTerm, statutFilter, revendeurFilter, dateDebut, dateFin]);
+  }, [decomptes, searchNom, searchCode, filterCodeFacture, statutFilter, revendeurFilter, dateDebut, dateFin]);
 
   const loadRevendeurs = async () => {
     try {
@@ -170,6 +236,85 @@ export default function ListeDecomptes() {
       setRevendeurs(data);
     } catch (error) {
       console.error('Erreur chargement revendeurs:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger la liste des revendeurs',
+        color: 'red'
+      });
+    }
+  };
+
+  const getDecompteDetails = async (idDecompte: number): Promise<DecompteDetail[]> => {
+    try {
+      const db = await getDb();
+
+      const details = await db.select<any[]>(
+        `
+        SELECT 
+          dd.*,
+          p.designation as produit_designation,
+          p.code_produit,
+          p.categorie as produit_categorie,
+          p.prix_achat_base,
+          p.prix_vente_gros,
+          p.commission_pourcentage as produit_commission,
+          COALESCE(
+            (
+              SELECT sr.qte_stock 
+              FROM stock_revendeur sr 
+              WHERE sr.idRevendeur = d.idClient 
+                AND sr.idProduit = dd.idProduit
+            ), 
+            0
+          ) as stock_actuel_revendeur
+        FROM decompte_details dd
+        INNER JOIN products p ON p.idProduit = dd.idProduit
+        INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
+        WHERE dd.idDecompte = ?
+        `,
+        [idDecompte]
+      );
+
+      return details.map(d => {
+        const prixAchat = d.prix_achat || d.prix_achat_base || 0;
+        const prixVente = d.prix_vente || d.prix_vente_gros || 0;
+        const qteDecompte = d.qte_decompte || 0;
+        const stockActuel = d.stock_actuel_revendeur || 0;
+        const qteInitiale = stockActuel + qteDecompte;
+        const totalAchat = prixAchat * qteDecompte;
+        const totalVente = d.total || (prixVente * qteDecompte);
+        const benefice = totalVente - totalAchat;
+        const commission = benefice * ((d.commission_pourcentage || d.produit_commission || 0) / 100);
+        const codeFacture = `F_${String(d.idDecompte).padStart(6, '0')}`;
+
+        return {
+          idDetailRevendeur: d.idDetailRevendeur,
+          idDecompte: d.idDecompte,
+          idProduit: d.idProduit,
+          qte_decompte: qteDecompte,
+          prix_achat: prixAchat,
+          prix_vente: prixVente,
+          commission_pourcentage: d.commission_pourcentage || d.produit_commission || 0,
+          designation: d.produit_designation || d.designation || 'Produit',
+          total: totalVente,
+          codeFacture: codeFacture,
+          categorie: d.produit_categorie || 'Non catégorisé',
+          qteInitiale: qteInitiale,
+          qteVendue: qteDecompte,
+          qteRestante: qteInitiale - qteDecompte,
+          prixAchat: prixAchat,
+          prixVente: prixVente,
+          totalAchat: totalAchat,
+          totalVente: totalVente,
+          benefice: benefice,
+          commission: commission,
+          produit_designation: d.produit_designation,
+          produit_categorie: d.produit_categorie
+        };
+      });
+    } catch (error) {
+      console.error('Erreur chargement détails:', error);
+      return [];
     }
   };
 
@@ -177,45 +322,56 @@ export default function ListeDecomptes() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const data = await decompteRepository.getAll();
-      
+
       const enrichedData = await Promise.all(
         data.map(async (decompte: any) => {
           try {
-            const client = await clientRepository.getById(decompte.idClient);
+            const details = await getDecompteDetails(decompte.idDecompte);
             return {
               ...decompte,
-              nom_revendeur: client?.NomComplet || 'Inconnu'
+              details: details || []
             };
-          } catch {
+          } catch (error) {
+            console.error(`Erreur chargement détails pour décompte ${decompte.idDecompte}:`, error);
             return {
               ...decompte,
-              nom_revendeur: 'Inconnu'
+              details: []
             };
           }
         })
       );
-      
+
       setDecomptes(enrichedData);
 
-      try {
-        const stats = await decompteRepository.getStatistiques();
-        setStatistiques({
-          total: stats.total || 0,
-          totalValide: stats.totalValide || 0,
-          totalPaye: stats.totalPaye || 0,
-          totalAnnule: stats.totalAnnule || 0,
-          totalBrouillon: stats.totalBrouillon || 0,
-          montantTotal: stats.montantTotal || 0,
-          montantTotalVente: stats.montantTotalVente || 0,
-          montantTotalCommission: stats.montantTotalCommission || 0,
-          montantTotalBenefice: stats.montantTotalBenefice || 0
+      const codes = new Set<string>();
+      enrichedData.forEach((d: Decompte) => {
+        d.details?.forEach((detail: DecompteDetail) => {
+          if (detail.codeFacture) {
+            codes.add(detail.codeFacture);
+          }
         });
-      } catch (statsError) {
-        console.warn('Impossible de charger les statistiques:', statsError);
-      }
-      
+      });
+      const codeOptions = Array.from(codes).sort().map((code: string) => ({
+        value: code,
+        label: code
+      }));
+      setCodeFactureOptions(codeOptions);
+
+      const stats = {
+        total: enrichedData.length,
+        totalValide: enrichedData.filter((d: Decompte) => d.statut === 'valide').length,
+        totalPaye: enrichedData.filter((d: Decompte) => d.statut === 'paye').length,
+        totalAnnule: enrichedData.filter((d: Decompte) => d.statut === 'annule').length,
+        totalBrouillon: enrichedData.filter((d: Decompte) => d.statut === 'brouillon').length,
+        montantTotal: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_net || 0), 0),
+        montantTotalVente: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_vente || 0), 0),
+        montantTotalCommission: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_commission || 0), 0),
+        montantTotalBenefice: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_benefice || 0), 0)
+      };
+      setStatistiques(stats);
+
     } catch (error: any) {
       console.error('Erreur chargement décomptes:', error);
       setError(error?.message || 'Impossible de charger les décomptes');
@@ -252,11 +408,10 @@ export default function ListeDecomptes() {
     });
   };
 
-  // ✅ Fonction de formatage des montants en FCFA
   const formatMontant = (value: number) => {
-    return (value || 0).toLocaleString('fr-FR', { 
-      minimumFractionDigits: 0, 
-      maximumFractionDigits: 0 
+    return (value || 0).toLocaleString('fr-FR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
     });
   };
 
@@ -297,7 +452,9 @@ export default function ListeDecomptes() {
   };
 
   const resetFilters = () => {
-    setSearchTerm('');
+    setSearchNom('');
+    setSearchCode('');
+    setFilterCodeFacture(null);
     setStatutFilter(null);
     setRevendeurFilter(null);
     setDateDebut('');
@@ -305,13 +462,67 @@ export default function ListeDecomptes() {
     setCurrentPage(1);
   };
 
-  const handleViewDetail = (decompte: Decompte) => {
-    setSelectedDecompte(decompte);
-    setDetailModalOpened(true);
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedItems(paginatedDecomptes.map(d => d.idDecompte));
+    } else {
+      setSelectedItems([]);
+    }
   };
 
-  const handlePrint = (decompte: Decompte) => {
-    navigate(`/decomptes/${decompte.idDecompte}/print`);
+  const handleSelectItem = (id: number, checked: boolean) => {
+    if (checked) {
+      setSelectedItems([...selectedItems, id]);
+    } else {
+      setSelectedItems(selectedItems.filter(item => item !== id));
+    }
+  };
+
+  const handleDelete = async (idDecompte: number) => {
+    if (!window.confirm('⚠️ Êtes-vous sûr de vouloir supprimer ce décompte ?\n\nCette action est irréversible et restaurera les stocks.')) {
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await decompteRepository.delete(idDecompte);
+
+      notifications.show({
+        title: '✅ Succès',
+        message: 'Décompte supprimé avec succès.',
+        color: 'green',
+        autoClose: 3000
+      });
+
+      setTimeout(() => {
+        loadDecomptes();
+      }, 500);
+
+    } catch (error: any) {
+      console.error('Erreur lors de la suppression:', error);
+
+      let errorMessage = 'Impossible de supprimer ce décompte.';
+
+      if (error?.message?.includes('database is locked')) {
+        errorMessage = '⚠️ La base de données est verrouillée. Veuillez rafraîchir la page et réessayer.';
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+
+      notifications.show({
+        title: '❌ Erreur',
+        message: errorMessage,
+        color: 'red',
+        autoClose: 5000
+      });
+
+      setTimeout(() => {
+        loadDecomptes();
+      }, 1000);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const totalPages = Math.ceil(filteredDecomptes.length / itemsPerPage);
@@ -323,17 +534,17 @@ export default function ListeDecomptes() {
   if (error) {
     return (
       <Stack p="md">
-        <Alert 
-          icon={<IconAlertCircle size={16} />} 
-          title="Erreur" 
+        <Alert
+          icon={<IconAlertCircle size={16} />}
+          title="Erreur"
           color="red"
           withCloseButton
           onClose={() => setError(null)}
         >
           {error}
-          <Button 
-            variant="light" 
-            color="red" 
+          <Button
+            variant="light"
+            color="red"
             mt="md"
             leftSection={<IconRefresh size={16} />}
             onClick={loadDecomptes}
@@ -348,164 +559,298 @@ export default function ListeDecomptes() {
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-        <Flex justify="space-between" align="center" wrap="wrap">
-          <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
-              <IconReceipt size={30} />
-            </ThemeIcon>
-            <div>
-              <Title order={1} c="white">Décomptes</Title>
-              <Text c="gray.3" size="sm">
-                Gestion des décomptes des revendeurs
-              </Text>
-            </div>
+      <Paper
+        p="xl"
+        radius="lg"
+        style={{
+          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+          borderBottom: '3px solid #e94560'
+        }}
+      >
+        <Stack gap="md">
+          <Group justify="space-between" align="center" wrap="wrap">
+            <Group gap="md">
+              <ThemeIcon size={45} radius="md" color="red" variant="filled">
+                <IconReceipt size={28} />
+              </ThemeIcon>
+              <div>
+                <Title order={1} c="white" size="h2" fw={700}>
+                  GESTION DES DECOMPTES DES REVENDEURS
+                </Title>
+              </div>
+            </Group>
+            <Group>
+              <Button
+                variant="light"
+                color="gray"
+                leftSection={<IconRefresh size={18} />}
+                onClick={loadDecomptes}
+                loading={loading}
+                size="sm"
+              >
+                Actualiser
+              </Button>
+              <Button
+                color="red"
+                leftSection={<IconPlus size={18} />}
+                onClick={() => navigate('/decomptes/nouveau')}
+                size="sm"
+              >
+                Nouveau décompte
+              </Button>
+            </Group>
           </Group>
-          <Group>
-            <Button
-              variant="light"
-              color="white"
-              leftSection={<IconRefresh size={18} />}
-              onClick={loadDecomptes}
-              loading={loading}
-            >
-              Actualiser
-            </Button>
-            <Button
-              color="green"
-              leftSection={<IconPlus size={18} />}
-              onClick={() => navigate('/decomptes/nouveau')}
-            >
-              Nouveau décompte
-            </Button>
-          </Group>
-        </Flex>
 
-        {/* Statistiques avec FCFA */}
-        <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md" mt="xl">
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Text c="white" size="xs">Total</Text>
-            <Text c="white" fw={700} size="xl">{statistiques.total}</Text>
+          {/* Barre de recherche et filtres */}
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="md" withBorder={false}>
+            <Grid align="flex-end">
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <TextInput
+                  placeholder="Nom du client"
+                  value={searchNom}
+                  onChange={(e) => setSearchNom(e.target.value)}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Rechercher</Text>}
+                  leftSection={<IconSearch size={16} color="rgba(255,255,255,0.6)" />}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <TextInput
+                  placeholder="Code décompte"
+                  value={searchCode}
+                  onChange={(e) => setSearchCode(e.target.value)}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Code décompte</Text>}
+                  leftSection={<IconFileInvoice size={16} color="rgba(255,255,255,0.6)" />}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <Select
+                  placeholder="Sélectionner un code facture"
+                  clearable
+                  searchable
+                  data={codeFactureOptions}
+                  value={filterCodeFacture}
+                  onChange={setFilterCodeFacture}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Code facture</Text>}
+                  leftSection={<IconFileInvoice size={16} color="rgba(255,255,255,0.6)" />}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    },
+                    dropdown: {
+                      backgroundColor: '#1a1a2e',
+                      borderColor: 'rgba(255,255,255,0.15)'
+                    },
+                    option: {
+                      color: 'white',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.1)'
+                      }
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <Select
+                  placeholder="Statut"
+                  clearable
+                  data={[
+                    { value: 'brouillon', label: '📝 Brouillon' },
+                    { value: 'valide', label: '✅ Validé' },
+                    { value: 'paye', label: '💳 Payé' },
+                    { value: 'annule', label: '❌ Annulé' }
+                  ]}
+                  value={statutFilter}
+                  onChange={setStatutFilter}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Statut</Text>}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    },
+                    dropdown: {
+                      backgroundColor: '#1a1a2e',
+                      borderColor: 'rgba(255,255,255,0.15)'
+                    },
+                    option: {
+                      color: 'white',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.1)'
+                      }
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <Select
+                  placeholder="Revendeur"
+                  clearable
+                  searchable
+                  data={revendeurs.map(r => ({
+                    value: r.idClient.toString(),
+                    label: r.NomComplet
+                  }))}
+                  value={revendeurFilter}
+                  onChange={setRevendeurFilter}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Revendeur</Text>}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    },
+                    dropdown: {
+                      backgroundColor: '#1a1a2e',
+                      borderColor: 'rgba(255,255,255,0.15)'
+                    },
+                    option: {
+                      color: 'white',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.1)'
+                      }
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <TextInput
+                  type="date"
+                  placeholder="Du"
+                  value={dateDebut}
+                  onChange={(e) => setDateDebut(e.target.value)}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Du</Text>}
+                  leftSection={<IconCalendar size={16} color="rgba(255,255,255,0.6)" />}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <TextInput
+                  type="date"
+                  placeholder="Au"
+                  value={dateFin}
+                  onChange={(e) => setDateFin(e.target.value)}
+                  size="sm"
+                  label={<Text c="gray.2" size="sm" fw={500}>Au</Text>}
+                  leftSection={<IconCalendar size={16} color="rgba(255,255,255,0.6)" />}
+                  styles={{
+                    input: {
+                      backgroundColor: 'rgba(255,255,255,0.15)',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      color: 'white',
+                      '&::placeholder': {
+                        color: 'rgba(255,255,255,0.5)'
+                      },
+                      '&:focus': {
+                        borderColor: '#e94560'
+                      }
+                    },
+                    label: {
+                      color: 'rgba(255,255,255,0.9)'
+                    }
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <Button
+                  variant="light"
+                  color="red"
+                  leftSection={<IconX size={16} />}
+                  onClick={resetFilters}
+                  size="sm"
+                  fullWidth
+                  style={{ marginBottom: 2 }}
+                >
+                  Réinitialiser
+                </Button>
+              </Grid.Col>
+            </Grid>
           </Card>
-          <Card bg="rgba(46,125,50,0.3)" radius="md" p="sm">
-            <Text c="white" size="xs">Validés</Text>
-            <Text c="white" fw={700} size="xl">{statistiques.totalValide}</Text>
-          </Card>
-          <Card bg="rgba(33,150,243,0.3)" radius="md" p="sm">
-            <Text c="white" size="xs">Payés</Text>
-            <Text c="white" fw={700} size="xl">{statistiques.totalPaye}</Text>
-          </Card>
-          <Card bg="rgba(255,152,0,0.3)" radius="md" p="sm">
-            <Text c="white" size="xs">Brouillons</Text>
-            <Text c="white" fw={700} size="xl">{statistiques.totalBrouillon}</Text>
-          </Card>
-          <Card bg="rgba(76,175,80,0.2)" radius="md" p="sm">
-            <Text c="white" size="xs">Montant total</Text>
-            <Text c="white" fw={700} size="xl">{formatMontant(statistiques.montantTotal)} FCFA</Text>
-          </Card>
-        </SimpleGrid>
-
-        {/* Statistiques détaillées supplémentaires avec FCFA */}
-        <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md" mt="md">
-          <Card bg="rgba(255,255,255,0.05)" radius="md" p="xs">
-            <Text c="gray.3" size="xs">Total ventes</Text>
-            <Text c="white" fw={600} size="sm">{formatMontant(statistiques.montantTotalVente)} FCFA</Text>
-          </Card>
-          <Card bg="rgba(255,255,255,0.05)" radius="md" p="xs">
-            <Text c="gray.3" size="xs">Commissions</Text>
-            <Text c="white" fw={600} size="sm">{formatMontant(statistiques.montantTotalCommission)} FCFA</Text>
-          </Card>
-          <Card bg="rgba(255,255,255,0.05)" radius="md" p="xs">
-            <Text c="gray.3" size="xs">Bénéfices</Text>
-            <Text c="white" fw={600} size="sm">{formatMontant(statistiques.montantTotalBenefice)} FCFA</Text>
-          </Card>
-        </SimpleGrid>
+        </Stack>
       </Paper>
 
-      {/* Filtres */}
-      <Card withBorder radius="lg" shadow="sm" p="md">
-        <Flex align="flex-end" gap="sm" wrap="wrap">
-          <TextInput
-            placeholder="Rechercher..."
-            leftSection={<IconSearch size={16} />}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            size="xs"
-            style={{ flex: 2, minWidth: 120 }}
-            label="Recherche"
-          />
-          <Select
-            placeholder="Statut"
-            clearable
-            data={[
-              { value: 'brouillon', label: '📝 Brouillon' },
-              { value: 'valide', label: '✅ Validé' },
-              { value: 'paye', label: '💳 Payé' },
-              { value: 'annule', label: '❌ Annulé' }
-            ]}
-            value={statutFilter}
-            onChange={setStatutFilter}
-            size="xs"
-            style={{ flex: 1.5, minWidth: 120 }}
-            label="Statut"
-          />
-          <Select
-            placeholder="Revendeur"
-            clearable
-            searchable
-            data={revendeurs.map(r => ({
-              value: r.idClient.toString(),
-              label: r.NomComplet
-            }))}
-            value={revendeurFilter}
-            onChange={setRevendeurFilter}
-            size="xs"
-            style={{ flex: 1.5, minWidth: 120 }}
-            label="Revendeur"
-          />
-          <TextInput
-            type="date"
-            placeholder="Du"
-            value={dateDebut}
-            onChange={(e) => setDateDebut(e.target.value)}
-            size="xs"
-            style={{ flex: 1, minWidth: 90 }}
-            label="Du"
-            leftSection={<IconCalendar size={14} />}
-          />
-          <TextInput
-            type="date"
-            placeholder="Au"
-            value={dateFin}
-            onChange={(e) => setDateFin(e.target.value)}
-            size="xs"
-            style={{ flex: 1, minWidth: 90 }}
-            label="Au"
-            leftSection={<IconCalendar size={14} />}
-          />
-          <Group gap="xs" style={{ flex: '0 0 auto' }}>
-            <Tooltip label="Réinitialiser les filtres">
-              <ActionIcon
-                variant="light"
-                color="red"
-                onClick={resetFilters}
-                size={30}
-                style={{ marginTop: 18 }}
-              >
-                <IconX size={16} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        </Flex>
-
-        {filteredDecomptes.length > 0 && (
-          <Text size="xs" c="dimmed" mt="xs">
-            {filteredDecomptes.length} décompte(s) trouvé(s)
-          </Text>
-        )}
-      </Card>
-
-      {/* Liste des décomptes */}
+      {/* Liste des décomptes - AVEC FUSION DE CELLULES */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
         {loading ? (
           <Center py={100}>
@@ -519,18 +864,18 @@ export default function ListeDecomptes() {
                 Aucun décompte trouvé
               </Text>
               <Text c="dimmed" size="sm">
-                {searchTerm || statutFilter || revendeurFilter || dateDebut || dateFin
+                {searchNom || searchCode || filterCodeFacture || statutFilter || revendeurFilter || dateDebut || dateFin
                   ? 'Aucun décompte ne correspond aux filtres appliqués'
                   : 'Commencez par créer un nouveau décompte'}
               </Text>
-              {(searchTerm || statutFilter || revendeurFilter || dateDebut || dateFin) && (
+              {(searchNom || searchCode || filterCodeFacture || statutFilter || revendeurFilter || dateDebut || dateFin) && (
                 <Button variant="subtle" size="xs" onClick={resetFilters}>
                   Réinitialiser les filtres
                 </Button>
               )}
-              {!searchTerm && !statutFilter && !revendeurFilter && !dateDebut && !dateFin && (
-                <Button 
-                  variant="light" 
+              {!searchNom && !searchCode && !filterCodeFacture && !statutFilter && !revendeurFilter && !dateDebut && !dateFin && (
+                <Button
+                  variant="light"
                   color="blue"
                   leftSection={<IconPlus size={16} />}
                   onClick={() => navigate('/decomptes/nouveau')}
@@ -542,89 +887,208 @@ export default function ListeDecomptes() {
           </Center>
         ) : (
           <>
-            <ScrollArea h={500}>
-              <Table striped highlightOnHover verticalSpacing="sm">
+            <ScrollArea h={550}>
+              <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                    <Table.Th c="white" w={50}>N°</Table.Th>
-                    <Table.Th c="white">Code</Table.Th>
-                    <Table.Th c="white">Revendeur</Table.Th>
-                    <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white" ta="right">Montant Net</Table.Th>
-                    <Table.Th c="white" ta="right">Bénéfice</Table.Th>
-                    <Table.Th c="white" ta="center">Statut</Table.Th>
-                    <Table.Th c="white" ta="center">Actions</Table.Th>
+                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+                    <Table.Th style={{ width: 30, textAlign: 'center', color: 'white' }}>
+                      <Checkbox
+                        checked={selectedItems.length === paginatedDecomptes.length && paginatedDecomptes.length > 0}
+                        onChange={(e) => handleSelectAll(e.currentTarget.checked)}
+                        styles={{ input: { backgroundColor: 'rgba(255,255,255,0.2)' } }}
+                      />
+                    </Table.Th>
+                    <Table.Th style={{ width: 35, textAlign: 'center', fontSize: 11, color: 'white' }}>N°</Table.Th>
+                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Nom du client</Table.Th>
+                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Date</Table.Th>
+                    <Table.Th style={{ fontSize: 11, color: 'white' }}>CodeFacture</Table.Th>
+                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Catégorie</Table.Th>
+                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Désignation</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté initiale</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté vendue</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté restante</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Prix Achat</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Prix Vente</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Total Achat</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Total Vente</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Bénéfice</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Commission</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {paginatedDecomptes.map((decompte, idx) => {
                     const num = (currentPage - 1) * itemsPerPage + idx + 1;
-                    return (
-                      <Table.Tr key={decompte.idDecompte}>
-                        <Table.Td fw={600}>{num}</Table.Td>
-                        <Table.Td>
-                          <Badge variant="outline" color="blue" size="sm">
-                            {decompte.code_decompte || 'N/A'}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap="xs" wrap="nowrap">
-                            <IconTruck size={14} color="#868e96" />
-                            <Text size="sm" lineClamp={1}>
-                              {decompte.nom_revendeur || decompte.NomComplet || 'Inconnu'}
-                            </Text>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Tooltip label={formatDateHeure(decompte.date_decompte)}>
-                            <Text size="sm">{formatDate(decompte.date_decompte)}</Text>
-                          </Tooltip>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text fw={600} color="blue" size="sm">
-                            {formatMontant(decompte.montant_net || 0)} FCFA
-                          </Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text 
-                            fw={600} 
-                            size="sm"
-                            color={(decompte.montant_benefice || 0) > 0 ? 'green' : 'red'}
-                          >
-                            {formatMontant(decompte.montant_benefice || 0)} FCFA
-                          </Text>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Badge color={getStatutColor(decompte.statut)} size="sm">
-                            {getStatutLabel(decompte.statut)}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Group gap="xs" justify="center" wrap="nowrap">
-                            <Tooltip label="Voir détails">
-                              <ActionIcon
-                                variant="subtle"
-                                color="blue"
-                                size="sm"
-                                onClick={() => handleViewDetail(decompte)}
-                              >
-                                <IconEye size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                            <Tooltip label="Imprimer">
-                              <ActionIcon
-                                variant="subtle"
-                                color="teal"
-                                size="sm"
-                                onClick={() => handlePrint(decompte)}
-                              >
-                                <IconPrinter size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </Group>
-                        </Table.Td>
-                      </Table.Tr>
-                    );
+
+                    if (decompte.details && decompte.details.length > 0) {
+                      // AVEC FUSION DE CELLULES - les infos communes sont fusionnées
+                      return decompte.details.map((detail, detailIdx) => {
+                        const benefice = detail.totalVente - detail.totalAchat;
+                        const commission = detail.commission;
+                        const totalDetails = decompte.details!.length;
+
+                        return (
+                          <Table.Tr key={`${decompte.idDecompte}-${detail.idDetailRevendeur || detailIdx}`}>
+                            {detailIdx === 0 && (
+                              <>
+                                <Table.Td ta="center" rowSpan={totalDetails}>
+                                  <Checkbox
+                                    checked={selectedItems.includes(decompte.idDecompte)}
+                                    onChange={(e) => handleSelectItem(decompte.idDecompte, e.currentTarget.checked)}
+                                  />
+                                </Table.Td>
+                                <Table.Td ta="center" fw={600} rowSpan={totalDetails}>
+                                  {num}
+                                </Table.Td>
+                                <Table.Td rowSpan={totalDetails}>
+                                  {decompte.NomComplet || 'Inconnu'}
+                                </Table.Td>
+                                <Table.Td rowSpan={totalDetails}>
+                                  {formatDate(decompte.date_decompte)}
+                                </Table.Td>
+                              </>
+                            )}
+                            <Table.Td>
+                              <Badge variant="outline" color="blue" size="xs">
+                                {detail.codeFacture}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>{detail.categorie || '-'}</Table.Td>
+                            <Table.Td>{detail.designation || '-'}</Table.Td>
+                            <Table.Td ta="center">{detail.qteInitiale}</Table.Td>
+                            <Table.Td ta="center">{detail.qteVendue}</Table.Td>
+                            <Table.Td ta="center">{detail.qteRestante}</Table.Td>
+                            <Table.Td ta="right">{formatMontant(detail.prixAchat)}</Table.Td>
+                            <Table.Td ta="right">{formatMontant(detail.prixVente)}</Table.Td>
+                            <Table.Td ta="right">{formatMontant(detail.totalAchat)}</Table.Td>
+                            <Table.Td ta="right">{formatMontant(detail.totalVente)}</Table.Td>
+                            <Table.Td ta="right" fw={600} c={benefice >= 0 ? 'green' : 'red'}>
+                              {formatMontant(benefice)}
+                            </Table.Td>
+                            <Table.Td ta="right" c={commission >= 0 ? 'green' : 'red'}>
+                              {formatMontant(commission)}
+                            </Table.Td>
+                            {detailIdx === 0 && (
+                              <Table.Td ta="center" rowSpan={totalDetails}>
+                                <Group gap="4px" justify="center">
+                                  <Tooltip label="Voir les détails">
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="gray"
+                                      size="sm"
+                                      onClick={() => handleViewDetail(decompte)}
+                                    >
+                                      <IconEye size={14} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                  <Tooltip label="Voir le reçu">
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="teal"
+                                      size="sm"
+                                      onClick={() => handleViewReceipt(decompte)}
+                                    >
+                                      <IconReceipt size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                  <Tooltip label="Modifier">
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="blue"
+                                      size="sm"
+                                      onClick={() => handleEdit(decompte)}
+                                    >
+                                      <IconPencil size={14} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                  <Tooltip label="Supprimer">
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="red"
+                                      size="sm"
+                                      onClick={() => handleDelete(decompte.idDecompte)}
+                                    >
+                                      <IconTrash size={14} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                </Group>
+                              </Table.Td>
+                            )}
+                          </Table.Tr>
+                        );
+                      });
+                    } else {
+                      // Cas sans détails - une seule ligne
+                      return (
+                        <Table.Tr key={decompte.idDecompte}>
+                          <Table.Td ta="center">
+                            <Checkbox
+                              checked={selectedItems.includes(decompte.idDecompte)}
+                              onChange={(e) => handleSelectItem(decompte.idDecompte, e.currentTarget.checked)}
+                            />
+                          </Table.Td>
+                          <Table.Td ta="center" fw={600}>{num}</Table.Td>
+                          <Table.Td>{decompte.NomComplet || 'Inconnu'}</Table.Td>
+                          <Table.Td>{formatDate(decompte.date_decompte)}</Table.Td>
+                          <Table.Td>-</Table.Td>
+                          <Table.Td>-</Table.Td>
+                          <Table.Td>-</Table.Td>
+                          <Table.Td ta="center">-</Table.Td>
+                          <Table.Td ta="center">-</Table.Td>
+                          <Table.Td ta="center">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="right">-</Table.Td>
+                          <Table.Td ta="center">
+                            <Group gap="4px" justify="center">
+                              <Tooltip label="Voir les détails">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="gray"
+                                  size="sm"
+                                  onClick={() => handleViewDetail(decompte)}
+                                >
+                                  <IconEye size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                              <Tooltip label="Voir le reçu">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="teal"
+                                  size="sm"
+                                  onClick={() => handleViewReceipt(decompte)}
+                                >
+                                  <IconReceipt size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                              <Tooltip label="Modifier">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="blue"
+                                  size="sm"
+                                  onClick={() => handleEdit(decompte)}
+                                >
+                                  <IconPencil size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                              <Tooltip label="Supprimer">
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="red"
+                                  size="sm"
+                                  onClick={() => handleDelete(decompte.idDecompte)}
+                                >
+                                  <IconTrash size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    }
                   })}
                 </Table.Tbody>
               </Table>
@@ -644,12 +1108,42 @@ export default function ListeDecomptes() {
         )}
       </Card>
 
+      {/* Pied de page */}
+      <Paper withBorder p="sm" radius="lg">
+        <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+          <Group gap="lg">
+            <Text size="xs" c="dimmed">
+              Total: <strong>{filteredDecomptes.length}</strong> décomptes
+            </Text>
+            {selectedItems.length > 0 && (
+              <Text size="xs" c="blue">
+                {selectedItems.length} sélectionné(s)
+              </Text>
+            )}
+          </Group>
+          <Group gap="xs">
+            <Badge color="green" size="sm">
+              Validés: {statistiques.totalValide}
+            </Badge>
+            <Badge color="blue" size="sm">
+              Payés: {statistiques.totalPaye}
+            </Badge>
+            <Badge color="orange" size="sm">
+              Brouillons: {statistiques.totalBrouillon}
+            </Badge>
+            <Badge color="red" size="sm">
+              Annulés: {statistiques.totalAnnule}
+            </Badge>
+          </Group>
+        </Flex>
+      </Paper>
+
       {/* Modal Détails */}
       <Modal
         opened={detailModalOpened}
         onClose={() => setDetailModalOpened(false)}
         title="Détails du décompte"
-        size="lg"
+        size="xl"
         centered
         styles={{
           header: {
@@ -664,9 +1158,9 @@ export default function ListeDecomptes() {
       >
         {selectedDecompte && (
           <Stack gap="md">
-            <SimpleGrid cols={2} spacing="md">
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
               <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Code</Text>
+                <Text size="xs" c="dimmed">Code décompte</Text>
                 <Text fw={600}>{selectedDecompte.code_decompte || 'N/A'}</Text>
               </Paper>
               <Paper withBorder p="sm" radius="md">
@@ -674,41 +1168,79 @@ export default function ListeDecomptes() {
                 <Text fw={600}>{formatDateHeure(selectedDecompte.date_decompte)}</Text>
               </Paper>
               <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Revendeur</Text>
-                <Group gap="xs">
-                  <IconTruck size={14} color="#868e96" />
-                  <Text fw={600}>{selectedDecompte.nom_revendeur || 'Inconnu'}</Text>
-                </Group>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Statut</Text>
-                <Badge color={getStatutColor(selectedDecompte.statut)} size="lg">
+                <Badge color={getStatutColor(selectedDecompte.statut)}>
                   {getStatutLabel(selectedDecompte.statut)}
                 </Badge>
               </Paper>
-            </SimpleGrid>
-
-            <Divider />
-
-            <Title order={5}>Montants</Title>
-            <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-              <Paper withBorder p="md" ta="center" radius="md">
-                <Text size="xs" c="dimmed">Achats</Text>
-                <Text fw={700} color="red">{formatMontant(selectedDecompte.montant_achat || 0)} FCFA</Text>
+              <Paper withBorder p="sm" radius="md">
+                <Text size="xs" c="dimmed">Revendeur</Text>
+                <Group gap="xs">
+                  <IconTruck size={14} color="#868e96" />
+                  <Text fw={600}>{selectedDecompte.NomComplet || 'Inconnu'}</Text>
+                </Group>
               </Paper>
-              <Paper withBorder p="md" ta="center" radius="md">
-                <Text size="xs" c="dimmed">Ventes</Text>
-                <Text fw={700} color="blue">{formatMontant(selectedDecompte.montant_vente || 0)} FCFA</Text>
+              <Paper withBorder p="sm" radius="md">
+                <Text size="xs" c="dimmed">Montant net</Text>
+                <Text fw={700} c="blue">{formatMontant(selectedDecompte.montant_net || 0)} FCFA</Text>
               </Paper>
-              <Paper withBorder p="md" ta="center" radius="md" style={{ backgroundColor: '#e8f5e9' }}>
+              <Paper withBorder p="sm" radius="md">
                 <Text size="xs" c="dimmed">Bénéfice</Text>
-                <Text fw={700} color="green">{formatMontant(selectedDecompte.montant_benefice || 0)} FCFA</Text>
-              </Paper>
-              <Paper withBorder p="md" ta="center" radius="md" style={{ backgroundColor: '#f0f5ff' }}>
-                <Text size="xs" c="dimmed">Net</Text>
-                <Text fw={700} color="blue" size="lg">{formatMontant(selectedDecompte.montant_net || 0)} FCFA</Text>
+                <Text fw={700} c={selectedDecompte.montant_benefice >= 0 ? 'green' : 'red'}>
+                  {formatMontant(selectedDecompte.montant_benefice || 0)} FCFA
+                </Text>
               </Paper>
             </SimpleGrid>
+
+            <Divider label="Produits décomptés" labelPosition="center" />
+
+            {selectedDecompte.details && selectedDecompte.details.length > 0 ? (
+              <ScrollArea h={300}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr style={{ backgroundColor: '#f8f9fa' }}>
+                      <Table.Th style={{ fontSize: 11 }}>CodeFacture</Table.Th>
+                      <Table.Th style={{ fontSize: 11 }}>Catégorie</Table.Th>
+                      <Table.Th style={{ fontSize: 11 }}>Désignation</Table.Th>
+                      <Table.Th style={{ fontSize: 11, textAlign: 'center' }}>Qté vendue</Table.Th>
+                      <Table.Th style={{ fontSize: 11, textAlign: 'right' }}>Prix Vente</Table.Th>
+                      <Table.Th style={{ fontSize: 11, textAlign: 'right' }}>Total Vente</Table.Th>
+                      <Table.Th style={{ fontSize: 11, textAlign: 'right' }}>Bénéfice</Table.Th>
+                      <Table.Th style={{ fontSize: 11, textAlign: 'right' }}>Commission</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {selectedDecompte.details.map((detail) => {
+                      const benefice = detail.totalVente - detail.totalAchat;
+                      const commission = detail.commission;
+
+                      return (
+                        <Table.Tr key={detail.idDetailRevendeur || Math.random()}>
+                          <Table.Td>
+                            <Badge variant="outline" color="blue" size="xs">
+                              {detail.codeFacture}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{detail.categorie || '-'}</Table.Td>
+                          <Table.Td>{detail.designation || '-'}</Table.Td>
+                          <Table.Td ta="center">{detail.qteVendue}</Table.Td>
+                          <Table.Td ta="right">{formatMontant(detail.prixVente)}</Table.Td>
+                          <Table.Td ta="right" fw={600}>{formatMontant(detail.totalVente)}</Table.Td>
+                          <Table.Td ta="right" c={benefice >= 0 ? 'green' : 'red'}>
+                            {formatMontant(benefice)}
+                          </Table.Td>
+                          <Table.Td ta="right" c={commission >= 0 ? 'green' : 'red'}>
+                            {formatMontant(commission)}
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            ) : (
+              <Text c="dimmed" ta="center">Aucun produit décompté</Text>
+            )}
 
             {selectedDecompte.observation && (
               <>
@@ -716,16 +1248,6 @@ export default function ListeDecomptes() {
                 <div>
                   <Text size="xs" c="dimmed">Observation</Text>
                   <Text>{selectedDecompte.observation}</Text>
-                </div>
-              </>
-            )}
-
-            {selectedDecompte.notes && (
-              <>
-                <Divider />
-                <div>
-                  <Text size="xs" c="dimmed">Notes</Text>
-                  <Text>{selectedDecompte.notes}</Text>
                 </div>
               </>
             )}

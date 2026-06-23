@@ -17,6 +17,10 @@ interface DecompteDetail {
   prix_vente: number;
   commission_pourcentage: number;
   code_produit?: string;
+  qte_initiale: number;        // Ajout
+  reliquat_precedent: number;   // Ajout
+  stock_actuel: number;         // Ajout
+  reliquat: number;             // Ajout
 }
 
 interface DecompteData {
@@ -75,7 +79,8 @@ export default function PrintRecuDecompte() {
             d.taux_commission,
             c.NomComplet,
             c.Societe,
-            c.Tel
+            c.Tel,
+            d.idClient
           FROM decomptes d
           LEFT JOIN clients c ON c.idClient = d.idClient
           WHERE d.idDecompte = ?
@@ -87,7 +92,9 @@ export default function PrintRecuDecompte() {
           return;
         }
 
-        // Récupérer les détails
+        const idClient = decompteData[0].idClient;
+
+        // Récupérer les détails avec les informations de stock
         const detailsData = await db.select<any[]>(`
           SELECT 
             dd.idDetailRevendeur,
@@ -100,25 +107,49 @@ export default function PrintRecuDecompte() {
             p.designation,
             p.code_produit,
             p.unite_base,
-            p.categorie
+            p.categorie,
+            COALESCE(
+              (
+                SELECT sr.qte_stock 
+                FROM stock_revendeur sr 
+                WHERE sr.idRevendeur = ? 
+                  AND sr.idProduit = dd.idProduit
+              ), 
+              0
+            ) as stock_actuel
           FROM decompte_details dd
           LEFT JOIN products p ON p.idProduit = dd.idProduit
           WHERE dd.idDecompte = ?
           ORDER BY dd.idDetailRevendeur ASC
-        `, [decompteId]);
+        `, [idClient, decompteId]);
 
-        // Transformer les détails
-        const recuDetails: DecompteDetail[] = (detailsData || []).map((detail: any) => ({
-          idProduit: detail.idProduit || 0,
-          designation: detail.detail_designation || detail.designation || 'Produit',
-          qte_decompte: detail.qte_decompte || 0,
-          prix_achat: detail.prix_achat || 0,
-          prix_vente: detail.prix_vente || 0,
-          commission_pourcentage: detail.commission_pourcentage || 60,
-          code_produit: detail.code_produit || '',
-          categorie: detail.categorie || 'Catégorie inconnue',
-          unite_base: detail.unite_base || 'Unité inconnue'
-        }));
+        // Transformer les détails avec les bonnes quantités
+        const recuDetails: DecompteDetail[] = (detailsData || []).map((detail: any) => {
+          const qteDecompte = detail.qte_decompte || 0;
+          const stockActuel = detail.stock_actuel || 0;
+          
+          // Quantité initiale = stock actuel + quantité décomptée
+          const qteInitiale = stockActuel + qteDecompte;
+          
+          // Reliquat = stock actuel (après le décompte)
+          const reliquat = stockActuel;
+          
+          return {
+            idProduit: detail.idProduit || 0,
+            designation: detail.detail_designation || detail.designation || 'Produit',
+            qte_decompte: qteDecompte,
+            prix_achat: detail.prix_achat || 0,
+            prix_vente: detail.prix_vente || 0,
+            commission_pourcentage: detail.commission_pourcentage || 60,
+            code_produit: detail.code_produit || '',
+            categorie: detail.categorie || 'Catégorie inconnue',
+            unite_base: detail.unite_base || 'Unité inconnue',
+            qte_initiale: qteInitiale,        // Stock avant le décompte
+            reliquat_precedent: qteInitiale,   // Pour le premier décompte = stock initial
+            stock_actuel: stockActuel,          // Stock actuel après décompte
+            reliquat: reliquat                  // Stock restant
+          };
+        });
 
         // Construire l'objet décompte
         const decompteObj: DecompteData = {
@@ -247,7 +278,11 @@ export default function PrintRecuDecompte() {
             commission_pourcentage: detail.commission_pourcentage,
             designation: detail.designation,
             categorie: detail.categorie || '-',
-            unite_base: detail.unite_base || 'pièce'
+            unite_base: detail.unite_base || 'pièce',
+            qte_initiale: detail.qte_initiale,
+            reliquat_precedent: detail.reliquat_precedent,
+            stock_actuel: detail.stock_actuel,
+            reliquat: detail.reliquat
           }))}
         />
       </div>

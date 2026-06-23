@@ -1,3 +1,4 @@
+// src/components/products/ModalImportProduits.tsx
 import React, { useState, useRef } from 'react';
 import {
   Modal,
@@ -40,11 +41,11 @@ const EXPECTED_COLUMNS = [
   { key: 'categorie', label: 'Catégorie', required: false },
   { key: 'unite_base', label: 'Unité', required: false },
   { key: 'prix_achat_base', label: 'Prix achat', required: false },
-  { key: 'prix_vente_detail', label: 'Prix vente', required: false },
-  { key: 'prix_vente_gros', label: 'Prix gros', required: false },
+  { key: 'prix_vente_detail', label: 'Prix vente détail', required: false },
+  { key: 'prix_vente_gros', label: 'Prix vente gros', required: false },
   { key: 'seuil_alerte', label: 'Seuil alerte', required: false },
-  { key: 'commission_pourcentage', label: 'Marge fixe', required: false },
-  { key: 'qte_stock', label: 'Stock', required: false }
+  { key: 'qte_stock', label: 'Stock', required: false },
+  { key: 'methode_gestion_stock', label: 'Méthode gestion', required: false }
 ];
 
 export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
@@ -72,8 +73,8 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
       '50000',
       '45000',
       '10',
-      '5000',
-      '10'
+      '10',
+      'PMP'
     ].join(',');
     return `${headers}\n${exampleRow}`;
   };
@@ -89,38 +90,42 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    notifications.show({ title: '✅ Template téléchargé', message: '9 colonnes disponibles', color: 'green' });
+    notifications.show({ 
+      title: '✅ Template téléchargé', 
+      message: '9 colonnes disponibles - Seule Désignation est obligatoire', 
+      color: 'green' 
+    });
   };
 
   const downloadExcelTemplate = () => {
-  notifications.show({
-    title: '✅ Template Excel',
-    message: 'Le téléchargement va commencer.',
-    color: 'green',
-  });
+    notifications.show({
+      title: '✅ Template Excel',
+      message: 'Le téléchargement va commencer.',
+      color: 'green',
+    });
 
-  setTimeout(() => {
-    const wsData = [
-      EXPECTED_COLUMNS.map(col => col.label),
-      [
-        'Disque dur SSD 1To',
-        'Informatique',
-        'pièce',
-        '25000',
-        '50000',
-        '45000',
-        '10',
-        '5000',
-        '10'
-      ]
-    ];
+    setTimeout(() => {
+      const wsData = [
+        EXPECTED_COLUMNS.map(col => col.label),
+        [
+          'Disque dur SSD 1To',
+          'Informatique',
+          'pièce',
+          '25000',
+          '50000',
+          '45000',
+          '10',
+          '10',
+          'PMP'
+        ]
+      ];
 
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Produits');
-    XLSX.writeFile(wb, 'template_import_produits.xlsx');
-  }, 150);
-};
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Produits');
+      XLSX.writeFile(wb, 'template_import_produits.xlsx');
+    }, 150);
+  };
 
   const detectSeparator = (firstLine: string): string => {
     const separators = [',', ';', '\t', '|'];
@@ -146,13 +151,13 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
 
     if (h === 'designation') return 'designation';
     if (h === 'categorie') return 'categorie';
-    if (h === 'unite') return 'unite_base';
+    if (h === 'unite' || h === 'unitebase') return 'unite_base';
     if (h === 'prixachat') return 'prix_achat_base';
-    if (h === 'prixvente') return 'prix_vente_detail';
-    if (h === 'prixgros') return 'prix_vente_gros';
+    if (h === 'prixvente' || h === 'prixventedetail') return 'prix_vente_detail';
+    if (h === 'prixgros' || h === 'prixventegros') return 'prix_vente_gros';
     if (h === 'seuilalerte') return 'seuil_alerte';
-    if (h === 'margefixe') return 'commission_pourcentage';
-    if (h === 'stock') return 'qte_stock';
+    if (h === 'stock' || h === 'qtestock') return 'qte_stock';
+    if (h === 'methodegestion' || h === 'methodestock' || h === 'gestionstock') return 'methode_gestion_stock';
 
     return h;
   };
@@ -233,15 +238,20 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
 
       const timestamp = Date.now();
       const random = Math.floor(Math.random() * 10000);
-      const codeProduit = `PROD-${timestamp}-${random}`;
+      const codeProduit = `PROD-${timestamp.toString().slice(-4)}-${random.toString().slice(-4)}`;
 
+      // Valeurs par défaut
       const uniteBase = row.unite_base || 'pièce';
       const seuilAlerte = row.seuil_alerte ? parseFloat(row.seuil_alerte) : 10;
-      const margeFixe = row.commission_pourcentage ? parseFloat(row.commission_pourcentage) : 5000;
       const prixAchat = row.prix_achat_base ? parseFloat(row.prix_achat_base) : 0;
-      const prixVenteDetail = row.prix_vente_detail ? parseFloat(row.prix_vente_detail) : (prixAchat + margeFixe);
-      const prixVenteGros = row.prix_vente_gros ? parseFloat(row.prix_vente_gros) : Math.round(prixVenteDetail * 0.9);
+      const prixVenteDetail = row.prix_vente_detail ? parseFloat(row.prix_vente_detail) : 0;
+      const prixVenteGros = row.prix_vente_gros ? parseFloat(row.prix_vente_gros) : 0;
       const qteStock = row.qte_stock ? parseFloat(row.qte_stock) : 0;
+      const methodeGestion = row.methode_gestion_stock || 'PMP';
+
+      // Si seul le prix d'achat est fourni, on utilise une marge par défaut
+      const prixVenteFinal = prixVenteDetail > 0 ? prixVenteDetail : (prixAchat > 0 ? prixAchat + 5000 : 0);
+      const prixGrosFinal = prixVenteGros > 0 ? prixVenteGros : Math.round(prixVenteFinal * 0.9);
 
       const product: CreateProductInput = {
         code_produit: codeProduit,
@@ -249,11 +259,12 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
         categorie: row.categorie || '',
         unite_base: uniteBase,
         prix_achat_base: prixAchat,
-        prix_vente_detail: prixVenteDetail,
-        prix_vente_gros: prixVenteGros,
+        prix_vente_detail: prixVenteFinal,
+        prix_vente_gros: prixGrosFinal,
         seuil_alerte: seuilAlerte,
-        commission_pourcentage: margeFixe,
         qte_stock: qteStock,
+        prix_moyen_pondere: 0,
+        methode_gestion_stock: methodeGestion
       };
 
       valid.push(product);
@@ -264,7 +275,11 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
 
   const handleImport = async () => {
     if (importData.length === 0) {
-      notifications.show({ title: 'Erreur', message: 'Aucune donnée valide à importer', color: 'red' });
+      notifications.show({ 
+        title: 'Erreur', 
+        message: 'Aucune donnée valide à importer', 
+        color: 'red' 
+      });
       return;
     }
 
@@ -447,9 +462,9 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
                 <Text fw={600} mb="xs">🤖 Valeurs par défaut</Text>
                 <Text size="sm">• Unité : "pièce"</Text>
                 <Text size="sm">• Seuil alerte : 10</Text>
-                <Text size="sm">• Marge fixe : 5 000 F</Text>
+                <Text size="sm">• Méthode de gestion : "PMP"</Text>
                 <Text size="sm">• Code produit : Généré auto</Text>
-                <Text size="sm">• Prix vente = Prix achat + Marge fixe</Text>
+                <Text size="sm">• Prix vente = Prix achat + 5000 F (si non renseigné)</Text>
               </Card>
             </SimpleGrid>
           </>
@@ -496,7 +511,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
                 </Alert>
 
                 <Card withBorder p="md" radius="md">
-                  <Text fw={600} mb="sm">📊 Aperçu</Text>
+                  <Text fw={600} mb="sm">📊 Aperçu (10 premiers)</Text>
                   <ScrollArea h={200}>
                     <Table striped>
                       <Table.Thead>
@@ -506,18 +521,38 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
                           <Table.Th>Unité</Table.Th>
                           <Table.Th>Prix achat</Table.Th>
                           <Table.Th>Prix vente</Table.Th>
+                          <Table.Th>Prix gros</Table.Th>
                           <Table.Th>Stock</Table.Th>
+                          <Table.Th>Méthode</Table.Th>
                         </Table.Tr>
                       </Table.Thead>
                       <Table.Tbody>
                         {importData.slice(0, 10).map((item, idx) => (
                           <Table.Tr key={idx}>
-                            <Table.Td><Text fw={500}>{item.designation}</Text></Table.Td>
-                            <Table.Td>{item.categorie || '-'}</Table.Td>
-                            <Table.Td>{item.unite_base}</Table.Td>
-                            <Table.Td>{Number(item.prix_achat_base || 0).toLocaleString()} F</Table.Td>
-                            <Table.Td><Badge color="blue">{Number(item.prix_vente_detail || 0).toLocaleString()} F</Badge></Table.Td>
-                            <Table.Td>{item.qte_stock}</Table.Td>
+                            <Table.Td>
+                              <Text fw={500} size="sm">{item.designation}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{item.categorie || '-'}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{item.unite_base}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{Number(item.prix_achat_base || 0).toLocaleString()} F</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge color="blue" size="sm">{Number(item.prix_vente_detail || 0).toLocaleString()} F</Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{Number(item.prix_vente_gros || 0).toLocaleString()} F</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{item.qte_stock}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge color="teal" size="sm">{item.methode_gestion_stock || 'PMP'}</Badge>
+                            </Table.Td>
                           </Table.Tr>
                         ))}
                       </Table.Tbody>
@@ -547,6 +582,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
               <Text size="sm">🔍 Résumé de l'import :</Text>
               <Text size="xs">• {importData.length} produit(s) seront ajoutés</Text>
               <Text size="xs">• Un code unique sera généré pour chaque produit</Text>
+              <Text size="xs">• La méthode de gestion par défaut est "PMP"</Text>
             </Alert>
           </>
         )}
@@ -559,12 +595,21 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
         <Group>
           {step > 1 && <Button variant="light" onClick={() => setStep(step - 1)}>Précédent</Button>}
           {step < 3 && (
-            <Button onClick={() => setStep(step + 1)} disabled={step === 2 && importData.length === 0} color="blue">
+            <Button 
+              onClick={() => setStep(step + 1)} 
+              disabled={step === 2 && importData.length === 0} 
+              color="blue"
+            >
               Suivant
             </Button>
           )}
           {step === 3 && (
-            <Button onClick={handleImport} loading={loading} disabled={importData.length === 0} color="green">
+            <Button 
+              onClick={handleImport} 
+              loading={loading} 
+              disabled={importData.length === 0} 
+              color="green"
+            >
               Importer {importData.length} produit(s)
             </Button>
           )}

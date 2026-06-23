@@ -28,6 +28,7 @@
     "bcryptjs": "^3.0.3",
     "dayjs": "^1.11.20",
     "html2canvas": "^1.4.1",
+    "html2pdf.js": "^0.14.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "react": "^19.1.0",

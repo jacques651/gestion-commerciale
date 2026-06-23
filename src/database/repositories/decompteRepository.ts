@@ -51,7 +51,6 @@ export const decompteRepository = {
       if (!exists) {
         const db = await getDb();
         
-        // Créer la table decomptes
         await db.execute(`
           CREATE TABLE IF NOT EXISTS decomptes (
             idDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +73,6 @@ export const decompteRepository = {
           )
         `);
 
-        // Créer la table decompte_details
         await db.execute(`
           CREATE TABLE IF NOT EXISTS decompte_details (
             idDetailRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,12 +89,13 @@ export const decompteRepository = {
           )
         `);
 
-        // Créer les index
         await db.execute(`
           CREATE INDEX IF NOT EXISTS idx_decomptes_client ON decomptes(idClient);
           CREATE INDEX IF NOT EXISTS idx_decomptes_date ON decomptes(date_decompte);
           CREATE INDEX IF NOT EXISTS idx_decomptes_statut ON decomptes(statut);
           CREATE INDEX IF NOT EXISTS idx_decomptes_code ON decomptes(code_decompte);
+          CREATE INDEX IF NOT EXISTS idx_decompte_details_decompte ON decompte_details(idDecompte);
+          CREATE INDEX IF NOT EXISTS idx_decompte_details_produit ON decompte_details(idProduit);
         `);
 
         console.log('✅ Table decomptes créée avec succès');
@@ -158,51 +157,44 @@ export const decompteRepository = {
     }
   },
 
+  // =====================================================
+  // CREATE SANS TRANSACTION - VERSION SIMPLIFIÉE
+  // =====================================================
   async create(
     decompte: CreateDecompteInput,
     details: CreateDecompteDetailInput[]
   ): Promise<number> {
-
     const db = await getDb();
 
     try {
+      const codeDecompte = `DCP-${Date.now()}`;
 
-      await db.execute("BEGIN TRANSACTION");
+      const result = await db.execute(
+        `
+        INSERT INTO decomptes
+        (
+          idClient,
+          code_decompte,
+          observation,
+          periode_debut,
+          periode_fin,
+          notes,
+          statut
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          decompte.idClient,
+          codeDecompte,
+          decompte.observation ?? null,
+          decompte.periode_debut ?? null,
+          decompte.periode_fin ?? null,
+          decompte.notes ?? null,
+          'brouillon'
+        ]
+      );
 
-      const codeDecompte =
-        `DCP-${Date.now()}`;
-
-      const result =
-        await db.execute(
-          `
-          INSERT INTO decomptes
-          (
-            idClient,
-            code_decompte,
-            observation,
-            periode_debut,
-            periode_fin,
-            notes,
-            statut
-          )
-          VALUES
-          (
-            ?, ?, ?, ?, ?, ?, ?
-          )
-          `,
-          [
-            decompte.idClient,
-            codeDecompte,
-            decompte.observation ?? null,
-            decompte.periode_debut ?? null,
-            decompte.periode_fin ?? null,
-            decompte.notes ?? null,
-            'brouillon'
-          ]
-        );
-
-      const idDecompte =
-        Number(result.lastInsertId);
+      const idDecompte = Number(result.lastInsertId);
 
       let montantAchat = 0;
       let montantVente = 0;
@@ -210,16 +202,10 @@ export const decompteRepository = {
       let montantCommission = 0;
 
       for (const detail of details) {
-
-        const produit =
-          await db.select<any[]>(
-            `
-            SELECT *
-            FROM products
-            WHERE idProduit = ?
-            `,
-            [detail.idProduit]
-          );
+        const produit = await db.select<any[]>(
+          `SELECT * FROM products WHERE idProduit = ?`,
+          [detail.idProduit]
+        );
 
         if (produit.length === 0) {
           throw new Error(`Produit introuvable`);
@@ -227,44 +213,21 @@ export const decompteRepository = {
 
         const p = produit[0];
 
-        const prixAchat =
-          Number(p.prix_achat_base || 0);
+        const prixAchat = Number(p.prix_achat_base || 0);
+        const prixVente = Number(p.prix_vente_gros || 0);
+        const commission = Number(p.commission_pourcentage || 0);
 
-        const prixVente =
-          Number(p.prix_vente_gros || 0);
+        const totalAchat = prixAchat * detail.qte_decompte;
+        const totalVente = prixVente * detail.qte_decompte;
+        const benefice = totalVente - totalAchat;
+        const montantCommissionLigne = benefice * commission / 100;
 
-        const commission =
-          Number(p.commission_pourcentage || 0);
+        montantAchat += totalAchat;
+        montantVente += totalVente;
+        montantBenefice += benefice;
+        montantCommission += montantCommissionLigne;
 
-        const totalAchat =
-          prixAchat *
-          detail.qte_decompte;
-
-        const totalVente =
-          prixVente *
-          detail.qte_decompte;
-
-        const benefice =
-          totalVente -
-          totalAchat;
-
-        const montantCommissionLigne =
-          benefice *
-          commission /
-          100;
-
-        montantAchat +=
-          totalAchat;
-
-        montantVente +=
-          totalVente;
-
-        montantBenefice +=
-          benefice;
-
-        montantCommission +=
-          montantCommissionLigne;
-
+        // Insertion dans decompte_details
         await db.execute(
           `
           INSERT INTO decompte_details
@@ -278,10 +241,7 @@ export const decompteRepository = {
             designation,
             total
           )
-          VALUES
-          (
-            ?, ?, ?, ?, ?, ?, ?, ?
-          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             idDecompte,
@@ -295,12 +255,14 @@ export const decompteRepository = {
           ]
         );
 
+        // Retirer du stock revendeur
         await stockRevendeurRepository.retirer(
           decompte.idClient,
           detail.idProduit,
           detail.qte_decompte
         );
 
+        // Enregistrer le mouvement
         await db.execute(
           `
           INSERT INTO mouvements_revendeur
@@ -311,10 +273,7 @@ export const decompteRepository = {
             type_mouvement,
             qte_mouvement
           )
-          VALUES
-          (
-            ?, ?, ?, ?, ?
-          )
+          VALUES (?, ?, ?, ?, ?)
           `,
           [
             detail.idProduit,
@@ -326,9 +285,7 @@ export const decompteRepository = {
         );
       }
 
-      const montantNet =
-        montantVente -
-        montantCommission;
+      const montantNet = montantVente - montantCommission;
 
       await db.execute(
         `
@@ -351,115 +308,72 @@ export const decompteRepository = {
         ]
       );
 
-      await db.execute(
-        "COMMIT"
-      );
-
       return idDecompte;
 
     } catch (error) {
-
-      await db.execute(
-        "ROLLBACK"
-      );
-
+      console.error('❌ Erreur lors de la création du décompte:', error);
       throw error;
     }
   },
 
-  async getById(
-    idDecompte: number
-  ) {
-
+  async getById(idDecompte: number) {
     const db = await getDb();
 
-    const decompte =
-      await db.select<any[]>(
-        `
-        SELECT
+    const decompte = await db.select<any[]>(
+      `
+      SELECT
+        d.*,
+        c.NomComplet,
+        c.Societe,
+        c.Tel,
+        c.Adresse
+      FROM decomptes d
+      INNER JOIN clients c ON c.idClient = d.idClient
+      WHERE d.idDecompte = ?
+      `,
+      [idDecompte]
+    );
 
-          d.*,
-
-          c.NomComplet,
-          c.Societe,
-          c.Tel,
-          c.Adresse
-
-        FROM decomptes d
-
-        INNER JOIN clients c
-        ON c.idClient = d.idClient
-
-        WHERE d.idDecompte = ?
-        `,
-        [idDecompte]
-      );
-
-    if (
-      decompte.length === 0
-    ) {
-
+    if (decompte.length === 0) {
       return null;
     }
 
-    const details =
-      await db.select<any[]>(
-        `
-        SELECT
-
-          dd.*,
-
-          p.designation,
-          p.code_produit
-
-        FROM decompte_details dd
-
-        INNER JOIN products p
-        ON p.idProduit =
-           dd.idProduit
-
-        WHERE dd.idDecompte = ?
-        `,
-        [idDecompte]
-      );
+    const details = await db.select<any[]>(
+      `
+      SELECT
+        dd.*,
+        p.designation,
+        p.code_produit
+      FROM decompte_details dd
+      INNER JOIN products p ON p.idProduit = dd.idProduit
+      WHERE dd.idDecompte = ?
+      `,
+      [idDecompte]
+    );
 
     return {
-
       ...decompte[0],
-
       details
-
     };
   },
 
   async getAll() {
-
     const db = await getDb();
     await this.ensureTable();
 
     return await db.select<any[]>(
       `
       SELECT
-
         d.*,
-
         c.NomComplet
-
       FROM decomptes d
-
-      INNER JOIN clients c
-      ON c.idClient = d.idClient
-
+      INNER JOIN clients c ON c.idClient = d.idClient
       ORDER BY d.idDecompte DESC
       `
     );
   },
 
-  async updateStatut(
-    idDecompte: number,
-    statut: string
-  ) {
-
+  async updateStatut(idDecompte: number, statut: string) {
     const db = await getDb();
 
     await db.execute(
@@ -470,135 +384,113 @@ export const decompteRepository = {
         updated_at = CURRENT_TIMESTAMP
       WHERE idDecompte = ?
       `,
-      [
-        statut,
-        idDecompte
-      ]
+      [statut, idDecompte]
     );
   },
 
-  async rechercher(
-    texte: string
-  ) {
-
+  async rechercher(texte: string) {
     const db = await getDb();
 
-    return await db.select<any[]>(`
+    return await db.select<any[]>(
+      `
       SELECT
-
         d.*,
-
         c.NomComplet
-
       FROM decomptes d
-
-      INNER JOIN clients c
-        ON c.idClient = d.idClient
-
-      WHERE
-
-        d.code_decompte LIKE ?
-
-        OR
-
-        c.NomComplet LIKE ?
-
-      ORDER BY
-        d.idDecompte DESC
-    `,
-    [
-      `%${texte}%`,
-      `%${texte}%`
-    ]);
+      INNER JOIN clients c ON c.idClient = d.idClient
+      WHERE d.code_decompte LIKE ? OR c.NomComplet LIKE ?
+      ORDER BY d.idDecompte DESC
+      `,
+      [`%${texte}%`, `%${texte}%`]
+    );
   },
 
-  async delete(
-    idDecompte: number
-  ) {
-
+  // =====================================================
+  // DELETE SANS TRANSACTION
+  // =====================================================
+  async delete(idDecompte: number): Promise<void> {
     const db = await getDb();
 
     try {
-
-      await db.execute(
-        "BEGIN TRANSACTION"
+      // Récupérer les informations nécessaires
+      const decompte = await db.select<any[]>(
+        `SELECT * FROM decomptes WHERE idDecompte = ?`,
+        [idDecompte]
       );
 
-      const decompte =
-        await db.select<any[]>(`
-          SELECT *
-          FROM decomptes
-          WHERE idDecompte = ?
-        `,
-        [idDecompte]);
-
-      if (
-        decompte.length === 0
-      ) {
-        throw new Error(
-          "Décompte introuvable"
-        );
+      if (decompte.length === 0) {
+        throw new Error("Décompte introuvable");
       }
 
-      const idRevendeur =
-        decompte[0].idClient;
+      const idRevendeur = decompte[0].idClient;
 
-      const details =
-        await db.select<any[]>(`
-          SELECT *
-          FROM decompte_details
-          WHERE idDecompte = ?
-        `,
-        [idDecompte]);
+      // Récupérer les détails
+      const details = await db.select<any[]>(
+        `SELECT * FROM decompte_details WHERE idDecompte = ?`,
+        [idDecompte]
+      );
 
+      console.log(`📦 Restauration des stocks pour ${details.length} produits...`);
+
+      // Restaurer les stocks UN PAR UN
       for (const detail of details) {
-
-        await stockRevendeurRepository
-          .approvisionner(
-            idRevendeur,
-            detail.idProduit,
-            detail.qte_decompte
+        try {
+          const stockExists = await db.select<any[]>(
+            `SELECT * FROM stock_revendeur 
+             WHERE idRevendeur = ? AND idProduit = ?`,
+            [idRevendeur, detail.idProduit]
           );
 
-        await db.execute(`
-          INSERT INTO mouvements_revendeur
-          (
-            idProduit,
-            idRevendeur,
-            idDecompte,
-            type_mouvement,
-            qte_mouvement
-          )
-          VALUES
-          (
-            ?, ?, ?, ?, ?
-          )
-        `,
-        [
-          detail.idProduit,
-          idRevendeur,
-          idDecompte,
-          "ANNULATION_DECOMPTE",
-          detail.qte_decompte
-        ]);
+          if (stockExists.length > 0) {
+            await db.execute(
+              `UPDATE stock_revendeur 
+               SET qte_stock = qte_stock + ?
+               WHERE idRevendeur = ? AND idProduit = ?`,
+              [detail.qte_decompte, idRevendeur, detail.idProduit]
+            );
+            console.log(`✅ Stock restauré pour produit ${detail.idProduit}`);
+          } else {
+            console.warn(`⚠️ Stock non trouvé pour produit ${detail.idProduit}, création...`);
+            await db.execute(
+              `INSERT INTO stock_revendeur (idRevendeur, idProduit, qte_stock, prix_achat, prix_vente, commission_pourcentage) 
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [
+                idRevendeur, 
+                detail.idProduit, 
+                detail.qte_decompte,
+                detail.prix_achat || 0,
+                detail.prix_vente || 0,
+                detail.commission_pourcentage || 0
+              ]
+            );
+          }
+
+          await db.execute(`
+            INSERT INTO mouvements_revendeur
+            (idProduit, idRevendeur, idDecompte, type_mouvement, qte_mouvement)
+            VALUES (?, ?, ?, ?, ?)
+          `,
+          [detail.idProduit, idRevendeur, idDecompte, "ANNULATION_DECOMPTE", detail.qte_decompte]);
+
+        } catch (productError) {
+          console.error(`❌ Erreur pour le produit ${detail.idProduit}:`, productError);
+        }
       }
 
-      await db.execute(`
-        DELETE FROM decomptes
-        WHERE idDecompte = ?
-      `,
-      [idDecompte]);
+      // Supprimer les enregistrements
+      await db.execute(`DELETE FROM mouvements_revendeur WHERE idDecompte = ?`, [idDecompte]);
+      console.log(`✅ Mouvements supprimés`);
 
-      await db.execute(
-        "COMMIT"
-      );
+      await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [idDecompte]);
+      console.log(`✅ Détails supprimés`);
 
-    } catch(error) {
+      await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [idDecompte]);
+      console.log(`✅ Décompte supprimé`);
 
-      await db.execute(
-        "ROLLBACK"
-      );
+      console.log(`✅ Suppression du décompte ${idDecompte} terminée`);
 
+    } catch (error) {
+      console.error('❌ Erreur lors de la suppression:', error);
       throw error;
     }
   },
@@ -614,8 +506,7 @@ export const decompteRepository = {
         d.*,
         c.NomComplet
       FROM decomptes d
-      INNER JOIN clients c
-        ON c.idClient = d.idClient
+      INNER JOIN clients c ON c.idClient = d.idClient
       WHERE d.statut = ?
       ORDER BY d.idDecompte DESC
       `,
@@ -634,8 +525,7 @@ export const decompteRepository = {
         d.*,
         c.NomComplet
       FROM decomptes d
-      INNER JOIN clients c
-        ON c.idClient = d.idClient
+      INNER JOIN clients c ON c.idClient = d.idClient
       WHERE d.idClient = ?
       ORDER BY d.idDecompte DESC
       `,
@@ -654,8 +544,7 @@ export const decompteRepository = {
         d.*,
         c.NomComplet
       FROM decomptes d
-      INNER JOIN clients c
-        ON c.idClient = d.idClient
+      INNER JOIN clients c ON c.idClient = d.idClient
       WHERE d.date_decompte BETWEEN ? AND ?
       ORDER BY d.idDecompte DESC
       `,

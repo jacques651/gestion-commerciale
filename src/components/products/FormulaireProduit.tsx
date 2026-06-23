@@ -10,12 +10,11 @@ import {
   Stack,
   LoadingOverlay,
   Card,
-  SimpleGrid,
   Text,
   Divider,
   Tooltip,
-  ActionIcon
-} from '@mantine/core';
+  ActionIcon,
+  Grid} from '@mantine/core';
 import {
   IconPackage,
   IconCategory,
@@ -24,12 +23,11 @@ import {
   IconBuildingStore,
   IconShoppingCart,
   IconPlus,
-  IconCoin,
-  IconCash
+  IconCash,
+  IconChartBar
 } from '@tabler/icons-react';
 import { useProducts } from '../../hooks/useProducts';
 import { CreateProductInput } from '../../database/repositories/productRepository';
-
 
 interface FormulaireProduitProps {
   opened: boolean;
@@ -47,6 +45,8 @@ const useDynamicOptions = () => {
   const [unites, setUnites] = useState<string[]>([
     'pièce', 'kg', 'litre', 'mètre', 'boîte', 'carton', 'lot', 'paire'
   ]);
+
+  const methodesGestion = ['PMP', 'FIFO', 'LIFO', 'Date de péremption'];
 
   useEffect(() => {
     const savedCategories = localStorage.getItem('custom_categories');
@@ -81,12 +81,12 @@ const useDynamicOptions = () => {
     return false;
   };
 
-  return { categories, unites, addCategory, addUnite };
+  return { categories, unites, methodesGestion, addCategory, addUnite };
 };
 
 export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, onClose, editProduct }) => {
   const { createProduct, updateProduct } = useProducts();
-  const { categories, unites, addCategory, addUnite } = useDynamicOptions();
+  const { categories, unites, methodesGestion, addCategory, addUnite } = useDynamicOptions();
   const [loading, setLoading] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -96,31 +96,17 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
   
   const [formData, setFormData] = useState<CreateProductInput>({
     code_produit: '',
-    categorie: '',
     designation: '',
+    categorie: '',
     unite_base: 'pièce',
     prix_achat_base: 0,
     prix_vente_detail: 0,
     prix_vente_gros: 0,
-    seuil_alerte: 10,
-    commission_pourcentage: 5000,
     qte_stock: 0,
+    seuil_alerte: 10,
+    prix_moyen_pondere: 0,
+    methode_gestion_stock: 'PMP'
   });
-
-  // 🔥 Calcul des prix de vente
-  const prixVenteCalcule = formData.prix_achat_base + formData.commission_pourcentage;
-  const prixGrosCalcule = Math.round(prixVenteCalcule * 0.9);
-
-  // 🔥 Mettre à jour les prix de vente quand le prix d'achat ou la marge changent
-  useEffect(() => {
-    if (!editProduct) {
-      setFormData(prev => ({
-        ...prev,
-        prix_vente_detail: prixVenteCalcule,
-        prix_vente_gros: prixGrosCalcule
-      }));
-    }
-  }, [formData.prix_achat_base, formData.commission_pourcentage]);
 
   // 🔥 Générer automatiquement le code produit au format PROD-XXXX
   useEffect(() => {
@@ -132,7 +118,6 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
           setFormData(prev => ({ ...prev, code_produit: code }));
         } catch (error) {
           console.error('Erreur génération code:', error);
-          // Fallback: utiliser un code temporaire
           setFormData(prev => ({ ...prev, code_produit: `PROD-${Date.now().toString().slice(-4)}` }));
         } finally {
           setGeneratingCode(false);
@@ -147,35 +132,43 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
     if (editProduct) {
       setFormData({
         code_produit: editProduct.code_produit || '',
-        categorie: editProduct.categorie || '',
         designation: editProduct.designation || '',
+        categorie: editProduct.categorie || '',
         unite_base: editProduct.unite_base || 'pièce',
         prix_achat_base: editProduct.prix_achat_base || 0,
         prix_vente_detail: editProduct.prix_vente_detail || 0,
         prix_vente_gros: editProduct.prix_vente_gros || 0,
-        seuil_alerte: editProduct.seuil_alerte || 10,
-        commission_pourcentage: editProduct.commission_pourcentage || 5000,
         qte_stock: editProduct.qte_stock || 0,
+        seuil_alerte: editProduct.seuil_alerte || 10,
+        prix_moyen_pondere: editProduct.prix_moyen_pondere || 0,
+        methode_gestion_stock: editProduct.methode_gestion_stock || 'PMP'
       });
     } else if (opened) {
       setFormData({
         code_produit: '',
-        categorie: '',
         designation: '',
+        categorie: '',
         unite_base: 'pièce',
         prix_achat_base: 0,
         prix_vente_detail: 0,
         prix_vente_gros: 0,
-        seuil_alerte: 10,
-        commission_pourcentage: 5000,
         qte_stock: 0,
+        seuil_alerte: 10,
+        prix_moyen_pondere: 0,
+        methode_gestion_stock: 'PMP'
       });
     }
   }, [editProduct, opened]);
 
-  const margeUnitaire = formData.prix_vente_detail - formData.prix_achat_base;
-  const margePourcentage = formData.prix_achat_base > 0 
-    ? (margeUnitaire / formData.prix_achat_base) * 100 
+  // Calcul des marges pour affichage
+  const margeUnitaire = (formData.prix_vente_detail || 0) - (formData.prix_achat_base || 0);
+  const margePourcentage = (formData.prix_achat_base || 0) > 0 
+    ? (margeUnitaire / (formData.prix_achat_base || 0)) * 100 
+    : 0;
+
+  const margeGrosUnitaire = (formData.prix_vente_gros || 0) - (formData.prix_achat_base || 0);
+  const margeGrosPourcentage = (formData.prix_achat_base || 0) > 0 
+    ? (margeGrosUnitaire / (formData.prix_achat_base || 0)) * 100 
     : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -219,169 +212,241 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
       <Modal
         opened={opened}
         onClose={onClose}
-        size="lg"
+        size="xl"
         padding="md"
         centered
         radius="lg"
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 700 },
-          body: { padding: '20px' }
+          header: { 
+            backgroundColor: '#1b365d', 
+            padding: '14px 24px', 
+            borderTopLeftRadius: '12px', 
+            borderTopRightRadius: '12px' 
+          },
+          title: { color: 'white', fontWeight: 700, width: '100%' },
+          body: { padding: '20px 24px' }
         }}
         title={
-          <Group gap="sm">
-            <IconPackage size={22} color="white" />
-            <div>
-              <Text fw={700} size="md" c="white">{editProduct ? 'Modifier le produit' : 'Nouveau produit'}</Text>
-              <Text size="xs" opacity={0.7} c="white">
-                {editProduct ? 'Modifiez les informations du produit' : 'Créez un nouveau produit dans le catalogue'}
-              </Text>
-            </div>
+          <Group justify="space-between" style={{ width: '100%' }}>
+            <Group gap="sm">
+              <IconPackage size={24} color="white" />
+              <div>
+                <Text fw={700} size="lg" c="white">
+                  {editProduct ? 'Modifier le produit' : 'Nouveau produit'}
+                </Text>
+                <Text size="xs" opacity={0.7} c="white">
+                  {editProduct ? 'Modifiez les informations du produit' : 'Créez un nouveau produit dans le catalogue'}
+                </Text>
+              </div>
+            </Group>
+            <TextInput
+              label="Code produit"
+              value={formData.code_produit}
+              readOnly
+              disabled
+              size="sm"
+              leftSection={<IconTag size={14} />}
+              styles={{ 
+                input: { 
+                  backgroundColor: 'rgba(255,255,255,0.15)', 
+                  fontFamily: 'monospace',
+                  color: 'white',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  width: '160px',
+                  fontSize: '14px'
+                },
+                label: { color: 'rgba(255,255,255,0.7)', fontSize: '12px' }
+              }}
+              description="Format: PROD-XXXX"
+            />
           </Group>
         }
       >
         <LoadingOverlay visible={generatingCode} />
         
         <form onSubmit={handleSubmit}>
-          <Stack gap="md">
-            {/* Code produit et Catégorie */}
-            <SimpleGrid cols={2} spacing="md">
-              <TextInput
-                label="Code produit"
-                value={formData.code_produit}
-                readOnly
-                disabled
-                size="sm"
-                leftSection={<IconTag size={14} />}
-                styles={{ input: { backgroundColor: '#f5f5f5', fontFamily: 'monospace' } }}
-                description="Format: PROD-XXXX (généré automatiquement)"
-              />
-              <Group align="flex-end" gap="xs">
-                <Select
-                  label="Catégorie"
-                  placeholder="Sélectionner"
-                  data={categories}
-                  value={formData.categorie}
-                  onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
+          <Stack gap="sm">
+            {/* Ligne 1: Catégorie + Désignation + Unité */}
+            <Grid align="flex-end">
+              <Grid.Col span={4}>
+                <Group align="flex-end" gap="xs">
+                  <Select
+                    label="Catégorie"
+                    placeholder="Sélectionner"
+                    data={categories}
+                    value={formData.categorie}
+                    onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
+                    size="sm"
+                    searchable
+                    leftSection={<IconCategory size={16} />}
+                    style={{ flex: 1 }}
+                  />
+                  <Tooltip label="Nouvelle catégorie">
+                    <ActionIcon size="md" variant="light" onClick={() => setCategoryModalOpen(true)} style={{ marginBottom: 2 }}>
+                      <IconPlus size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              </Grid.Col>
+              <Grid.Col span={5}>
+                <TextInput
+                  label="Désignation"
+                  placeholder="Nom du produit"
+                  value={formData.designation}
+                  onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
                   required
                   size="sm"
-                  searchable
-                  leftSection={<IconCategory size={14} />}
-                  style={{ flex: 1 }}
+                  leftSection={<IconPackage size={16} />}
                 />
-                <Tooltip label="Nouvelle catégorie">
-                  <ActionIcon size="sm" variant="light" mt={22} onClick={() => setCategoryModalOpen(true)}>
-                    <IconPlus size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-            </SimpleGrid>
-
-            <TextInput
-              label="Désignation"
-              placeholder="Nom du produit"
-              value={formData.designation}
-              onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-              required
-              size="sm"
-              leftSection={<IconPackage size={14} />}
-            />
-
-            <SimpleGrid cols={2} spacing="md">
-              <Group align="flex-end" gap="xs">
-                <Select
-                  label="Unité"
-                  data={unites}
-                  value={formData.unite_base}
-                  onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
-                  size="sm"
-                  leftSection={<IconScale size={14} />}
-                  style={{ flex: 1 }}
-                />
-                <Tooltip label="Nouvelle unité">
-                  <ActionIcon size="sm" variant="light" mt={22} onClick={() => setUniteModalOpen(true)}>
-                    <IconPlus size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-              <NumberInput
-                label="Stock initial"
-                value={formData.qte_stock}
-                onChange={(value) => setFormData({ ...formData, qte_stock: Number(value) || 0 })}
-                min={0}
-                size="sm"
-                leftSection={<IconBuildingStore size={14} />}
-              />
-            </SimpleGrid>
-
-            <Divider label="Prix et marges" labelPosition="center" />
-
-            <SimpleGrid cols={2} spacing="md">
-              <NumberInput
-                label="Prix d'achat (FCFA)"
-                value={formData.prix_achat_base}
-                onChange={(value) => setFormData({ ...formData, prix_achat_base: Number(value) || 0 })}
-                min={0}
-                step={100}
-                size="sm"
-                leftSection={<IconCash size={14} />}
-                required
-              />
-              <NumberInput
-                label="Marge fixe (FCFA)"
-                value={formData.commission_pourcentage}
-                onChange={(value) => setFormData({ ...formData, commission_pourcentage: Number(value) || 0 })}
-                min={0}
-                step={100}
-                size="sm"
-                leftSection={<IconCoin size={14} />}
-              />
-            </SimpleGrid>
-
-            <SimpleGrid cols={2} spacing="md">
-              <NumberInput
-                label="Prix vente détail"
-                value={prixVenteCalcule}
-                readOnly
-                size="sm"
-                leftSection={<IconShoppingCart size={14} />}
-                styles={{ input: { backgroundColor: '#e8f5e9', fontWeight: 600, color: '#2e7d32' } }}
-              />
-              <NumberInput
-                label="Prix vente gros"
-                value={prixGrosCalcule}
-                readOnly
-                size="sm"
-                leftSection={<IconBuildingStore size={14} />}
-                styles={{ input: { backgroundColor: '#f5f5f5' } }}
-              />
-            </SimpleGrid>
-
-            {/* Marge */}
-            {formData.prix_achat_base > 0 && (
-              <SimpleGrid cols={3} spacing="sm">
-                <Card p="xs" withBorder>
-                  <Text size="xs" c="dimmed">Marge unitaire</Text>
-                  <Text fw={700} size="sm" c="green">{margeUnitaire.toLocaleString()} F</Text>
-                </Card>
-                <Card p="xs" withBorder>
-                  <Text size="xs" c="dimmed">Marge (%)</Text>
-                  <Text fw={700} size="sm">{margePourcentage.toFixed(1)}%</Text>
-                </Card>
-                <Card p="xs" withBorder>
-                  <Text size="xs" c="dimmed">Seuil alerte</Text>
-                  <NumberInput
-                    size="xs"
-                    value={formData.seuil_alerte}
-                    onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
-                    min={0}
-                    hideControls
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Group align="flex-end" gap="xs">
+                  <Select
+                    label="Unité de base"
+                    data={unites}
+                    value={formData.unite_base}
+                    onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
+                    size="sm"
+                    leftSection={<IconScale size={16} />}
+                    style={{ flex: 1 }}
                   />
-                </Card>
-              </SimpleGrid>
+                  <Tooltip label="Nouvelle unité">
+                    <ActionIcon size="md" variant="light" onClick={() => setUniteModalOpen(true)} style={{ marginBottom: 2 }}>
+                      <IconPlus size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              </Grid.Col>
+            </Grid>
+
+            {/* Ligne 2: Stock + Seuil + Méthode */}
+            <Grid>
+              <Grid.Col span={4}>
+                <NumberInput
+                  label="Quantité en stock"
+                  value={formData.qte_stock}
+                  onChange={(value) => setFormData({ ...formData, qte_stock: Number(value) || 0 })}
+                  min={0}
+                  size="sm"
+                  leftSection={<IconBuildingStore size={16} />}
+                />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <NumberInput
+                  label="Seuil d'alerte"
+                  value={formData.seuil_alerte}
+                  onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
+                  min={0}
+                  size="sm"
+                  leftSection={<IconChartBar size={16} />}
+                />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <Select
+                  label="Méthode de gestion"
+                  data={methodesGestion}
+                  value={formData.methode_gestion_stock}
+                  onChange={(value) => setFormData({ ...formData, methode_gestion_stock: value || 'PMP' })}
+                  size="sm"
+                  leftSection={<IconChartBar size={16} />}
+                />
+              </Grid.Col>
+            </Grid>
+
+            <Divider size="xs" />
+
+            {/* Ligne 3: Prix */}
+            <Grid>
+              <Grid.Col span={3}>
+                <NumberInput
+                  label="Prix d'achat (FCFA)"
+                  value={formData.prix_achat_base}
+                  onChange={(value) => setFormData({ ...formData, prix_achat_base: Number(value) || 0 })}
+                  min={0}
+                  step={100}
+                  size="sm"
+                  leftSection={<IconCash size={16} />}
+                  required
+                  styles={{ input: { backgroundColor: '#f5f5f5' } }}
+                />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <NumberInput
+                  label="Prix vente détail (FCFA)"
+                  value={formData.prix_vente_detail}
+                  onChange={(value) => setFormData({ ...formData, prix_vente_detail: Number(value) || 0 })}
+                  min={0}
+                  step={100}
+                  size="sm"
+                  leftSection={<IconShoppingCart size={16} />}
+                  required
+                  styles={{ input: { fontWeight: 600, color: '#2e7d32' } }}
+                />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <NumberInput
+                  label="Prix vente gros (FCFA)"
+                  value={formData.prix_vente_gros}
+                  onChange={(value) => setFormData({ ...formData, prix_vente_gros: Number(value) || 0 })}
+                  min={0}
+                  step={100}
+                  size="sm"
+                  leftSection={<IconBuildingStore size={16} />}
+                  required
+                  styles={{ input: { fontWeight: 600, color: '#1565c0' } }}
+                />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <NumberInput
+                  label="Prix moyen pondéré"
+                  value={formData.prix_moyen_pondere}
+                  onChange={(value) => setFormData({ ...formData, prix_moyen_pondere: Number(value) || 0 })}
+                  min={0}
+                  size="sm"
+                  leftSection={<IconCash size={16} />}
+                  disabled
+                  styles={{ input: { backgroundColor: '#f5f5f5', fontWeight: 500 } }}
+                />
+              </Grid.Col>
+            </Grid>
+
+            {/* Marges calculées */}
+            {(formData.prix_achat_base || 0) > 0 && (
+              <Grid mt={4}>
+                <Grid.Col span={6}>
+                  <Card p="xs" withBorder shadow="none" bg="green.0" style={{ padding: '8px 14px' }}>
+                    <Group justify="space-between">
+                      <Text size="sm" c="dimmed" fw={600}>Marge détail</Text>
+                      <Group gap="md">
+                        <Text size="md" fw={700} c={margeUnitaire >= 0 ? 'green' : 'red'}>
+                          {margeUnitaire.toLocaleString()} FCFA
+                        </Text>
+                        <Text size="sm" fw={600} c={margePourcentage >= 0 ? 'green' : 'red'}>
+                          ({margePourcentage.toFixed(1)}%)
+                        </Text>
+                      </Group>
+                    </Group>
+                  </Card>
+                </Grid.Col>
+                <Grid.Col span={6}>
+                  <Card p="xs" withBorder shadow="none" bg="blue.0" style={{ padding: '8px 14px' }}>
+                    <Group justify="space-between">
+                      <Text size="sm" c="dimmed" fw={600}>Marge gros</Text>
+                      <Group gap="md">
+                        <Text size="md" fw={700} c={margeGrosUnitaire >= 0 ? 'green' : 'red'}>
+                          {margeGrosUnitaire.toLocaleString()} FCFA
+                        </Text>
+                        <Text size="sm" fw={600} c={margeGrosPourcentage >= 0 ? 'green' : 'red'}>
+                          ({margeGrosPourcentage.toFixed(1)}%)
+                        </Text>
+                      </Group>
+                    </Group>
+                  </Card>
+                </Grid.Col>
+              </Grid>
             )}
 
-            <Divider />
+            <Divider size="xs" />
 
             <Group justify="flex-end" gap="sm">
               <Button variant="outline" onClick={onClose} size="sm">Annuler</Button>

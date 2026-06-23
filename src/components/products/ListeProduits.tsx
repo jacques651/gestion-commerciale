@@ -18,7 +18,7 @@ import { stockService } from '../../database/repositories/stockService';
 import { FormulaireProduit } from './FormulaireProduit';
 import { ModalImportProduits } from './ModalImportProduits';
 
-// Modal d'ajout de stock (inchangé)
+// Modal d'ajout de stock
 const ModalAjoutStock: React.FC<{
   opened: boolean;
   onClose: () => void;
@@ -28,7 +28,7 @@ const ModalAjoutStock: React.FC<{
   const [loading, setLoading] = useState(false);
   const [quantite, setQuantite] = useState<number>(1);
   const [prixAchat, setPrixAchat] = useState<number>(0);
-  const [margeFixe, setMargeFixe] = useState<number>(produit?.commission_pourcentage || 5000);
+  const [margeFixe, setMargeFixe] = useState<number>(5000);
   const [dateEntree, setDateEntree] = useState<Date>(new Date());
   const [referenceFacture, setReferenceFacture] = useState('');
   const [notes, setNotes] = useState('');
@@ -39,7 +39,7 @@ const ModalAjoutStock: React.FC<{
     if (opened && produit) {
       setQuantite(1);
       setPrixAchat(0);
-      setMargeFixe(produit.commission_pourcentage || 5000);
+      setMargeFixe(5000);
       setDateEntree(new Date());
       setReferenceFacture('');
       setNotes('');
@@ -53,7 +53,7 @@ const ModalAjoutStock: React.FC<{
       return;
     }
     if (prixAchat <= 0) {
-      notifications.show({ title: 'Erreur', message: 'Prix d\'achat invalide', color: 'red' });
+      notifications.show({ title: 'Erreur', message: "Prix d'achat invalide", color: 'red' });
       return;
     }
 
@@ -94,13 +94,35 @@ const ModalAjoutStock: React.FC<{
           <SimpleGrid cols={2} spacing="xs">
             <Text size="xs">📦 Code: {produit?.code_produit}</Text>
             <Text size="xs">📊 Stock: {produit?.qte_stock || 0} {produit?.unite_base}</Text>
-            <Text size="xs">💰 PMP: {(produit?.prix_achat_base || 0).toLocaleString()} F</Text>
-            <Text size="xs">💎 Marge: +{(produit?.commission_pourcentage || 5000).toLocaleString()} F</Text>
+            <Text size="xs">💰 PMP: {(produit?.prix_moyen_pondere || produit?.prix_achat_base || 0).toLocaleString()} F</Text>
+            <Text size="xs">📐 Méthode: {produit?.methode_gestion_stock || 'PMP'}</Text>
           </SimpleGrid>
         </Alert>
-        <NumberInput label="Quantité" value={quantite} onChange={(val) => setQuantite(typeof val === 'number' ? val : 0)} min={1} size="sm" />
-        <NumberInput label="Prix d'achat (F CFA)" value={prixAchat} onChange={(val) => setPrixAchat(typeof val === 'number' ? val : 0)} min={0} step={100} size="sm" leftSection={<IconCash size={14} />} />
-        <NumberInput label="Marge fixe (F CFA)" value={margeFixe} onChange={(val) => setMargeFixe(typeof val === 'number' ? val : 0)} min={0} step={100} size="sm" leftSection={<IconCoin size={14} />} />
+        <NumberInput 
+          label="Quantité" 
+          value={quantite} 
+          onChange={(val) => setQuantite(typeof val === 'number' ? val : 0)} 
+          min={1} 
+          size="sm" 
+        />
+        <NumberInput 
+          label="Prix d'achat (F CFA)" 
+          value={prixAchat} 
+          onChange={(val) => setPrixAchat(typeof val === 'number' ? val : 0)} 
+          min={0} 
+          step={100} 
+          size="sm" 
+          leftSection={<IconCash size={14} />} 
+        />
+        <NumberInput 
+          label="Marge fixe (F CFA)" 
+          value={margeFixe} 
+          onChange={(val) => setMargeFixe(typeof val === 'number' ? val : 0)} 
+          min={0} 
+          step={100} 
+          size="sm" 
+          leftSection={<IconCoin size={14} />} 
+        />
         {prixAchat > 0 && (
           <Alert color="green" variant="light" p="xs">
             <Group justify="space-between">
@@ -109,8 +131,20 @@ const ModalAjoutStock: React.FC<{
             </Group>
           </Alert>
         )}
-        <TextInput type="date" label="Date d'entrée" value={dateEntree.toISOString().split('T')[0]} onChange={(e) => setDateEntree(new Date(e.target.value))} size="sm" />
-        <TextInput label="Référence facture" placeholder="N° de facture" value={referenceFacture} onChange={(e) => setReferenceFacture(e.target.value)} size="sm" />
+        <TextInput 
+          type="date" 
+          label="Date d'entrée" 
+          value={dateEntree.toISOString().split('T')[0]} 
+          onChange={(e) => setDateEntree(new Date(e.target.value))} 
+          size="sm" 
+        />
+        <TextInput 
+          label="Référence facture" 
+          placeholder="N° de facture" 
+          value={referenceFacture} 
+          onChange={(e) => setReferenceFacture(e.target.value)} 
+          size="sm" 
+        />
         <Group justify="flex-end" mt="sm">
           <Button variant="outline" onClick={onClose} size="sm">Annuler</Button>
           <Button onClick={handleSubmit} loading={loading} color="green" size="sm">Ajouter</Button>
@@ -207,7 +241,6 @@ export const ListeProduits: React.FC = () => {
 
   const formatMontant = (value: number): string => (value || 0).toLocaleString('fr-FR');
 
-
   const handleDelete = async () => {
     if (productToDelete) {
       await productRepository.delete(productToDelete.idProduit);
@@ -232,7 +265,7 @@ export const ListeProduits: React.FC = () => {
 
   // Export Excel
   const exportToExcel = () => {
-    const headers = ['Code', 'Désignation', 'Catégorie', 'Unité', 'Stock', 'Prix achat (PMP)', 'Prix vente', 'Date entrée'];
+    const headers = ['Code', 'Désignation', 'Catégorie', 'Unité', 'Stock', 'Prix achat (PMP)', 'Prix vente', 'Prix gros', 'Date entrée'];
     const rows = filteredProducts.map(p => [
       p.code_produit,
       p.designation,
@@ -241,6 +274,7 @@ export const ListeProduits: React.FC = () => {
       p.qte_stock,
       (p.prix_moyen_pondere || p.prix_achat_base).toLocaleString(),
       p.prix_vente_detail.toLocaleString(),
+      p.prix_vente_gros.toLocaleString(),
       new Date(p.date_entree).toLocaleDateString('fr-FR')
     ]);
     
@@ -357,7 +391,7 @@ export const ListeProduits: React.FC = () => {
 
       {/* Barre de recherche, filtres et boutons sur une seule ligne */}
       <Card withBorder radius="lg" shadow="sm" p="md">
-        <Grid  align="flex-end">
+        <Grid align="flex-end">
           {/* Recherche */}
           <Grid.Col span={2.5}>
             <TextInput
@@ -468,7 +502,7 @@ export const ListeProduits: React.FC = () => {
         {/* Panneau des filtres avancés (affiché en dessous) */}
         {showFilters && (
           <Paper withBorder p="md" radius="md" mt="md" bg="gray.0">
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
               <TextInput 
                 type="date" 
                 label="Date début" 
@@ -639,12 +673,37 @@ export const ListeProduits: React.FC = () => {
       {/* Modals */}
       <Modal opened={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Confirmation" centered>
         <Alert icon={<IconAlertCircle size={16} />} color="red">Supprimer "{productToDelete?.designation}" ?</Alert>
-        <Group justify="flex-end" mt="md"><Button variant="outline" onClick={() => setDeleteModalOpen(false)}>Annuler</Button><Button color="red" onClick={handleDelete}>Supprimer</Button></Group>
+        <Group justify="flex-end" mt="md">
+          <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>Annuler</Button>
+          <Button color="red" onClick={handleDelete}>Supprimer</Button>
+        </Group>
       </Modal>
 
-      <FormulaireProduit opened={modalOpened} onClose={() => { setModalOpened(false); setEditingProduct(null); loadProducts(); }} editProduct={editingProduct} />
-      <ModalAjoutStock opened={ajoutStockModalOpen} onClose={() => { setAjoutStockModalOpen(false); setSelectedProductForStock(null); }} produit={selectedProductForStock} onSuccess={loadProducts} />
-      <ModalImportProduits opened={importModalOpen} onClose={() => setImportModalOpen(false)} onSuccess={loadProducts} />
+      <FormulaireProduit 
+        opened={modalOpened} 
+        onClose={() => { 
+          setModalOpened(false); 
+          setEditingProduct(null); 
+          loadProducts(); 
+        }} 
+        editProduct={editingProduct} 
+      />
+      
+      <ModalAjoutStock 
+        opened={ajoutStockModalOpen} 
+        onClose={() => { 
+          setAjoutStockModalOpen(false); 
+          setSelectedProductForStock(null); 
+        }} 
+        produit={selectedProductForStock} 
+        onSuccess={loadProducts} 
+      />
+      
+      <ModalImportProduits 
+        opened={importModalOpen} 
+        onClose={() => setImportModalOpen(false)} 
+        onSuccess={loadProducts} 
+      />
     </Stack>
   );
 };

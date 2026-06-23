@@ -14,7 +14,20 @@ interface RecuDecompteProps {
   numero: string;
   date: string;
   client: string;
-  details: any[];
+  details: Array<{
+    qte_decompte: number;
+    prix_achat: number;
+    prix_vente: number;
+    commission_pourcentage: number;
+    designation: string;
+    categorie: string;
+    unite_base: string;
+    qte_initiale?: number;
+    reliquat_precedent?: number;
+    qte_cumulee?: number;
+    reliquat?: number;
+    stock_actuel?: number;  // Stock actuel du revendeur
+  }>;
   factureOriginale?: any;
 }
 
@@ -23,7 +36,12 @@ interface DetailCalcul {
   designation: string;
   categorie: string;
   unite: string;
-  qte: number;
+
+  qte_initiale: number;
+  qte_vendue: number;
+  qte_cumulee: number;
+  reliquat: number;
+
   prix_achat: number;
   prix_vente: number;
   benefice_ligne: number;
@@ -31,25 +49,24 @@ interface DetailCalcul {
   total_vente: number;
 }
 
-export const RecuDecompte: React.FC<RecuDecompteProps> = ({ 
-  numero, 
-  date, 
-  client, 
+export const RecuDecompte: React.FC<RecuDecompteProps> = ({
+  numero,
+  date,
+  client,
   details,
-  factureOriginale 
+  factureOriginale
 }) => {
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
 
   // Récupérer le taux de commission
   const tauxCommissionUnique = useMemo(() => {
-    // Priorité: facture originale > détails > 60%
-    const taux = factureOriginale?.taux_commission_revendeur 
+    const taux = factureOriginale?.taux_commission_revendeur
       || factureOriginale?.taux_commission
       || factureOriginale?.commission_pourcentage
-      || (details && details.length > 0 ? details[0]?.commission_pourcentage || details[0]?.commissionPourcentage : null)
+      || (details && details.length > 0 ? details[0]?.commission_pourcentage : null)
       || 60;
-    
+
     return Number(taux) || 60;
   }, [factureOriginale, details]);
 
@@ -59,38 +76,103 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
     let totalCommissionValue = 0;
     let totalBeneficeValue = 0;
 
-    const detailsWithCalculsValue: DetailCalcul[] = safeDetails.map((detail: any, idx: number) => {
-      // Extraction des données avec gestion des null/undefined
-      const qte = Number(detail.qte_decompte || detail.qteVendue || detail.quantite || detail.qte_commande || 1);
-      const prixAchat = Number(detail.prix_achat || detail.prixAchat || detail.prix_achat_base || 0);
-      const prixVente = Number(detail.prix_vente || detail.prixVente || detail.prix_unitaire_vente || 0);
-      const unite = detail.unite_base || detail.unite_mesure || detail.unite || 'pièce';
-      const categorie = detail.categorie || '-';
-      const designation = detail.designation || detail.produit_designation || 'Produit';
-      
-      const totalVenteLigne = prixVente * qte;
-      const totalAchatLigne = prixAchat * qte;
-      const beneficeLigne = totalVenteLigne - totalAchatLigne;
-      const commissionLigne = (beneficeLigne * tauxCommissionUnique) / 100;
+    const detailsWithCalculsValue: DetailCalcul[] = safeDetails.map(
+      (detail: any, idx: number) => {
 
-      totalVenteValue += totalVenteLigne;
-      totalCommissionValue += commissionLigne;
-      totalBeneficeValue += beneficeLigne;
+        // Quantité décomptée (vendue dans ce décompte)
+        const qteVendue = Number(
+          detail.qte_decompte ??
+          detail.qteVendue ??
+          detail.quantite ??
+          0
+        );
 
-      return {
-        numero: idx + 1,
-        designation,
-        categorie,
-        unite,
-        qte,
-        prix_achat: prixAchat,
-        prix_vente: prixVente,
-        benefice_ligne: beneficeLigne,
-        commission_ligne: commissionLigne,
-        total_vente: totalVenteLigne,
-      };
-    });
+        // Quantité initiale avant ce décompte
+        // - Pour un premier décompte : stock_actuel + qte_decompte (stock avant le décompte)
+        // - Pour les décomptes suivants : reliquat du décompte précédent
+        const stockActuel = Number(detail.stock_actuel || 0);
+        const qteInitiale = Number(
+          detail.qte_initiale ??                              // Si explicitement fourni
+          detail.reliquat_precedent ??                        // Si c'est un décompte suivant
+          (stockActuel + qteVendue)                           // Stock actuel + quantité décomptée
+        );
 
+        // Quantité cumulée = quantité initiale - quantité restante
+        const qteCumulee = Number(
+          detail.qte_cumulee ??
+          (qteInitiale - (detail.reliquat ?? 0))
+        );
+
+        // Reliquat (stock restant après le décompte)
+        const reliquat = Number(
+          detail.reliquat ??
+          (qteInitiale - qteVendue)
+        );
+
+        const prixAchat = Number(
+          detail.prix_achat ??
+          detail.prixAchat ??
+          detail.prix_achat_base ??
+          0
+        );
+
+        const prixVente = Number(
+          detail.prix_vente ??
+          detail.prixVente ??
+          detail.prix_unitaire_vente ??
+          0
+        );
+
+        const unite =
+          detail.unite_base ||
+          detail.unite_mesure ||
+          detail.unite ||
+          'pièce';
+
+        const categorie =
+          detail.categorie || '-';
+
+        const designation =
+          detail.designation ||
+          detail.produit_designation ||
+          'Produit';
+
+        const totalVenteLigne =
+          prixVente * qteVendue;
+
+        const totalAchatLigne =
+          prixAchat * qteVendue;
+
+        const beneficeLigne =
+          totalVenteLigne - totalAchatLigne;
+
+        const commissionLigne =
+          (beneficeLigne * tauxCommissionUnique) / 100;
+
+        totalVenteValue += totalVenteLigne;
+        totalCommissionValue += commissionLigne;
+        totalBeneficeValue += beneficeLigne;
+
+        return {
+          numero: idx + 1,
+          designation,
+          categorie,
+          unite,
+
+          qte_initiale: qteInitiale,
+          qte_vendue: qteVendue,
+          qte_cumulee: qteCumulee,
+          reliquat: reliquat,
+
+          prix_achat: prixAchat,
+          prix_vente: prixVente,
+
+          benefice_ligne: beneficeLigne,
+          commission_ligne: commissionLigne,
+          total_vente: totalVenteLigne
+        };
+      }
+    );
     return {
       detailsWithCalculs: detailsWithCalculsValue,
       totalVente: totalVenteValue,
@@ -157,7 +239,7 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
 
       <div ref={printRef}>
         <Paper p="xs" style={{ maxWidth: '1300px', margin: '0 auto', backgroundColor: 'white' }}>
-          
+
           {/* En-tête compact */}
           <Flex justify="space-between" align="center" wrap="wrap" gap="xs" style={{ borderBottom: '1px solid #1b365d', paddingBottom: 6, marginBottom: 8 }}>
             <Flex align="center" gap="xs">
@@ -193,18 +275,21 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
             <Text ta="center" c="dimmed" py="xl" size="sm">Aucun détail disponible</Text>
           ) : (
             <>
-              <Table withColumnBorders style={{ fontSize: '14px', marginBottom: 12 }}>
+              <Table withColumnBorders style={{ fontSize: '12px', marginBottom: 12 }}>
                 <Table.Thead>
                   <Table.Tr style={{ backgroundColor: '#1b365d' }}>
                     <Table.Th c="white" ta="center" w={25}>#</Table.Th>
                     <Table.Th c="white">Désignation</Table.Th>
                     <Table.Th c="white">Catégorie</Table.Th>
-                    <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
-                    <Table.Th c="white" ta="center" w={60}>Qté</Table.Th>
-                    <Table.Th c="white" ta="right" w={90}>P.A (F)</Table.Th>
-                    <Table.Th c="white" ta="right" w={90}>P.V (F)</Table.Th>
-                    <Table.Th c="white" ta="right" w={100}>Bénéf (F)</Table.Th>
-                    <Table.Th c="white" ta="right" w={100}>Total (F)</Table.Th>
+                    <Table.Th c="white" ta="center" w={60}>Unité</Table.Th>
+                    <Table.Th c="white" ta="center" w={70}>Qté Init.</Table.Th>
+                    <Table.Th c="white" ta="center" w={70}>Qté Décompt.</Table.Th>
+                    <Table.Th c="white" ta="center" w={70}>Cumul</Table.Th>
+                    <Table.Th c="white" ta="center" w={70}>Reliquat</Table.Th>
+                    <Table.Th c="white" ta="right" w={80}>P.A (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={80}>P.V (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={90}>Bénéf (F)</Table.Th>
+                    <Table.Th c="white" ta="right" w={90}>Total (F)</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -218,11 +303,40 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
                         <Text size="xs" c="dimmed">{detail.categorie}</Text>
                       </Table.Td>
                       <Table.Td ta="center">
-                        <Badge size="xs" variant="light" color="gray" style={{ fontSize: '12px' }}>
+                        <Badge size="xs" variant="light" color="gray" style={{ fontSize: '10px' }}>
                           {detail.unite}
                         </Badge>
                       </Table.Td>
-                      <Table.Td ta="center">{detail.qte}</Table.Td>
+                      <Table.Td ta="center">
+                        <Badge color="blue" variant="light" size="xs">
+                          {detail.qte_initiale}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge color="green" variant="light" size="xs">
+                          {detail.qte_vendue}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge color="orange" variant="light" size="xs">
+                          {detail.qte_cumulee}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Badge
+                          color={
+                            detail.reliquat <= 0
+                              ? 'red'
+                              : detail.reliquat <= 5
+                                ? 'orange'
+                                : 'teal'
+                          }
+                          variant="filled"
+                          size="xs"
+                        >
+                          {detail.reliquat}
+                        </Badge>
+                      </Table.Td>
                       <Table.Td ta="right">{formatMontant(detail.prix_achat)}</Table.Td>
                       <Table.Td ta="right" fw={600}>{formatMontant(detail.prix_vente)}</Table.Td>
                       <Table.Td ta="right" c={detail.benefice_ligne >= 0 ? "green.7" : "red.7"}>

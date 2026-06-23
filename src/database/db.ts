@@ -154,12 +154,10 @@ CREATE TABLE IF NOT EXISTS products (
     prix_achat_base REAL DEFAULT 0,
     prix_vente_detail REAL DEFAULT 0,
     prix_vente_gros REAL DEFAULT 0,
-    commission_pourcentage REAL DEFAULT 0,
     qte_stock REAL DEFAULT 0,
     seuil_alerte REAL DEFAULT 10,
     prix_moyen_pondere REAL DEFAULT 0,
     methode_gestion_stock TEXT DEFAULT 'FIFO',
-    idUniteStockage INTEGER,
     date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
     est_supprime INTEGER DEFAULT 0
 );
@@ -765,16 +763,40 @@ INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
 
 export const getDb = async (): Promise<Database> => {
   if (dbInstance) return dbInstance;
-  
+
   try {
     dbInstance = await Database.load('sqlite:gestion-commerciale.db');
+
+    // 🔥 IMPORTANT
+    await dbInstance.execute('PRAGMA foreign_keys = ON;');
+    await dbInstance.execute('PRAGMA journal_mode = WAL;');
+    await dbInstance.execute('PRAGMA synchronous = NORMAL;');
+    await dbInstance.execute('PRAGMA busy_timeout = 30000;');
+
     console.log('✅ Base de données connectée');
     return dbInstance;
+
   } catch (error) {
     console.error('❌ Erreur de connexion:', error);
     throw error;
   }
 };
+// src/database/db.ts - Ajouter cette fonction
+export async function debugLocks() {
+  try {
+    const db = await getDb();
+    const result = await db.select(`
+      SELECT 
+        pid,
+        status,
+        sql
+      FROM pragma_vfs_list()
+    `);
+    console.log('🔍 Verrous actifs:', result);
+  } catch (error) {
+    console.error('Erreur debug locks:', error);
+  }
+}
 
 export const initDatabase = async (): Promise<void> => {
   try {

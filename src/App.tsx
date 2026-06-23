@@ -1,6 +1,6 @@
 // src/App.tsx
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Routes, Route, BrowserRouter, useNavigate } from 'react-router-dom';
+import { Routes, Route, BrowserRouter, useNavigate, useLocation } from 'react-router-dom';
 import { AppShell, Loader, Center, Button, Notification, MantineProvider, Stack, Text } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
@@ -39,10 +39,6 @@ const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireC
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
-
-// ✅ CORRECTION : Chemin correct pour HistoriqueRevendeur
-
-
 const ListeStockRevendeur = lazy(() => import('./components/pages/revendeurs/ListeStockRevendeur'));
 const DashboardRevendeurs = lazy(() => import('./components/pages/revendeurs/DashboardRevendeurs'));
 const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompte'));
@@ -186,21 +182,17 @@ function RouteGuard({
 
   // Vérifier les permissions
   if (requiredPermissions && requiredPermissions.length > 0) {
-    // Si l'utilisateur est admin, il a tous les droits
     if (user.role === 'admin') {
       return <>{children}</>;
     }
 
-    // Récupérer les permissions de l'utilisateur
     let userPermissions: Record<string, boolean> = {};
     try {
-      // @ts-ignore - user.permissions est ajouté dynamiquement
       userPermissions = user.permissions ? JSON.parse(user.permissions) : {};
     } catch (e) {
       console.error('Erreur parsing permissions:', e);
     }
 
-    // Vérifier chaque permission requise
     const hasAllPermissions = requiredPermissions.every(perm => userPermissions[perm] === true);
 
     if (!hasAllPermissions) {
@@ -219,12 +211,18 @@ function RouteGuard({
   return <>{children}</>;
 }
 
-// Wrapper pour NouveauDecompte avec navigation
+// Wrapper pour NouveauDecompte avec navigation et gestion de l'ID
 function NouveauDecompteWrapper() {
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Extraire l'ID de l'URL pour la modification
+  const match = location.pathname.match(/\/decomptes\/(\d+)\/modifier/);
+  const decompteId = match ? parseInt(match[1]) : undefined;
 
   return (
     <NouveauDecompte
+      decompteId={decompteId}
       onSuccess={() => navigate('/decomptes')}
       onCancel={() => navigate('/decomptes')}
     />
@@ -360,8 +358,6 @@ function AuthenticatedApp() {
                 <ListeStockRevendeur />
               </RouteGuard>
             } />
-            
-            {/* ✅ Route pour l'historique - CORRECTE */}
             <Route path="/revendeurs/historique" element={
               <RouteGuard requiredPermissions={['revendeurs.view']}>
                 <HistoriqueRevendeur />
@@ -375,7 +371,7 @@ function AuthenticatedApp() {
               </RouteGuard>
             } />
 
-            {/* FINANCES */}
+            {/* FINANCES - DECOMPTES */}
             <Route path="/decomptes" element={
               <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <ListeDecomptes />
@@ -394,6 +390,17 @@ function AuthenticatedApp() {
             <Route path="/decomptes/:id/print" element={
               <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <PrintRecuDecompte />
+              </RouteGuard>
+            } />
+            <Route path="/decomptes/:id/reçu" element={
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
+                <PrintRecuDecompte />
+              </RouteGuard>
+            } />
+            {/* ✅ ROUTE POUR LA MODIFICATION */}
+            <Route path="/decomptes/:id/modifier" element={
+              <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
+                <NouveauDecompteWrapper />
               </RouteGuard>
             } />
             <Route path="/reglements" element={
@@ -448,7 +455,7 @@ function AuthenticatedApp() {
               </RouteGuard>
             } />
 
-            {/* ✅ Route pour les commandes revendeur (ajoutée) */}
+            {/* COMMANDES REVENDEUR */}
             <Route path="/commandes-revendeur" element={
               <RouteGuard requiredPermissions={['revendeurs.commandes']}>
                 <ListeCommandesRevendeur />
@@ -496,10 +503,8 @@ function App() {
       try {
         console.log('🚀 Démarrage de l\'application...');
 
-        // 🔥 Exécuter la migration complète avec le schéma
         await initDatabaseWithMigrations();
 
-        // Vérifier si une migration est nécessaire
         try {
           const versionInfo = await DatabaseVersionManager.getCurrentVersion();
           const currentVersion = DatabaseVersionManager.getCurrentVersionNumber();
@@ -532,7 +537,6 @@ function App() {
     setup();
   }, []);
 
-  // Afficher un loader pendant la migration
   if (migrationRunning) {
     return (
       <MantineProvider>
@@ -547,7 +551,6 @@ function App() {
     );
   }
 
-  // Afficher le gestionnaire de migration si nécessaire
   if (showMigration) {
     return (
       <MantineProvider>
@@ -556,7 +559,6 @@ function App() {
           onComplete={() => {
             setShowMigration(false);
             setAppReady(true);
-            // Recharger la page pour appliquer les changements
             setTimeout(() => {
               window.location.reload();
             }, 500);
@@ -566,7 +568,6 @@ function App() {
     );
   }
 
-  // Erreur de base de données
   if (!dbReady || dbError) {
     return (
       <MantineProvider>
@@ -584,7 +585,6 @@ function App() {
     );
   }
 
-  // L'application est prête
   if (!appReady) {
     return (
       <MantineProvider>

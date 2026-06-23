@@ -2,6 +2,7 @@
 export type Role = 'admin' | 'gestionnaire' | 'commercial' | 'stockiste' | 'comptable';
 
 export interface Utilisateur {
+  permissions: any;
   id: number;
   nom: string;
   login: string;

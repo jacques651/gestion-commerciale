@@ -4,18 +4,18 @@ import { getDb } from '../db';
 export interface Product {
   idProduit: number;
   code_produit: string;
-  categorie: string;
   designation: string;
+  categorie: string;
   unite_base: string;
   prix_achat_base: number;
   prix_vente_detail: number;
   prix_vente_gros: number;
-  seuil_alerte: number;
-  commission_pourcentage: number;
   qte_stock: number;
+  seuil_alerte: number;
+  prix_moyen_pondere: number;
+  methode_gestion_stock: string;
   date_entree: string;
   est_supprime: number;
-  prix_moyen_pondere?: number; // Ajout pour PMP
 }
 
 export type CreateProductInput = Omit<Product, 'idProduit' | 'date_entree' | 'est_supprime'>;
@@ -28,18 +28,18 @@ export const productRepository = {
         SELECT 
           idProduit,
           code_produit,
-          categorie,
           designation,
+          categorie,
           unite_base,
           prix_achat_base,
           prix_vente_detail,
           prix_vente_gros,
-          seuil_alerte,
-          commission_pourcentage,
           qte_stock,
+          seuil_alerte,
+          prix_moyen_pondere,
+          methode_gestion_stock,
           date_entree,
-          est_supprime,
-          0 as prix_moyen_pondere
+          est_supprime
         FROM products 
         WHERE est_supprime = 0 
         ORDER BY designation
@@ -58,18 +58,18 @@ export const productRepository = {
         SELECT 
           idProduit,
           code_produit,
-          categorie,
           designation,
+          categorie,
           unite_base,
           prix_achat_base,
           prix_vente_detail,
           prix_vente_gros,
-          seuil_alerte,
-          commission_pourcentage,
           qte_stock,
+          seuil_alerte,
+          prix_moyen_pondere,
+          methode_gestion_stock,
           date_entree,
-          est_supprime,
-          0 as prix_moyen_pondere
+          est_supprime
         FROM products 
         WHERE idProduit = ? AND est_supprime = 0
       `, [id]);
@@ -87,8 +87,8 @@ export const productRepository = {
         SELECT 
           idProduit,
           code_produit,
-          categorie,
           designation,
+          categorie,
           prix_vente_detail,
           qte_stock
         FROM products 
@@ -110,28 +110,30 @@ export const productRepository = {
       const result = await db.execute(`
         INSERT INTO products (
           code_produit,
-          categorie,
           designation,
+          categorie,
           unite_base,
           prix_achat_base,
           prix_vente_detail,
           prix_vente_gros,
-          seuil_alerte,
-          commission_pourcentage,
           qte_stock,
+          seuil_alerte,
+          prix_moyen_pondere,
+          methode_gestion_stock,
           est_supprime
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         product.code_produit,
-        product.categorie || '',
         product.designation,
+        product.categorie || '',
         product.unite_base || 'pièce',
         product.prix_achat_base || 0,
         product.prix_vente_detail || 0,
         product.prix_vente_gros || 0,
-        product.seuil_alerte || 0,
-        product.commission_pourcentage || 0,
         product.qte_stock || 0,
+        product.seuil_alerte || 10,
+        product.prix_moyen_pondere || 0,
+        product.methode_gestion_stock || 'PMP',
         0
       ]);
       
@@ -149,9 +151,10 @@ export const productRepository = {
     const values: any[] = [];
     
     const allowedFields = [
-      'code_produit', 'categorie', 'designation', 'unite_base',
+      'code_produit', 'designation', 'categorie', 'unite_base',
       'prix_achat_base', 'prix_vente_detail', 'prix_vente_gros',
-      'seuil_alerte', 'commission_pourcentage', 'qte_stock'
+      'qte_stock', 'seuil_alerte', 'prix_moyen_pondere', 
+      'methode_gestion_stock'
     ];
     
     Object.entries(product).forEach(([key, value]) => {

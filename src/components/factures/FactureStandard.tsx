@@ -1,13 +1,14 @@
 // src/components/factures/FactureStandard.tsx
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { 
-  Paper, Text, Table, Group, Box, Divider, 
+import {
+  Paper, Text, Table, Group, Box, Divider,
   Button, Image, Flex, SimpleGrid, Loader, Center
 } from '@mantine/core';
-import { 
+import {
   IconPrinter, IconDownload
 } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
+import html2pdf from 'html2pdf.js';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
 import { generateFactureCode } from '../../services/codeGeneratorService';
 import { getDb } from '../../database/db';
@@ -35,7 +36,6 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
   const [codeFacture, setCodeFacture] = useState<string>(facture?.code_facture || '');
   const [generating, setGenerating] = useState(false);
 
-  // Générer le code facture si non existant
   useEffect(() => {
     const generateCode = async () => {
       if (!facture?.code_facture && !codeFacture) {
@@ -43,15 +43,13 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
         try {
           const code = await generateFactureCode();
           setCodeFacture(code);
-          
-          // Mettre à jour la facture dans la base de données
+
           if (facture?.idFacture) {
             const db = await getDb();
             await db.execute(
               `UPDATE factures SET code_facture = ? WHERE idFacture = ?`,
               [code, facture.idFacture]
             );
-            console.log(`✅ Code facture généré: ${code}`);
           }
         } catch (error) {
           console.error('Erreur génération code facture:', error);
@@ -76,7 +74,7 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
       const prix = detail.prix_unitaire_vente || detail.prix_vente || detail.prix_unitaire || 0;
       const totalLigne = prix * qte;
       totalHTValue += totalLigne;
-      
+
       return {
         numero: idx + 1,
         qte,
@@ -95,15 +93,26 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Facture_${codeFacture || 'facture'}`,
+    documentTitle: `Facture_${codeFacture || 'facture'}`
   });
 
-  const handleDownload = () => {
+  const handleDownloadPdf = async () => {
     if (onDownload) {
       onDownload();
-    } else {
-      handlePrint();
+      return;
     }
+    if (!printRef.current) return;
+
+    await html2pdf()
+      .set({
+        margin: 0.3,
+        filename: `Facture_${codeFacture || 'facture'}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+      })
+      .from(printRef.current)
+      .save();
   };
 
   const formatMontant = (value: number | undefined | null): string => {
@@ -151,25 +160,53 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
 
   return (
     <Box>
-      {/* Boutons d'action */}
       <Group justify="flex-end" mb="md" className="no-print">
-        <Button size="xs" variant="light" onClick={handlePrint} leftSection={<IconPrinter size={14} />}>
+        <Button
+          size="xs"
+          variant="light"
+          onClick={handlePrint}
+          leftSection={<IconPrinter size={14} />}
+        >
           Imprimer
         </Button>
-        <Button size="xs" variant="light" color="teal" onClick={handleDownload} leftSection={<IconDownload size={14} />}>
+        <Button
+          size="xs"
+          variant="light"
+          color="teal"
+          onClick={handleDownloadPdf}
+          leftSection={<IconDownload size={14} />}
+        >
           PDF
         </Button>
       </Group>
 
-      {/* Facture */}
       <div ref={printRef}>
-        <Paper p="sm" style={{ maxWidth: '100%', margin: '0 auto', backgroundColor: 'white' }}>
-          
-          {/* En-tête compact */}
-          <Flex justify="space-between" align="center" wrap="wrap" gap="xs" style={{ borderBottom: '1px solid #1b365d', paddingBottom: 8, marginBottom: 12 }}>
+        <Paper
+          p="sm"
+          style={{
+            maxWidth: '100%',
+            margin: '0 auto',
+            backgroundColor: 'white'
+          }}
+        >
+          <Flex
+            justify="space-between"
+            align="center"
+            wrap="wrap"
+            gap="xs"
+            style={{
+              borderBottom: '1px solid #1b365d',
+              paddingBottom: 8,
+              marginBottom: 12
+            }}
+          >
             <Flex align="center" gap="sm">
               {atelier.logo_base64 && (
-                <Image src={atelier.logo_base64} alt="Logo" style={{ height: '40px', objectFit: 'contain' }} />
+                <Image
+                  src={atelier.logo_base64}
+                  alt="Logo"
+                  style={{ height: '40px', objectFit: 'contain' }}
+                />
               )}
               <Box>
                 <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
@@ -183,12 +220,10 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
             </Box>
           </Flex>
 
-          {/* Titre */}
           <Text ta="center" fw={700} size="xs" style={{ backgroundColor: '#f2d2bc', padding: '3px', borderRadius: '4px', marginBottom: 10 }}>
             FACTURE STANDARD
           </Text>
 
-          {/* Infos client compactes */}
           <Flex justify="space-between" wrap="wrap" gap="xs" mb="xs" style={{ fontSize: '10px' }}>
             <Text><Text span fw={400}>Client:</Text> {facture.NomComplet || facture.client_nom || 'Client'}</Text>
             <Text><Text span fw={400}>Commande:</Text> {facture.code_commande || facture.idCommande || '-'}</Text>
@@ -196,7 +231,6 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
 
           <Divider my="xs" />
 
-          {/* Tableau compact */}
           <Table withColumnBorders style={{ fontSize: '9px', marginBottom: 12 }}>
             <Table.Thead>
               <Table.Tr style={{ backgroundColor: '#1b365d' }}>
@@ -224,7 +258,6 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
 
           <Divider my="xs" />
 
-          {/* Totaux compacts */}
           <Box style={{ textAlign: 'right', marginBottom: 12 }}>
             <SimpleGrid cols={3} spacing="xs" style={{ maxWidth: '350px', marginLeft: 'auto' }}>
               <Paper p="xs" withBorder>
@@ -250,14 +283,12 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
 
           <Divider my="xs" />
 
-          {/* Montant en lettres */}
           <Paper p="xs" withBorder style={{ backgroundColor: '#f8f9fa', marginTop: 8 }}>
             <Text size="xs" fw={500} ta="center">
               Arrêté la présente facture à la somme de : {formatMontant(totalTTC)} Francs CFA
             </Text>
           </Paper>
 
-          {/* Signature */}
           <Flex justify="flex-end" mt={16}>
             <Box>
               <Text fw={600} size="xs">Le responsable</Text>
@@ -265,7 +296,6 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
             </Box>
           </Flex>
 
-          {/* Message */}
           <Text size="xs" ta="center" fs="italic" c="dimmed" mt={12}>
             {atelier.message_facture}
           </Text>
