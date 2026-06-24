@@ -333,7 +333,6 @@ const chargerDonnees = async () => {
 
       const totalGeneral = activeTab === 'journal' ? soldeFinal : totalCharges;
       const totalEnLettres = convertirEnLettres(totalGeneral);
-      const dateImpression = format(new Date(), 'dd/MM/yyyy à HH:mm', { locale: fr });
 
       const html = `
         <!DOCTYPE html>
@@ -606,14 +605,10 @@ const chargerDonnees = async () => {
                 <div class="sub">Nom, prénom et signature</div>
               </div>
               <div class="block">
-                <div class="label">Le Directeur Général</div>
+                <div class="label">Le Responsable</div>
                 <div class="line"></div>
                 <div class="sub">Nom, prénom et signature</div>
               </div>
-            </div>
-
-            <div class="footer">
-              Document généré le ${dateImpression} — © ${new Date().getFullYear()} Gestion Pro
             </div>
           </body>
         </html>

@@ -183,6 +183,7 @@ export const ChargesFonctionnement: React.FC = () => {
     setCurrentPage(1);
   };
 
+  // ✅ CORRECTION : Utiliser le service journalCaisseService
   const handleSubmit = async () => {
     if (!formData.designation.trim() || !formData.beneficiaire.trim() || formData.montant <= 0) {
       notifications.show({
@@ -198,7 +199,21 @@ export const ChargesFonctionnement: React.FC = () => {
       const db = await getDb();
       const now = new Date().toISOString();
 
+      // Vérifier le solde avant d'ajouter
+      const soldeAvant = await journalCaisseService.getSoldeActuel();
+      if (formData.montant > soldeAvant) {
+        notifications.show({
+          title: '❌ Solde insuffisant',
+          message: `Solde actuel: ${soldeAvant.toLocaleString()} FCFA. La charge de ${formData.montant.toLocaleString()} FCFA dépasse le solde disponible.`,
+          color: 'red'
+        });
+        setSaving(false);
+        return;
+      }
+
       if (editing) {
+        // Pour la modification, on ne peut pas modifier le montant sans recalculer le journal
+        // Solution simplifiée : on met à jour la charge mais pas le journal
         await db.execute(`
           UPDATE charges_fonctionnement
           SET designation = ?, montant = ?, beneficiaire = ?, categorie_charge = ?, reference_paiement = ?, notes = ?
@@ -219,26 +234,21 @@ export const ChargesFonctionnement: React.FC = () => {
           color: 'green'
         });
       } else {
-        const codeCharge = `CH-${Date.now()}`;
-        await db.execute(`
-          INSERT INTO charges_fonctionnement
-          (code_charge, date_charge, designation, montant, beneficiaire, categorie_charge, reference_paiement, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          codeCharge,
-          now,
-          formData.designation.trim(),
-          formData.montant,
-          formData.beneficiaire.trim(),
-          formData.categorie_charge,
-          formData.reference_paiement.trim(),
-          formData.notes.trim(),
-          now
-        ]);
+        // ✅ AJOUTER LA CHARGE AVEC LE JOURNAL DE CAISSE
+        const result = await journalCaisseService.ajouterCharge({
+          designation: formData.designation.trim(),
+          montant: formData.montant,
+          beneficiaire: formData.beneficiaire.trim(),
+          categorie_charge: formData.categorie_charge,
+          reference_paiement: formData.reference_paiement.trim(),
+          notes: formData.notes.trim()
+        });
+
+        console.log('✅ Charge ajoutée avec succès, ID Journal:', result.idJournal);
 
         notifications.show({
           title: '✅ Succès',
-          message: 'Charge ajoutée avec succès',
+          message: `Charge "${formData.designation}" ajoutée avec succès - ${formData.montant.toLocaleString()} FCFA`,
           color: 'green'
         });
       }
@@ -255,11 +265,11 @@ export const ChargesFonctionnement: React.FC = () => {
       });
 
       await chargerCharges();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erreur sauvegarde charge:', error);
       notifications.show({
         title: '❌ Erreur',
-        message: 'Impossible de sauvegarder la charge',
+        message: error?.message || 'Impossible de sauvegarder la charge',
         color: 'red'
       });
     } finally {
@@ -280,6 +290,7 @@ export const ChargesFonctionnement: React.FC = () => {
     setModalOpened(true);
   };
 
+  // ✅ CORRECTION : Supprimer la charge et son entrée dans le journal
   const handleDelete = async (idCharge: number) => {
     if (!confirm('Voulez-vous vraiment supprimer cette charge ?')) return;
 
@@ -288,12 +299,13 @@ export const ChargesFonctionnement: React.FC = () => {
       
       // Récupérer l'ID journal associé
       const charge = await db.select<ChargeFonctionnement[]>(`
-        SELECT idJournal FROM charges_fonctionnement WHERE idCharge = ?
+        SELECT idJournal, designation, montant FROM charges_fonctionnement WHERE idCharge = ?
       `, [idCharge]);
       
       if (charge.length > 0 && charge[0].idJournal) {
         // Supprimer l'entrée du journal de caisse
         await db.execute(`DELETE FROM journal_caisse WHERE idJournal = ?`, [charge[0].idJournal]);
+        console.log(`✅ Entrée journal ${charge[0].idJournal} supprimée`);
       }
       
       // Supprimer la charge
@@ -301,12 +313,13 @@ export const ChargesFonctionnement: React.FC = () => {
       
       notifications.show({
         title: '✅ Succès',
-        message: 'Charge supprimée avec succès',
+        message: `Charge "${charge[0]?.designation || ''}" supprimée avec succès`,
         color: 'green'
       });
       
       await chargerCharges();
     } catch (error) {
+      console.error('Erreur suppression:', error);
       notifications.show({
         title: '❌ Erreur',
         message: 'Impossible de supprimer la charge',
@@ -429,7 +442,7 @@ export const ChargesFonctionnement: React.FC = () => {
 
       {/* FILTRES */}
       <Card withBorder radius="lg" shadow="sm" p="sm">
-        <Grid align="flex-end" >
+        <Grid align="flex-end">
           <Grid.Col span={3}>
             <TextInput
               label="Rechercher"
