@@ -1,6 +1,6 @@
 // src/services/journalCaisseService.ts
 
-import { getDb } from '../database/db';
+import { getDb } from "../database/db";
 
 interface ChargeData {
   designation: string;
@@ -12,15 +12,6 @@ interface ChargeData {
 }
 
 class JournalCaisseService {
-  private async getDernierSolde(db: any): Promise<number> {
-    const result = await db.select(`
-      SELECT solde_apres as solde 
-      FROM journal_caisse 
-      ORDER BY idJournal DESC 
-      LIMIT 1
-    `);
-    return (result as any[])[0]?.solde || 0;
-  }
 
   private async getNextCodeJournal(db: any): Promise<string> {
     const count = await db.select(`
@@ -28,6 +19,16 @@ class JournalCaisseService {
     `);
     const countValue = (count as any[])[0]?.count || 0;
     return `JRN-${String(countValue + 1).padStart(4, '0')}`;
+  }
+
+  private async calculerSolde(db: any): Promise<number> {
+    const result = await db.select(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN type_mouvement = 'ENTREE' THEN montant ELSE 0 END), 0) as total_entrees,
+        COALESCE(SUM(CASE WHEN type_mouvement = 'SORTIE' THEN montant ELSE 0 END), 0) as total_sorties
+      FROM journal_caisse
+    `);
+    return (result[0]?.total_entrees || 0) - (result[0]?.total_sorties || 0);
   }
 
   async ajouterEntree(data: {
@@ -39,7 +40,7 @@ class JournalCaisseService {
     notes?: string;
   }): Promise<number> {
     const db = await getDb();
-    const soldeActuel = await this.getDernierSolde(db);
+    const soldeActuel = await this.calculerSolde(db);
     const nouveauSolde = soldeActuel + data.montant;
     const codeJournal = await this.getNextCodeJournal(db);
 
@@ -73,7 +74,7 @@ class JournalCaisseService {
     notes?: string;
   }): Promise<number> {
     const db = await getDb();
-    const soldeActuel = await this.getDernierSolde(db);
+    const soldeActuel = await this.calculerSolde(db);
     
     if (data.montant > soldeActuel) {
       throw new Error(`Solde insuffisant. Solde actuel: ${soldeActuel.toLocaleString()} FCFA`);
@@ -141,8 +142,8 @@ class JournalCaisseService {
     codeDecompte: string;
     revendeurNom?: string;
   }): Promise<number> {
-    return this.ajouterEntree({
-      categorie: 'DECOMPTE_REVENDEUR',
+    return this.ajouterSortie({
+      categorie: 'CHARGE_FONCTIONNEMENT',
       designation: `Décompte revendeur ${data.codeDecompte}${data.revendeurNom ? ` - ${data.revendeurNom}` : ''}`,
       montant: data.montant,
       reference: data.codeDecompte,
@@ -194,36 +195,45 @@ class JournalCaisseService {
 
   async getSoldeActuel(): Promise<number> {
     const db = await getDb();
-    return this.getDernierSolde(db);
+    return this.calculerSolde(db);
   }
 
+  // ✅ CORRECTION : Utiliser BETWEEN pour les dates
   async getMouvementsDuJour(date: string): Promise<any[]> {
     const db = await getDb();
+    const startDate = date + ' 00:00:00';
+    const endDate = date + ' 23:59:59';
+    
     const result = await db.select(`
       SELECT * FROM journal_caisse 
-      WHERE date(date_journal) = date(?)
+      WHERE date_journal >= ? AND date_journal <= ?
       ORDER BY idJournal ASC
-    `, [date]);
+    `, [startDate, endDate]);
     return result as any[];
   }
 
   async getChargesDuJour(date: string): Promise<any[]> {
     const db = await getDb();
+    const startDate = date + ' 00:00:00';
+    const endDate = date + ' 23:59:59';
+    
     const result = await db.select(`
       SELECT * FROM charges_fonctionnement 
-      WHERE date(date_charge) = date(?)
+      WHERE date_charge >= ? AND date_charge <= ?
       ORDER BY date_charge DESC
-    `, [date]);
+    `, [startDate, endDate]);
     return result as any[];
   }
 
   async getRecapJournalier(date: string): Promise<any> {
     const db = await getDb();
+    const startDate = date + ' 00:00:00';
+    const endDate = date + ' 23:59:59';
     
     // Vérifier si le récapitulatif existe
     const recapResult = await db.select(`
       SELECT * FROM recapitulatif_journalier 
-      WHERE date_recap = date(?)
+      WHERE date_recap = ?
     `, [date]);
     
     if ((recapResult as any[]).length > 0) {
@@ -234,19 +244,19 @@ class JournalCaisseService {
     const initial = await db.select(`
       SELECT solde_apres as solde 
       FROM journal_caisse 
-      WHERE date(date_journal) < date(?)
+      WHERE date_journal < ?
       ORDER BY idJournal DESC 
       LIMIT 1
-    `, [date]);
+    `, [startDate]);
     
     const initSolde = (initial as any[])[0]?.solde || 0;
     
     const mouvements = await db.select(`
       SELECT type_mouvement, categorie, SUM(montant) as total
       FROM journal_caisse
-      WHERE date(date_journal) = date(?)
+      WHERE date_journal >= ? AND date_journal <= ?
       GROUP BY type_mouvement, categorie
-    `, [date]);
+    `, [startDate, endDate]);
     
     let totalEntrees = 0, totalSorties = 0;
     let totalVentesComptoir = 0, totalReglementsFactures = 0;

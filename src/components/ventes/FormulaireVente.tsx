@@ -15,7 +15,7 @@ import { useSales } from '../../hooks/useSales';
 import { FormulaireClient } from '../clients/FormulaireClient';
 import { stockService } from '../../database/repositories/stockService';
 import { journalCaisseService } from '../../services/journalCaisseService';
-
+import { getDb } from '../../database/db';
 
 interface FormulaireVenteProps {
   onSuccess: () => void;
@@ -54,9 +54,40 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
   const itemsPerPage = 5;
 
+  // Fonction pour générer un code de vente unique
+  const generateUniqueVenteCode = async (): Promise<string> => {
+    const db = await getDb();
+    const prefix = 'VENTE-';
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    
+    let baseCode = `${prefix}${year}${month}${day}`;
+    let code = `${baseCode}-001`;
+    let counter = 1;
+    let exists = true;
+    
+    while (exists && counter <= 100) {
+      code = `${baseCode}-${String(counter).padStart(3, '0')}`;
+      const result = await db.select(
+        `SELECT COUNT(*) as count FROM ventes WHERE code_vente = ?`,
+        [code]
+      ) as Array<{ count: number }>;
+      exists = (result[0]?.count ?? 0) > 0;
+      if (exists) counter++;
+    }
+    
+    if (counter > 100) {
+      code = `${prefix}${Date.now()}`;
+    }
+    
+    return code;
+  };
+
   useEffect(() => {
     const generateCode = async () => {
-      const code = await getNextVenteCode();
+      const code = await generateUniqueVenteCode();
       setCodeVente(code);
     };
     generateCode();
@@ -80,7 +111,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
   }, [selectedClientId, clients, ajouterClient]);
 
-  // Filtrer les produits pour n'afficher que ceux avec du stock
   const filteredProducts = products.filter(product => {
     const stockDisponible = (product.qte_stock || 0) > 0;
     const matchesSearch = searchTerm === '' || 
@@ -96,12 +126,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     currentPage * itemsPerPage
   );
 
-  // Calcul des totaux
   const totalHT = cart.reduce((sum, item) => sum + item.total, 0);
   const tva = totalHT * 0.18;
   const totalTTC = totalHT + tva;
 
-  // Ajouter un produit au panier
   const addToCart = (product: any) => {
     const existingItem = cart.find(item => item.idProduit === product.idProduit);
     const qte = 1;
@@ -198,7 +226,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       return;
     }
 
-    // Vérifier le stock pour chaque produit avant de continuer
     for (const item of cart) {
       if (item.quantite > item.quantite_stock) {
         notifications.show({
@@ -238,7 +265,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       // Créer la vente et récupérer l'ID
       const createdSaleId = await createSale(sale, details);
 
-      // 2. Pour chaque produit, enregistrer la sortie de stock avec logique FIFO
+      // 2. Pour chaque produit, enregistrer la sortie de stock
       const results = [];
       for (const item of cart) {
         const result = await stockService.sortieStock({
@@ -256,10 +283,9 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         results.push(result);
       }
 
-      // 3. Calculer le bénéfice total
       const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
 
-      // 4. ✅ AJOUTER AU JOURNAL DE CAISSE
+      // 4. ✅ ENREGISTRER DANS LE JOURNAL DE CAISSE via le service
       try {
         await journalCaisseService.ajouterVenteComptoir({
           montant: totalTTC,
@@ -273,7 +299,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         // Ne pas bloquer la vente si le journal échoue
       }
 
-      // 5. Afficher le récapitulatif
       notifications.show({
         title: '✅ Vente enregistrée avec succès',
         message: `${cart.length} produit(s) vendu(s) - Chiffre d'affaires: ${totalTTC.toLocaleString()} F - Bénéfice: ${beneficeTotal.toLocaleString()} F`,
@@ -281,10 +306,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         autoClose: 5000
       });
 
-      // 6. Rafraîchir la liste des produits
       await refreshProducts();
-      
-      // 7. Fermer le modal
       onSuccess();
 
     } catch (error: any) {
@@ -404,7 +426,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
               )}
             </Card>
 
-            {/* Produits - Uniquement avec stock > 0 + Catégorie + Unité */}
+            {/* Produits */}
             <Card withBorder p="sm" radius="md">
               <Title order={5} mb="sm">Produits disponibles en stock</Title>
 
@@ -521,7 +543,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
               )}
             </Card>
 
-            {/* Panier avec Catégorie et Unité */}
+            {/* Panier */}
             {cart.length > 0 && (
               <Card withBorder p="sm" radius="md" style={{ backgroundColor: '#fafafa' }}>
                 <Title order={5} mb="sm">Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
@@ -622,8 +644,3 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 };
 
 export default FormulaireVente;
-
-async function getNextVenteCode(): Promise<string> {
-  const timestamp = Date.now();
-  return `VENTE-${timestamp}`;
-}

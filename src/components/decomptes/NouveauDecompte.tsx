@@ -20,7 +20,8 @@ import {
   Badge,
   ScrollArea,
   Divider,
-  Flex} from '@mantine/core';
+  Flex
+} from '@mantine/core';
 import {
   IconReceipt,
   IconPlus,
@@ -35,6 +36,7 @@ import { useNavigate } from 'react-router-dom';
 import { getDb } from '../../database/db';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { decompteRepository } from '../../database/repositories/decompteRepository';
+import { journalCaisseService } from '../../services/journalCaisseService';
 import { format } from 'date-fns';
 
 interface NouveauDecompteProps {
@@ -125,7 +127,6 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
       
       const db = await getDb();
       
-      // Récupérer le décompte
       const decompteData = await db.select<any[]>(
         `SELECT d.*, c.NomComplet 
          FROM decomptes d
@@ -145,7 +146,6 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
       setSelectedClientName(decompte.NomComplet);
       setObservation(decompte.observation || '');
       
-      // Récupérer les détails
       const detailsData = await db.select<any[]>(
         `
         SELECT 
@@ -187,10 +187,7 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
       }));
       
       setDetails(detailsFormatted);
-      
-      // Charger les produits disponibles pour le client
       await loadProduitsForClient(decompte.idClient);
-      
       setLoading(false);
       
     } catch (error) {
@@ -206,7 +203,6 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
     try {
       const db = await getDb();
       
-      // Récupérer les produits en stock du revendeur
       const produits = await db.select<any[]>(
         `
         SELECT 
@@ -395,7 +391,24 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
         qte_decompte: d.qte_decompte
       }));
       
-      await decompteRepository.create(decompteInput, detailsInput);
+      // Créer le décompte
+      const idDecompte = await decompteRepository.create(decompteInput, detailsInput);
+      
+      // ✅ ENREGISTRER DANS LE JOURNAL DE CAISSE (SORTIE D'ARGENT)
+      try {
+        const montantNetARegler = montantNet; // Net à reverser au revendeur
+        
+        await journalCaisseService.ajouterDecompteRevendeur({
+          montant: montantNetARegler,
+          idDecompte: idDecompte,
+          codeDecompte: `DCP-${idDecompte}`,
+          revendeurNom: selectedClientName
+        });
+        console.log('✅ Journal de caisse mis à jour pour le décompte', idDecompte);
+      } catch (journalError) {
+        console.error('Erreur journal de caisse:', journalError);
+        // Ne pas bloquer si le journal échoue
+      }
       
       notifications.show({
         title: '✅ Succès',

@@ -46,6 +46,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
   const [loading, setLoading] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [codeReglement, setCodeReglement] = useState<string>('');
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [factures, setFactures] = useState<Facture[]>([]);
@@ -78,7 +79,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   };
 
-  // Fonction pour calculer le montant réellement réglé d'une facture
   const getTotalRegleFacture = async (idFacture: number): Promise<number> => {
     const db = await getDb();
     const result = await db.select<any[]>(`
@@ -89,12 +89,10 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     return result[0]?.total || 0;
   };
 
-  // Charger les factures d'un client avec calcul réel du reste
   const loadFactures = async (clientId: number) => {
     try {
       const db = await getDb();
 
-      // Récupérer les factures du client
       const facturesData = await db.select<any[]>(`
         SELECT 
           idFacture,
@@ -111,7 +109,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       const facturesAvecReste = [];
 
       for (const facture of facturesData) {
-        // Calculer le vrai montant réglé depuis la table reglements
         const totalRegle = await getTotalRegleFacture(facture.idFacture);
         const montantRestant = facture.montant_ttc - totalRegle;
 
@@ -137,7 +134,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   };
 
-  // Générer le code règlement
   useEffect(() => {
     const generateCode = async () => {
       if (opened) {
@@ -156,13 +152,11 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     loadClients();
   }, [opened]);
 
-  // Si idFacture est passé en prop, charger directement la facture avec calcul du vrai reste
   useEffect(() => {
     if (propIdFacture && opened) {
       const loadFactureDirect = async () => {
         const db = await getDb();
 
-        // Récupérer la facture
         const factureData = await db.select<any[]>(`
           SELECT 
             f.idFacture,
@@ -182,8 +176,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
 
         if (factureData.length > 0) {
           const row = factureData[0];
-
-          // Calculer le vrai montant réglé depuis la table reglements
           const totalRegle = await getTotalRegleFacture(propIdFacture);
           const montantRestant = row.montant_ttc - totalRegle;
 
@@ -193,6 +185,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
             Societe: row.Societe,
             Tel: row.Tel
           });
+          setSelectedClientId(String(row.idClient));
 
           const facture = {
             idFacture: row.idFacture,
@@ -213,18 +206,17 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   }, [propIdFacture, opened]);
 
-  // Si idClient est passé en prop, charger directement ses factures
   useEffect(() => {
     if (propIdClient && opened && !propIdFacture) {
       const client = clients.find(c => c.idClient === propIdClient);
       if (client) {
         setSelectedClient(client);
+        setSelectedClientId(String(client.idClient));
         loadFactures(propIdClient);
       }
     }
   }, [propIdClient, opened, clients, propIdFacture]);
 
-  // Mettre à jour le montant à payer quand le type de paiement change
   useEffect(() => {
     if (selectedFacture) {
       if (typePaiement === 'total') {
@@ -233,7 +225,30 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   }, [typePaiement, selectedFacture]);
 
-  // Enregistrer le règlement
+  // ✅ CORRECTION : Gérer le changement de client
+  const handleClientChange = (value: string | null) => {
+    setSelectedClientId(value);
+    
+    if (!value) {
+      setSelectedClient(null);
+      setFactures([]);
+      setSelectedFacture(null);
+      setMontantAPayer(0);
+      return;
+    }
+    
+    const client = clients.find(c => String(c.idClient) === value);
+    setSelectedClient(client || null);
+    
+    if (client) {
+      loadFactures(client.idClient);
+    } else {
+      setFactures([]);
+      setSelectedFacture(null);
+      setMontantAPayer(0);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!selectedClient) {
       notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
@@ -267,7 +282,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     setLoading(true);
 
     try {
-      // 1. Créer le règlement
       await createReglement({
         idClient: selectedClient.idClient,
         idFacture: selectedFacture.idFacture,
@@ -278,7 +292,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         observation: observation || null,
       });
 
-      // 2. ✅ AJOUTER AU JOURNAL DE CAISSE
       try {
         await journalCaisseService.ajouterReglementFacture({
           montant: montantAPayer,
@@ -289,7 +302,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         console.log('✅ Journal de caisse mis à jour pour le règlement', codeReglement);
       } catch (journalError) {
         console.error('Erreur journal de caisse:', journalError);
-        // Ne pas bloquer le règlement si le journal échoue
       }
 
       notifications.show({
@@ -312,9 +324,10 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     }
   };
 
+  // ✅ CORRECTION : S'assurer que les options sont des strings
   const clientOptions = clients.map(c => ({
-    value: c.idClient.toString(),
-    label: `${c.NomComplet}${c.Societe ? ` (${c.Societe})` : ''}`,
+    value: String(c.idClient),
+    label: `${c.NomComplet || 'Client'}${c.Societe ? ` (${c.Societe})` : ''}`,
   }));
 
   return (
@@ -339,7 +352,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       <LoadingOverlay visible={generatingCode || loading} />
 
       <Stack gap="md" p="xl">
-        {/* Code règlement */}
         <Paper p="md" withBorder bg="gray.0">
           <SimpleGrid cols={2} spacing="md">
             <div>
@@ -353,24 +365,13 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           </SimpleGrid>
         </Paper>
 
-        {/* Sélection du client */}
         <Card withBorder>
           <Select
             label="Client"
             placeholder="Sélectionner un client"
             data={clientOptions}
-            value={selectedClient?.idClient?.toString() || null}
-            onChange={(value) => {
-              const client = clients.find(c => c.idClient.toString() === value);
-              setSelectedClient(client || null);
-              if (client) {
-                loadFactures(client.idClient);
-              } else {
-                setFactures([]);
-                setSelectedFacture(null);
-                setMontantAPayer(0);
-              }
-            }}
+            value={selectedClientId}
+            onChange={handleClientChange}
             searchable
             clearable
             disabled={!!propIdFacture}
@@ -381,7 +382,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
               <SimpleGrid cols={2} spacing="md">
                 <div>
                   <Text size="xs" c="dimmed">Client</Text>
-                  <Text fw={500}>{selectedClient.NomComplet}</Text>
+                  <Text fw={500}>{selectedClient.NomComplet || 'Client'}</Text>
                 </div>
                 <div>
                   <Text size="xs" c="dimmed">Contact</Text>
@@ -392,7 +393,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           )}
         </Card>
 
-        {/* Liste des factures */}
         {selectedClient && factures.length > 0 && (
           <Card withBorder shadow="sm" p="md">
             <Group gap="xs" mb="md">
@@ -437,20 +437,20 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
                         />
                       </Table.Td>
                       <Table.Td>
-                        <Text fw={500}>{facture.code_facture}</Text>
+                        <Text fw={500}>{facture.code_facture || '-'}</Text>
                       </Table.Td>
                       <Table.Td>
-                        {new Date(facture.date_facture).toLocaleDateString('fr-FR')}
+                        {facture.date_facture ? new Date(facture.date_facture).toLocaleDateString('fr-FR') : '-'}
                       </Table.Td>
                       <Table.Td ta="right">
-                        {facture.montant_ttc.toLocaleString()} FCFA
+                        {facture.montant_ttc ? facture.montant_ttc.toLocaleString() : '0'} FCFA
                       </Table.Td>
                       <Table.Td ta="right">
-                        {facture.montant_regle.toLocaleString()} FCFA
+                        {facture.montant_regle ? facture.montant_regle.toLocaleString() : '0'} FCFA
                       </Table.Td>
                       <Table.Td ta="right">
                         <Badge color={facture.montant_restant === 0 ? 'green' : 'orange'} variant="light">
-                          {facture.montant_restant.toLocaleString()} FCFA
+                          {facture.montant_restant ? facture.montant_restant.toLocaleString() : '0'} FCFA
                         </Badge>
                       </Table.Td>
                     </Table.Tr>
@@ -461,7 +461,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           </Card>
         )}
 
-        {/* Formulaire de règlement */}
         {selectedFacture && (
           <Card withBorder>
             <Stack gap="md">
@@ -469,11 +468,11 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
                 <SimpleGrid cols={2} spacing="md">
                   <div>
                     <Text size="xs" c="dimmed">Facture</Text>
-                    <Text fw={600}>{selectedFacture.code_facture}</Text>
+                    <Text fw={600}>{selectedFacture.code_facture || '-'}</Text>
                   </div>
                   <div>
                     <Text size="xs" c="dimmed">Solde restant</Text>
-                    <Text fw={700} c="orange">{selectedFacture.montant_restant.toLocaleString()} FCFA</Text>
+                    <Text fw={700} c="orange">{selectedFacture.montant_restant ? selectedFacture.montant_restant.toLocaleString() : '0'} FCFA</Text>
                   </div>
                 </SimpleGrid>
               </Paper>
@@ -514,7 +513,6 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           </Card>
         )}
 
-        {/* Actions */}
         <Group justify="flex-end">
           <Button variant="outline" onClick={onClose}>
             Annuler

@@ -1,4 +1,6 @@
 // src/components/ventes/ListeVentes.tsx
+// Remplacer le fichier complet par celui-ci :
+
 import React, { useEffect, useState } from "react";
 import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
@@ -11,7 +13,7 @@ import {
   IconBuildingStore, IconTrash, IconSearch, IconRefresh,
   IconInfoCircle, IconCalendar, IconCash, IconPlus, IconPrinter, IconEye,
   IconShoppingCart, IconTruck, IconReceipt, IconAlertCircle, IconEdit,
-  IconDeviceFloppy, IconX
+  IconDeviceFloppy, IconX, IconPhone
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import FormulaireVente from "./FormulaireVente";
@@ -22,12 +24,12 @@ interface Vente {
   idVente: number;
   code_vente: string;
   idClient: number | null;
-  client_nom: string;
-  client_societe: string;
-  client_tel: string;
-  nom_prenom: string;
-  contact: string;
-  Tel: string;
+  client_nom: string | null;
+  client_societe: string | null;
+  client_tel: string | null;
+  nom_prenom: string | null;
+  contact: string | null;
+  Tel: string | null;
   date_vente: string;
   montant_ht: number;
   montant_ttc: number;
@@ -73,7 +75,7 @@ const ListeVentes: React.FC = () => {
     setLoading(true);
     try {
       const db = await getDb();
-      const result = await db.select<Vente[]>(`
+      const result = await db.select<any[]>(`
         SELECT 
           v.*,
           cl.NomComplet as client_nom,
@@ -83,7 +85,15 @@ const ListeVentes: React.FC = () => {
         LEFT JOIN clients cl ON v.idClient = cl.idClient
         ORDER BY v.date_vente DESC
       `);
-      setVentes(result || []);
+      
+      // Transformer les données pour gérer les cas où le client n'existe pas
+      const ventesFormatted = result.map((v: any) => ({
+        ...v,
+        client_nom: v.client_nom || v.nom_prenom || null,
+        client_tel: v.client_tel || v.contact || null
+      }));
+      
+      setVentes(ventesFormatted || []);
     } catch (error) {
       console.error("Erreur chargement ventes:", error);
       notifications.show({
@@ -104,7 +114,6 @@ const ListeVentes: React.FC = () => {
   const peutSupprimerVente = async (idVente: number): Promise<{ peut: boolean; raison: string }> => {
     const db = await getDb();
 
-    // Vérifier s'il y a des règlements associés à cette vente
     const reglements = await db.select<any[]>(`
       SELECT COUNT(*) as count
       FROM reglements
@@ -116,6 +125,53 @@ const ListeVentes: React.FC = () => {
     }
 
     return { peut: true, raison: '' };
+  };
+
+  // =====================================================
+  // FONCTIONS DE RÉCUPÉRATION DES INFOS CLIENT - CORRIGÉES
+  // =====================================================
+  
+  const getClientDisplay = (vente: any): string => {
+    if (!vente) return 'Client inconnu';
+    
+    // Priorité 1: Nom du client lié
+    if (vente.client_nom && typeof vente.client_nom === 'string' && vente.client_nom.trim() !== '') {
+      return vente.client_nom;
+    }
+    // Priorité 2: Nom saisi manuellement
+    if (vente.nom_prenom && typeof vente.nom_prenom === 'string' && vente.nom_prenom.trim() !== '') {
+      return vente.nom_prenom;
+    }
+    // Priorité 3: Société
+    if (vente.client_societe && typeof vente.client_societe === 'string' && vente.client_societe.trim() !== '') {
+      return vente.client_societe;
+    }
+    // Priorité 4: Contact
+    if (vente.contact && typeof vente.contact === 'string' && vente.contact.trim() !== '') {
+      return vente.contact;
+    }
+    return 'Client direct';
+  };
+
+  const getClientContact = (vente: any): string => {
+    if (!vente) return '-';
+    
+    if (vente.client_tel && typeof vente.client_tel === 'string' && vente.client_tel.trim() !== '') {
+      return vente.client_tel;
+    }
+    if (vente.contact && typeof vente.contact === 'string' && vente.contact.trim() !== '') {
+      return vente.contact;
+    }
+    if (vente.Tel && typeof vente.Tel === 'string' && vente.Tel.trim() !== '') {
+      return vente.Tel;
+    }
+    return '-';
+  };
+
+  const isDirectClient = (vente: any): boolean => {
+    if (!vente) return true;
+    // Vrai si pas de client_nom ET (pas de nom_prenom OU nom_prenom vide)
+    return !vente.client_nom && (!vente.nom_prenom || vente.nom_prenom.trim() === '');
   };
 
   const handleEditVente = async (vente: Vente) => {
@@ -176,7 +232,6 @@ const ListeVentes: React.FC = () => {
     try {
       const db = await getDb();
       
-      // Calculer les nouveaux montants
       let nouveauMontantHT = 0;
       for (const produit of editProduits) {
         const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
@@ -184,28 +239,24 @@ const ListeVentes: React.FC = () => {
       }
       const nouveauMontantTTC = nouveauMontantHT * 1.18;
       
-      // Mettre à jour la vente
       await db.execute(`
         UPDATE ventes 
         SET montant_ht = ?, montant_ttc = ?
         WHERE idVente = ?
       `, [nouveauMontantHT, nouveauMontantTTC, venteToEdit.idVente]);
       
-      // Mettre à jour les détails et ajuster les stocks
       for (const produit of editProduits) {
         const ancienneQuantite = produit.quantite;
         const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
         const difference = nouvelleQuantite - ancienneQuantite;
         
         if (difference !== 0) {
-          // Mettre à jour la quantité dans vente_details
           await db.execute(`
             UPDATE vente_details 
             SET quantite = ?
             WHERE idDetail = ?
           `, [nouvelleQuantite, produit.idDetail]);
           
-          // Ajuster le stock
           await db.execute(`
             UPDATE products 
             SET qte_stock = qte_stock - ?
@@ -238,11 +289,9 @@ const ListeVentes: React.FC = () => {
     }
   };
 
-  // ✅ Supprimer une vente avec restauration du stock
   const supprimerVente = async () => {
     if (!venteToDelete) return;
 
-    // ✅ Vérifier si la vente peut être supprimée
     const { peut, raison } = await peutSupprimerVente(venteToDelete.idVente);
     
     if (!peut) {
@@ -262,12 +311,10 @@ const ListeVentes: React.FC = () => {
     try {
       const db = await getDb();
 
-      // 1. Récupérer les détails de la vente pour restaurer le stock
       const details = await db.select<any[]>(`
         SELECT idProduit, quantite FROM vente_details WHERE idVente = ?
       `, [venteToDelete.idVente]);
 
-      // 2. Restaurer le stock pour chaque produit
       for (const detail of details) {
         await db.execute(`
           UPDATE products 
@@ -276,10 +323,7 @@ const ListeVentes: React.FC = () => {
         `, [detail.quantite, detail.idProduit]);
       }
 
-      // 3. Supprimer les détails de la vente
       await db.execute("DELETE FROM vente_details WHERE idVente = ?", [venteToDelete.idVente]);
-
-      // 4. Supprimer la vente
       await db.execute("DELETE FROM ventes WHERE idVente = ?", [venteToDelete.idVente]);
 
       notifications.show({
@@ -340,10 +384,11 @@ const ListeVentes: React.FC = () => {
   };
 
   const ventesFiltrees = ventes.filter(v => {
+    if (!v) return false;
+    const clientDisplay = getClientDisplay(v);
     const matchRecherche =
       v.code_vente?.toLowerCase().includes(recherche.toLowerCase()) ||
-      (v.client_nom && v.client_nom.toLowerCase().includes(recherche.toLowerCase())) ||
-      (v.client_societe && v.client_societe.toLowerCase().includes(recherche.toLowerCase()));
+      clientDisplay.toLowerCase().includes(recherche.toLowerCase());
 
     const matchType = typeFiltre ? v.type_vente === typeFiltre : true;
 
@@ -353,7 +398,7 @@ const ListeVentes: React.FC = () => {
   const totalPages = Math.ceil(ventesFiltrees.length / itemsPerPage);
   const paginatedData = ventesFiltrees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const totalMontant = ventesFiltrees.reduce((sum, v) => sum + (v.montant_ttc || 0), 0);
-  const ventesAujourdhui = ventes.filter(v => new Date(v.date_vente).toDateString() === new Date().toDateString()).length;
+  const ventesAujourdhui = ventes.filter(v => v && new Date(v.date_vente).toDateString() === new Date().toDateString()).length;
 
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';
@@ -376,8 +421,8 @@ const ListeVentes: React.FC = () => {
     return <ReçuVente
       vente={{
         idVente: selectedVente.idVente,
-        nom_prenom: selectedVente.nom_prenom || selectedVente.client_nom || 'Client',
-        contact: selectedVente.contact || selectedVente.Tel || '',
+        nom_prenom: getClientDisplay(selectedVente),
+        contact: getClientContact(selectedVente),
         date_vente: selectedVente.date_vente,
         montant_total: selectedVente.montant_ttc || selectedVente.montant_total || 0
       }}
@@ -398,7 +443,7 @@ const ListeVentes: React.FC = () => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        {/* EN-TÊTE ATTRACTIF */}
+        {/* EN-TÊTE */}
         <Paper
           p="xl"
           radius="lg"
@@ -462,7 +507,7 @@ const ListeVentes: React.FC = () => {
                 </ThemeIcon>
                 <div>
                   <Text c="white" size="xs">Ventes comptoir</Text>
-                  <Text c="white" fw={700} size="xl">{ventes.filter(v => v.type_vente === 'COMPTOIR').length}</Text>
+                  <Text c="white" fw={700} size="xl">{ventes.filter(v => v && v.type_vente === 'COMPTOIR').length}</Text>
                 </div>
               </Group>
             </Card>
@@ -551,68 +596,97 @@ const ListeVentes: React.FC = () => {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedData.map((v, idx) => (
-                  <Table.Tr key={v.idVente}>
-                    <Table.Td fw={500}>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
-                    <Table.Td>
-                      <Text fw={600} size="sm">{v.code_vente}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="sm">
-                        <Avatar size="sm" radius="xl" color="blue">
-                          {(v.client_nom || v.client_societe || 'C').charAt(0).toUpperCase()}
-                        </Avatar>
-                        <Text fw={500} size="sm">{v.client_nom || v.client_societe || 'Client inconnu'}</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge 
-                        size="sm" 
-                        color={v.type_vente === 'COMPTOIR' ? 'blue' : 'orange'}
-                        variant="light"
-                        leftSection={v.type_vente === 'COMPTOIR' ? <IconBuildingStore size={12} /> : <IconTruck size={12} />}
-                      >
-                        {v.type_vente === 'COMPTOIR' ? 'Comptoir' : 'Livraison'}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={4}>
-                        <IconCalendar size={12} color="#1b365d" />
-                        <Text size="sm">{new Date(v.date_vente).toLocaleDateString("fr-FR")}</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td ta="right">
-                      <Text fw={700} c="blue" size="sm">{formatMontant(v.montant_ttc)} FCFA</Text>
-                    </Table.Td>
-                    <Table.Td ta="center">
-                      <Group gap={6} justify="center">
-                        <Tooltip label="Modifier">
-                          <ActionIcon size="md" color="yellow" variant="light" onClick={() => handleEditVente(v)}>
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Voir détails">
-                          <ActionIcon size="md" color="blue" variant="light" onClick={() => handleViewDetails(v)}>
-                            <IconEye size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Imprimer reçu">
-                          <ActionIcon size="md" color="teal" variant="light" onClick={() => handlePrintReçu(v)}>
-                            <IconPrinter size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Supprimer">
-                          <ActionIcon size="md" color="red" variant="light" onClick={() => {
-                            setVenteToDelete(v);
-                            setDeleteModalOpen(true);
-                          }}>
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
+                {paginatedData.map((v, idx) => {
+                  // Vérification de sécurité
+                  if (!v) {
+                    return (
+                      <Table.Tr key={`empty-${idx}`}>
+                        <Table.Td colSpan={7} ta="center">
+                          <Text c="dimmed" size="sm">Données invalides</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  }
+                  
+                  const clientDisplay = getClientDisplay(v);
+                  const clientContact = getClientContact(v);
+                  const isDirect = isDirectClient(v);
+                  const hasContact = clientContact && clientContact !== '-';
+                  
+                  return (
+                    <Table.Tr key={v.idVente || idx}>
+                      <Table.Td fw={500}>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
+                      <Table.Td>
+                        <Text fw={600} size="sm">{v.code_vente || '-'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="sm">
+                          <Avatar size="sm" radius="xl" color={isDirect ? 'gray' : 'blue'}>
+                            {(clientDisplay || 'C').charAt(0).toUpperCase()}
+                          </Avatar>
+                          <Stack gap={0}>
+                            <Text fw={500} size="sm">{clientDisplay}</Text>
+                            {hasContact && (
+                              <Group gap={4}>
+                                <IconPhone size={10} color="#868e96" />
+                                <Text size="xs" c="dimmed">{clientContact}</Text>
+                              </Group>
+                            )}
+                          </Stack>
+                          {isDirect && (
+                            <Badge size="xs" color="gray" variant="dot">Direct</Badge>
+                          )}
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge 
+                          size="sm" 
+                          color={v.type_vente === 'COMPTOIR' ? 'blue' : 'orange'}
+                          variant="light"
+                          leftSection={v.type_vente === 'COMPTOIR' ? <IconBuildingStore size={12} /> : <IconTruck size={12} />}
+                        >
+                          {v.type_vente === 'COMPTOIR' ? 'Comptoir' : 'Livraison'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4}>
+                          <IconCalendar size={12} color="#1b365d" />
+                          <Text size="sm">{v.date_vente ? new Date(v.date_vente).toLocaleDateString("fr-FR") : '-'}</Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text fw={700} c="blue" size="sm">{formatMontant(v.montant_ttc || v.montant_total || 0)} FCFA</Text>
+                      </Table.Td>
+                      <Table.Td ta="center">
+                        <Group gap={6} justify="center">
+                          <Tooltip label="Modifier">
+                            <ActionIcon size="md" color="yellow" variant="light" onClick={() => handleEditVente(v)}>
+                              <IconEdit size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Voir détails">
+                            <ActionIcon size="md" color="blue" variant="light" onClick={() => handleViewDetails(v)}>
+                              <IconEye size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Imprimer reçu">
+                            <ActionIcon size="md" color="teal" variant="light" onClick={() => handlePrintReçu(v)}>
+                              <IconPrinter size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Supprimer">
+                            <ActionIcon size="md" color="red" variant="light" onClick={() => {
+                              setVenteToDelete(v);
+                              setDeleteModalOpen(true);
+                            }}>
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
               </Table.Tbody>
             </Table>
           </Box>
@@ -668,11 +742,11 @@ const ListeVentes: React.FC = () => {
                 <SimpleGrid cols={2} spacing="md">
                   <div>
                     <Text size="xs" c="dimmed">Client</Text>
-                    <Text fw={500}>{venteToEdit?.client_nom || venteToEdit?.nom_prenom || 'Client inconnu'}</Text>
+                    <Text fw={500}>{getClientDisplay(venteToEdit)}</Text>
                   </div>
                   <div>
                     <Text size="xs" c="dimmed">Contact</Text>
-                    <Text>{venteToEdit?.client_tel || venteToEdit?.contact || '-'}</Text>
+                    <Text>{getClientContact(venteToEdit)}</Text>
                   </div>
                   <div>
                     <Text size="xs" c="dimmed">Date</Text>
@@ -766,9 +840,9 @@ const ListeVentes: React.FC = () => {
                 <SimpleGrid cols={2} spacing="md">
                   <div>
                     <Text size="xs" c="dimmed">Client</Text>
-                    <Text fw={500}>{selectedVenteDetails.client_nom || selectedVenteDetails.client_societe || 'Client inconnu'}</Text>
+                    <Text fw={500}>{getClientDisplay(selectedVenteDetails)}</Text>
                     <Text size="xs" c="dimmed" mt="xs">Contact</Text>
-                    <Text>{selectedVenteDetails.client_tel || '-'}</Text>
+                    <Text>{getClientContact(selectedVenteDetails)}</Text>
                   </div>
                   <div>
                     <Text size="xs" c="dimmed">Date</Text>
@@ -824,7 +898,7 @@ const ListeVentes: React.FC = () => {
           )}
         </Modal>
 
-        {/* ✅ Modal confirmation suppression avec vérification */}
+        {/* Modal confirmation suppression */}
         <Modal
           opened={deleteModalOpen}
           onClose={() => setDeleteModalOpen(false)}
