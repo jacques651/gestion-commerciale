@@ -1,214 +1,276 @@
-// src/pages/revendeurs/HistoriqueRevendeur.tsx - Version corrigée avec tous les imports
-
-import { useState, useEffect } from "react";
+// src/components/pages/revendeurs/HistoriqueRevendeur.tsx
+import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  Stack,
-  Title,
-  Table,
-  Select,
-  Badge,
-  Loader,
-  Center,
-  Group,
-  Text,
-  Paper,
-  ThemeIcon,
-  SimpleGrid,
-  TextInput,
-  Button,
-  Modal,
-  Pagination,
-  Flex,
-  Grid,
-  ActionIcon,
-  Tooltip,
-  ScrollArea,
-  Divider
-} from "@mantine/core";
+  Stack, Card, Title, Text, Group, Button, Table,
+  Pagination, ThemeIcon,
+  SimpleGrid, Select, TextInput, Badge, Flex, Paper,
+  Loader, Center, Grid, ScrollArea, Alert, Avatar,
+  Tabs
+} from '@mantine/core';
 import {
-  IconHistory,
-  IconSearch,
-  IconRefresh,
-  IconPrinter,
-  IconFilter,
-  IconCalendar,
-  IconArrowUp,
-  IconArrowDown,
-  IconUsers,
-  IconPackage,
-  IconAlertCircle,
-  IconX,
-  IconFileSpreadsheet,
-  IconEye
-} from "@tabler/icons-react";
-
+  IconHistory, IconSearch, IconRefresh, IconTruck,
+  IconShoppingCart, IconReceipt, 
+  IconCash, IconAlertCircle
+  } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
+import { getDb } from '../../../database/db';
 
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { clientRepository } from "../../../database/repositories/clientRepository";
-import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
-
-// Interfaces
-interface MouvementRevendeur {
-  idMouvementRevendeur: number;
-  date_mouvement: string;
+interface HistoriqueItem {
+  id: number;
+  date: string;
+  type: 'COMMANDE' | 'DECOMPTE' | 'STOCK';
+  reference: string;
   designation: string;
-  type_mouvement: 'ENTREE' | 'SORTIE';
-  qte_mouvement: number;
-  code_commande?: string;
-  code_decompte?: string;
-  idRevendeur: number;
-  prix_unitaire?: number;
-  total?: number;
-  notes?: string;
-}
-
-interface Client {
-  idClient: number;
-  NomComplet: string;
-  code_client?: string;
-  telephone?: string;
+  montant: number;
+  quantite: number;
+  solde: number;
+  status: string;
+  clientNom: string;
+  clientId: number;
 }
 
 interface Statistiques {
-  totalEntrees: number;
-  totalSorties: number;
-  totalMouvements: number;
-  dernierMouvement: string;
+  totalCommandes: number;
+  totalDecomptes: number;
+  totalMouvementsStock: number;
+  montantTotalCommandes: number;
+  montantTotalDecomptes: number;
 }
 
-export default function HistoriqueRevendeur() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [mouvements, setMouvements] = useState<MouvementRevendeur[]>([]);
-  const [filteredMouvements, setFilteredMouvements] = useState<MouvementRevendeur[]>([]);
-  const [loading, setLoading] = useState(false);
+const typeLabels: Record<string, string> = {
+  'COMMANDE': '📦 Commande',
+  'DECOMPTE': '📄 Décompte',
+  'STOCK': '📊 Stock'
+};
+
+const typeColors: Record<string, string> = {
+  'COMMANDE': 'blue',
+  'DECOMPTE': 'orange',
+  'STOCK': 'green'
+};
+
+export const HistoriqueRevendeur: React.FC = () => {
+  const [historique, setHistorique] = useState<HistoriqueItem[]>([]);
+  const [filteredHistorique, setFilteredHistorique] = useState<HistoriqueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [dateDebut, setDateDebut] = useState<string>('');
   const [dateFin, setDateFin] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [printModalOpened, setPrintModalOpened] = useState(false);
-  const [statistiques, setStatistiques] = useState<Statistiques | null>(null);
-  const [detailModalOpened, setDetailModalOpened] = useState(false);
-  const [selectedMouvement, setSelectedMouvement] = useState<MouvementRevendeur | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>('all');
+  const [statistiques, setStatistiques] = useState<Statistiques>({
+    totalCommandes: 0,
+    totalDecomptes: 0,
+    totalMouvementsStock: 0,
+    montantTotalCommandes: 0,
+    montantTotalDecomptes: 0
+  });
 
-  const itemsPerPage = 15;
+  const itemsPerPage = 10;
 
-  useEffect(() => {
-    loadClients();
-  }, []);
-
-  useEffect(() => {
-    if (selected) {
-      loadHistorique(Number(selected));
-    }
-  }, [selected]);
-
-  // Filtrage des mouvements
-  useEffect(() => {
-    let filtered = [...mouvements];
-
-    // Filtre par terme de recherche
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(m =>
-        m.designation.toLowerCase().includes(term) ||
-        m.code_commande?.toLowerCase().includes(term) ||
-        m.code_decompte?.toLowerCase().includes(term) ||
-        m.notes?.toLowerCase().includes(term)
-      );
-    }
-
-    // Filtre par type
-    if (typeFilter) {
-      filtered = filtered.filter(m => m.type_mouvement === typeFilter);
-    }
-
-    // Filtre par date début
-    if (dateDebut) {
-      const start = new Date(dateDebut);
-      start.setHours(0, 0, 0);
-      filtered = filtered.filter(m => {
-        const date = new Date(m.date_mouvement);
-        return date >= start;
-      });
-    }
-
-    // Filtre par date fin
-    if (dateFin) {
-      const end = new Date(dateFin);
-      end.setHours(23, 59, 59);
-      filtered = filtered.filter(m => {
-        const date = new Date(m.date_mouvement);
-        return date <= end;
-      });
-    }
-
-    setFilteredMouvements(filtered);
-    setCurrentPage(1);
-  }, [mouvements, searchTerm, typeFilter, dateDebut, dateFin]);
-
-  const loadClients = async () => {
-    try {
-      const data = await clientRepository.getByType("revendeur");
-      setClients(data);
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger la liste des revendeurs',
-        color: 'red'
-      });
-    }
-  };
-
-  const loadHistorique = async (idRevendeur: number) => {
-    try {
-      setLoading(true);
-      const data = await stockRevendeurRepository.getHistorique(idRevendeur);
-      setMouvements(data);
-      calculerStatistiques(data);
-    } catch (error) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger l\'historique',
-        color: 'red'
-      });
-      setMouvements([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const calculerStatistiques = (data: MouvementRevendeur[]) => {
-    const totalEntrees = data.filter(m => m.type_mouvement === 'ENTREE')
-      .reduce((sum, m) => sum + m.qte_mouvement, 0);
-    const totalSorties = data.filter(m => m.type_mouvement === 'SORTIE')
-      .reduce((sum, m) => sum + m.qte_mouvement, 0);
-    const dernierMouvement = data.length > 0 
-      ? format(new Date(data[0].date_mouvement), 'dd/MM/yyyy HH:mm', { locale: fr })
-      : 'Aucun';
-
-    setStatistiques({
-      totalEntrees,
-      totalSorties,
-      totalMouvements: data.length,
-      dernierMouvement
-    });
-  };
-
+  // ✅ Fonction de formatage de date personnalisée
   const formatDate = (dateStr: string): string => {
+    if (!dateStr) return '-';
     try {
-      return format(new Date(dateStr), 'dd/MM/yyyy HH:mm', { locale: fr });
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return '-';
+      
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
     } catch {
       return '-';
     }
   };
 
-  const formatNombre = (value: number): string => {
+  const chargerHistorique = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const db = await getDb();
+      
+      // Récupérer les commandes revendeur
+      const commandes = await db.select<any[]>(`
+        SELECT 
+          c.idCommande as id,
+          c.date_commande as date,
+          'COMMANDE' as type,
+          c.code_commande as reference,
+          'Commande revendeur' as designation,
+          c.montant_ttc as montant,
+          0 as quantite,
+          0 as solde,
+          c.statut as status,
+          cl.NomComplet as clientNom,
+          cl.idClient as clientId
+        FROM commandes c
+        LEFT JOIN clients cl ON cl.idClient = c.idClient
+        WHERE c.type_commande = 'REVENDEUR'
+        ORDER BY c.date_commande DESC
+      `);
+
+      // Récupérer les décomptes
+      const decomptes = await db.select<any[]>(`
+        SELECT 
+          d.idDecompte as id,
+          d.date_decompte as date,
+          'DECOMPTE' as type,
+          d.code_decompte as reference,
+          'Décompte revendeur' as designation,
+          d.montant_net as montant,
+          0 as quantite,
+          0 as solde,
+          d.statut as status,
+          cl.NomComplet as clientNom,
+          cl.idClient as clientId
+        FROM decomptes d
+        LEFT JOIN clients cl ON cl.idClient = d.idClient
+        ORDER BY d.date_decompte DESC
+      `);
+
+      // Récupérer les mouvements de stock revendeur
+      const mouvements = await db.select<any[]>(`
+        SELECT 
+          mr.idMouvement as id,
+          mr.date_mouvement as date,
+          'STOCK' as type,
+          mr.type_mouvement as reference,
+          p.designation as designation,
+          0 as montant,
+          mr.qte_mouvement as quantite,
+          0 as solde,
+          mr.type_mouvement as status,
+          cl.NomComplet as clientNom,
+          cl.idClient as clientId
+        FROM mouvements_revendeur mr
+        LEFT JOIN products p ON p.idProduit = mr.idProduit
+        LEFT JOIN clients cl ON cl.idClient = mr.idRevendeur
+        ORDER BY mr.date_mouvement DESC
+      `);
+
+      // Combiner tous les éléments
+      const allItems: HistoriqueItem[] = [
+        ...commandes.map((c: any) => ({ ...c, clientNom: c.clientNom || 'Inconnu' })),
+        ...decomptes.map((d: any) => ({ ...d, clientNom: d.clientNom || 'Inconnu' })),
+        ...mouvements.map((m: any) => ({ 
+          ...m, 
+          clientNom: m.clientNom || 'Inconnu',
+          reference: m.reference === 'ENTREE' ? '📥 Entrée stock' : '📤 Sortie stock'
+        }))
+      ];
+
+      // Trier par date décroissante
+      allItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      setHistorique(allItems);
+      setFilteredHistorique(allItems);
+
+      // Calculer les statistiques
+      const stats: Statistiques = {
+        totalCommandes: commandes.length,
+        totalDecomptes: decomptes.length,
+        totalMouvementsStock: mouvements.length,
+        montantTotalCommandes: commandes.reduce((sum: number, c: any) => sum + (c.montant || 0), 0),
+        montantTotalDecomptes: decomptes.reduce((sum: number, d: any) => sum + (d.montant || 0), 0)
+      };
+      setStatistiques(stats);
+
+    } catch (error) {
+      console.error('Erreur chargement historique:', error);
+      setError('Impossible de charger l\'historique');
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger l\'historique',
+        color: 'red'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    chargerHistorique();
+  }, []);
+
+  useEffect(() => {
+    let filtered = [...historique];
+
+    // Filtrer par onglet
+    if (activeTab && activeTab !== 'all') {
+      filtered = filtered.filter(item => item.type === activeTab);
+    }
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(item =>
+        item.reference?.toLowerCase().includes(term) ||
+        item.designation?.toLowerCase().includes(term) ||
+        item.clientNom?.toLowerCase().includes(term)
+      );
+    }
+
+    if (typeFilter) {
+      filtered = filtered.filter(item => item.type === typeFilter);
+    }
+
+    if (dateDebut) {
+      filtered = filtered.filter(item => item.date >= dateDebut);
+    }
+
+    if (dateFin) {
+      filtered = filtered.filter(item => item.date <= dateFin + ' 23:59:59');
+    }
+
+    setFilteredHistorique(filtered);
+    setCurrentPage(1);
+  }, [historique, activeTab, searchTerm, typeFilter, dateDebut, dateFin]);
+
+  const formatMontant = (value: number): string => {
     return (value || 0).toLocaleString('fr-FR');
+  };
+
+  const getTypeBadge = (type: string) => {
+    return (
+      <Badge color={typeColors[type] || 'gray'} variant="light" size="sm">
+        {typeLabels[type] || type}
+      </Badge>
+    );
+  };
+
+  const getStatusBadge = (status: string, type: string) => {
+    if (type === 'COMMANDE') {
+      const colors: Record<string, string> = {
+        'BROUILLON': 'gray',
+        'CONFIRMEE': 'blue',
+        'LIVREE': 'green',
+        'ANNULEE': 'red'
+      };
+      return <Badge color={colors[status] || 'gray'} variant="light" size="xs">{status || '-'}</Badge>;
+    }
+    if (type === 'DECOMPTE') {
+      const colors: Record<string, string> = {
+        'brouillon': 'gray',
+        'valide': 'green',
+        'paye': 'blue',
+        'annule': 'red'
+      };
+      return <Badge color={colors[status?.toLowerCase()] || 'gray'} variant="light" size="xs">{status || '-'}</Badge>;
+    }
+    if (type === 'STOCK') {
+      const isEntree = status === 'ENTREE';
+      return (
+        <Badge color={isEntree ? 'green' : 'red'} variant="light" size="xs">
+          {isEntree ? '📥 Entrée' : '📤 Sortie'}
+        </Badge>
+      );
+    }
+    return <Badge variant="light" size="xs">{status || '-'}</Badge>;
   };
 
   const resetFilters = () => {
@@ -219,74 +281,43 @@ export default function HistoriqueRevendeur() {
     setCurrentPage(1);
   };
 
-  const handlePrint = () => {
-    setPrintModalOpened(true);
-    setTimeout(() => {
-      setPrintModalOpened(false);
-      notifications.show({
-        title: '✅ Impression',
-        message: 'L\'historique a été envoyé à l\'imprimante',
-        color: 'green'
-      });
-    }, 1500);
-  };
-
-  const handleExportCSV = () => {
-    if (filteredMouvements.length === 0) {
-      notifications.show({
-        title: 'Aucune donnée',
-        message: 'Il n\'y a pas de données à exporter',
-        color: 'yellow'
-      });
-      return;
-    }
-
-    const headers = ['Date', 'Produit', 'Type', 'Quantité', 'Référence', 'Notes'];
-    const rows = filteredMouvements.map(m => [
-      formatDate(m.date_mouvement),
-      m.designation,
-      m.type_mouvement,
-      m.qte_mouvement.toString(),
-      m.code_commande || m.code_decompte || '-',
-      m.notes || '-'
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    const clientName = clients.find(c => c.idClient.toString() === selected)?.NomComplet || 'revendeur';
-    link.download = `historique_${clientName}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    notifications.show({
-      title: '✅ Exportation réussie',
-      message: 'Le fichier CSV a été téléchargé',
-      color: 'green'
-    });
-  };
-
-  const handleViewDetail = (mouvement: MouvementRevendeur) => {
-    setSelectedMouvement(mouvement);
-    setDetailModalOpened(true);
-  };
-
-  const totalPages = Math.ceil(filteredMouvements.length / itemsPerPage);
-  const paginatedMouvements = filteredMouvements.slice(
+  const totalPages = Math.ceil(filteredHistorique.length / itemsPerPage);
+  const paginatedHistorique = filteredHistorique.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  const selectedClient = clients.find(c => c.idClient.toString() === selected);
+  if (loading) {
+    return (
+      <Center py={100}>
+        <Loader size="xl" />
+        <Text ml="md" c="dimmed">Chargement de l'historique...</Text>
+      </Center>
+    );
+  }
+
+  if (error) {
+    return (
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert icon={<IconAlertCircle size={16} />} title="Erreur" color="red">
+            {error}
+          </Alert>
+          <Button 
+            leftSection={<IconRefresh size={16} />}
+            onClick={chargerHistorique}
+            variant="light"
+          >
+            Réessayer
+          </Button>
+        </Stack>
+      </Center>
+    );
+  }
 
   return (
     <Stack gap="lg" p="md">
-      {/* En-tête */}
+      {/* EN-TÊTE */}
       <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
@@ -294,10 +325,8 @@ export default function HistoriqueRevendeur() {
               <IconHistory size={30} />
             </ThemeIcon>
             <div>
-              <Title order={1} c="white">Historique Revendeur</Title>
-              <Text c="gray.3" size="sm">
-                Suivi des mouvements de stock par revendeur
-              </Text>
+              <Title order={1} c="white">Historique Revendeurs</Title>
+              <Text c="gray.3" size="sm">Suivi complet des activités des revendeurs</Text>
             </div>
           </Group>
           <Group>
@@ -305,310 +334,212 @@ export default function HistoriqueRevendeur() {
               variant="light"
               color="white"
               leftSection={<IconRefresh size={18} />}
-              onClick={() => selected && loadHistorique(Number(selected))}
-              disabled={!selected}
+              onClick={chargerHistorique}
             >
               Actualiser
             </Button>
           </Group>
         </Flex>
 
-        {selectedClient && (
-          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconUsers size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Revendeur</Text>
-                  <Text c="white" fw={700} size="md">
-                    {selectedClient.NomComplet}
-                  </Text>
-                  {selectedClient.code_client && (
-                    <Text c="gray.3" size="xs">Code: {selectedClient.code_client}</Text>
-                  )}
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(46,125,50,0.3)' }}>
-              <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconArrowUp size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Entrées</Text>
-                  <Text c="white" fw={700} size="xl">
-                    {formatNombre(statistiques?.totalEntrees || 0)}
-                  </Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(211,47,47,0.3)' }}>
-              <Group>
-                <ThemeIcon color="red" variant="light" size="lg">
-                  <IconArrowDown size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Sorties</Text>
-                  <Text c="white" fw={700} size="xl">
-                    {formatNombre(statistiques?.totalSorties || 0)}
-                  </Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconPackage size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Total mouvements</Text>
-                  <Text c="white" fw={700} size="xl">
-                    {statistiques?.totalMouvements || 0}
-                  </Text>
-                  <Text c="gray.3" size="xs">
-                    Dernier: {statistiques?.dernierMouvement || '-'}
-                  </Text>
-                </div>
-              </Group>
-            </Card>
-          </SimpleGrid>
-        )}
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="white" variant="light" size="lg">
+                <IconShoppingCart size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Commandes</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.totalCommandes}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(255,152,0,0.3)' }}>
+            <Group>
+              <ThemeIcon color="orange" variant="light" size="lg">
+                <IconReceipt size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Décomptes</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.totalDecomptes}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(76,175,80,0.3)' }}>
+            <Group>
+              <ThemeIcon color="green" variant="light" size="lg">
+                <IconTruck size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Mouvements stock</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.totalMouvementsStock}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="yellow" variant="light" size="lg">
+                <IconCash size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Montant total</Text>
+                <Text c="white" fw={700} size="xl">
+                  {formatMontant(statistiques.montantTotalCommandes + statistiques.montantTotalDecomptes)} F
+                </Text>
+              </div>
+            </Group>
+          </Card>
+        </SimpleGrid>
       </Paper>
 
-      {/* Sélection du revendeur */}
-      <Card withBorder radius="lg" shadow="sm" p="lg">
-        <Grid align="flex-end">
-          <Grid.Col span={{ base: 12, md: 6, lg: 4 }}>
-            <Select
-              label="Revendeur"
-              placeholder="Sélectionner un revendeur"
-              searchable
-              clearable
-              data={clients.map(c => ({
-                value: c.idClient.toString(),
-                label: c.NomComplet + (c.code_client ? ` (${c.code_client})` : '')
-              }))}
-              value={selected}
-              onChange={(value) => {
-                setSelected(value);
-                if (value) {
-                  loadHistorique(Number(value));
-                } else {
-                  setMouvements([]);
-                  setFilteredMouvements([]);
-                  setStatistiques(null);
-                }
-              }}
-              size="md"
-              leftSection={<IconUsers size={16} />}
+      {/* FILTRES */}
+      <Card withBorder radius="lg" shadow="sm" p="sm">
+        <Tabs value={activeTab} onChange={setActiveTab}>
+          <Tabs.List grow>
+            <Tabs.Tab value="all" leftSection={<IconHistory size={14} />}>
+              Tout
+              <Badge size="xs" color="blue" ml="xs" variant="light">{historique.length}</Badge>
+            </Tabs.Tab>
+            <Tabs.Tab value="COMMANDE" leftSection={<IconShoppingCart size={14} />}>
+              Commandes
+              <Badge size="xs" color="blue" ml="xs" variant="light">{statistiques.totalCommandes}</Badge>
+            </Tabs.Tab>
+            <Tabs.Tab value="DECOMPTE" leftSection={<IconReceipt size={14} />}>
+              Décomptes
+              <Badge size="xs" color="orange" ml="xs" variant="light">{statistiques.totalDecomptes}</Badge>
+            </Tabs.Tab>
+            <Tabs.Tab value="STOCK" leftSection={<IconTruck size={14} />}>
+              Stocks
+              <Badge size="xs" color="green" ml="xs" variant="light">{statistiques.totalMouvementsStock}</Badge>
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+
+        <Grid align="flex-end" mt="sm">
+          <Grid.Col span={3}>
+            <TextInput
+              placeholder="Rechercher..."
+              leftSection={<IconSearch size={14} />}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              size="xs"
             />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <Select
+              placeholder="Type"
+              data={[
+                { value: 'COMMANDE', label: '📦 Commande' },
+                { value: 'DECOMPTE', label: '📄 Décompte' },
+                { value: 'STOCK', label: '📊 Stock' }
+              ]}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              clearable
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <TextInput
+              type="date"
+              placeholder="Date début"
+              value={dateDebut}
+              onChange={(e) => setDateDebut(e.target.value)}
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <TextInput
+              type="date"
+              placeholder="Date fin"
+              value={dateFin}
+              onChange={(e) => setDateFin(e.target.value)}
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={3}>
+            <Group justify="flex-end" gap="xs">
+              <Button
+                variant="light"
+                color="gray"
+                leftSection={<IconRefresh size={14} />}
+                onClick={resetFilters}
+                size="xs"
+              >
+                Effacer
+              </Button>
+            </Group>
           </Grid.Col>
         </Grid>
       </Card>
 
-      {/* Filtres */}
-      {selected && (
-        <Card withBorder radius="lg" shadow="sm" p="md">
-          <Flex align="flex-end" gap="sm" wrap="wrap">
-            <TextInput
-              placeholder="Rechercher..."
-              leftSection={<IconSearch size={16} />}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              size="xs"
-              style={{ flex: 2, minWidth: 120 }}
-              label="Recherche"
-            />
-            <Select
-              placeholder="Type"
-              clearable
-              data={[
-                { value: 'ENTREE', label: '📥 Entrée' },
-                { value: 'SORTIE', label: '📤 Sortie' }
-              ]}
-              value={typeFilter}
-              onChange={setTypeFilter}
-              size="xs"
-              style={{ flex: 1.5, minWidth: 100 }}
-              label="Type"
-              leftSection={<IconFilter size={14} />}
-            />
-            <TextInput
-              type="date"
-              placeholder="Du"
-              value={dateDebut}
-              onChange={(e) => setDateDebut(e.target.value)}
-              size="xs"
-              style={{ flex: 1.2, minWidth: 90 }}
-              label="Du"
-              leftSection={<IconCalendar size={14} />}
-            />
-            <TextInput
-              type="date"
-              placeholder="Au"
-              value={dateFin}
-              onChange={(e) => setDateFin(e.target.value)}
-              size="xs"
-              style={{ flex: 1.2, minWidth: 90 }}
-              label="Au"
-              leftSection={<IconCalendar size={14} />}
-            />
-            <Group gap="xs" style={{ flex: '0 0 auto' }}>
-              <Tooltip label="Réinitialiser">
-                <ActionIcon
-                  variant="light"
-                  color="red"
-                  onClick={resetFilters}
-                  size={30}
-                  style={{ marginTop: 18 }}
-                >
-                  <IconX size={16} />
-                </ActionIcon>
-              </Tooltip>
-              <Tooltip label="Exporter CSV">
-                <ActionIcon
-                  variant="light"
-                  color="blue"
-                  onClick={handleExportCSV}
-                  size={30}
-                  style={{ marginTop: 18 }}
-                >
-                  <IconFileSpreadsheet size={16} />
-                </ActionIcon>
-              </Tooltip>
-              <Tooltip label="Imprimer">
-                <ActionIcon
-                  variant="light"
-                  color="teal"
-                  onClick={handlePrint}
-                  size={30}
-                  style={{ marginTop: 18 }}
-                >
-                  <IconPrinter size={16} />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          </Flex>
-
-          {filteredMouvements.length > 0 && (
-            <Text size="xs" c="dimmed" mt="xs">
-              {filteredMouvements.length} mouvement(s) trouvé(s)
-            </Text>
-          )}
-        </Card>
-      )}
-
-      {/* Liste des mouvements */}
+      {/* TABLEAU */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
-        {!selected ? (
+        {filteredHistorique.length === 0 ? (
           <Center py={60}>
             <Stack align="center" gap="sm">
-              <IconAlertCircle size={48} color="#868e96" />
+              <IconHistory size={48} color="#868e96" />
               <Text c="dimmed" size="lg" fw={500}>
-                Veuillez sélectionner un revendeur
+                Aucun historique trouvé
               </Text>
               <Text c="dimmed" size="sm">
-                Pour voir son historique de mouvements
+                Aucune activité enregistrée pour les revendeurs
               </Text>
-            </Stack>
-          </Center>
-        ) : loading ? (
-          <Center py={100}>
-            <Loader size="xl" />
-          </Center>
-        ) : filteredMouvements.length === 0 ? (
-          <Center py={60}>
-            <Stack align="center" gap="sm">
-              <IconPackage size={48} color="#868e96" />
-              <Text c="dimmed" size="lg" fw={500}>
-                Aucun mouvement trouvé
-              </Text>
-              <Text c="dimmed" size="sm">
-                {searchTerm || typeFilter || dateDebut || dateFin
-                  ? 'Aucun mouvement ne correspond aux filtres appliqués'
-                  : 'Ce revendeur n\'a pas encore de mouvements'}
-              </Text>
-              {(searchTerm || typeFilter || dateDebut || dateFin) && (
-                <Button variant="subtle" size="xs" onClick={resetFilters}>
-                  Réinitialiser les filtres
-                </Button>
-              )}
             </Stack>
           </Center>
         ) : (
           <>
             <ScrollArea h={500}>
-              <Table striped highlightOnHover verticalSpacing="sm">
+              <Table striped highlightOnHover verticalSpacing="xs">
                 <Table.Thead>
                   <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                    <Table.Th c="white" w={50}>N°</Table.Th>
+                    <Table.Th c="white" w={40}>N°</Table.Th>
                     <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white">Produit</Table.Th>
-                    <Table.Th c="white" ta="center">Type</Table.Th>
-                    <Table.Th c="white" ta="right">Quantité</Table.Th>
+                    <Table.Th c="white">Type</Table.Th>
                     <Table.Th c="white">Référence</Table.Th>
-                    <Table.Th c="white">Notes</Table.Th>
-                    <Table.Th c="white" ta="center">Actions</Table.Th>
+                    <Table.Th c="white">Désignation</Table.Th>
+                    <Table.Th c="white">Revendeur</Table.Th>
+                    <Table.Th c="white" ta="right">Montant</Table.Th>
+                    <Table.Th c="white" ta="center">Statut</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {paginatedMouvements.map((m, idx) => {
+                  {paginatedHistorique.map((item, idx) => {
                     const num = (currentPage - 1) * itemsPerPage + idx + 1;
                     return (
-                      <Table.Tr key={m.idMouvementRevendeur}>
+                      <Table.Tr key={`${item.type}-${item.id}`}>
                         <Table.Td fw={600}>{num}</Table.Td>
                         <Table.Td>
-                          <Text size="sm">{formatDate(m.date_mouvement)}</Text>
+                          <Text size="xs">{formatDate(item.date)}</Text>
+                        </Table.Td>
+                        <Table.Td>{getTypeBadge(item.type)}</Table.Td>
+                        <Table.Td>
+                          <Text fw={500} size="xs">{item.reference || '-'}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text fw={500} size="sm">{m.designation}</Text>
+                          <Text size="xs">{item.designation || '-'}</Text>
+                          {item.quantite > 0 && (
+                            <Text size="xs" c="dimmed">Qté: {item.quantite}</Text>
+                          )}
                         </Table.Td>
-                        <Table.Td ta="center">
-                          <Badge
-                            color={m.type_mouvement === "ENTREE" ? "green" : "red"}
-                            variant="light"
-                            size="sm"
-                          >
-                            {m.type_mouvement === "ENTREE" ? "📥 Entrée" : "📤 Sortie"}
-                          </Badge>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Avatar size="sm" radius="xl" color="blue">
+                              {(item.clientNom || 'C').charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Text size="xs">{item.clientNom || 'Inconnu'}</Text>
+                          </Group>
                         </Table.Td>
                         <Table.Td ta="right">
-                          <Text fw={600} c={m.type_mouvement === "ENTREE" ? "green" : "red"}>
-                            {m.type_mouvement === "ENTREE" ? "+" : "-"}
-                            {formatNombre(m.qte_mouvement)}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          {m.code_commande ? (
-                            <Badge variant="outline" color="blue" size="sm">
-                              {m.code_commande}
-                            </Badge>
-                          ) : m.code_decompte ? (
-                            <Badge variant="outline" color="orange" size="sm">
-                              {m.code_decompte}
-                            </Badge>
+                          {item.montant > 0 ? (
+                            <Text fw={600} c="blue" size="xs">{formatMontant(item.montant)} F</Text>
+                          ) : item.type === 'STOCK' ? (
+                            <Text size="xs" c="dimmed">-</Text>
                           ) : (
                             <Text size="xs" c="dimmed">-</Text>
                           )}
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" c="dimmed" lineClamp={1}>
-                            {m.notes || '-'}
-                          </Text>
-                        </Table.Td>
                         <Table.Td ta="center">
-                          <Tooltip label="Voir détails">
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              onClick={() => handleViewDetail(m)}
-                              size="sm"
-                            >
-                              <IconEye size={16} />
-                            </ActionIcon>
-                          </Tooltip>
+                          {getStatusBadge(item.status, item.type)}
                         </Table.Td>
                       </Table.Tr>
                     );
@@ -619,110 +550,19 @@ export default function HistoriqueRevendeur() {
 
             {totalPages > 1 && (
               <Group justify="center" p="md">
-                <Pagination 
-                  total={totalPages} 
-                  value={currentPage} 
-                  onChange={setCurrentPage} 
-                  size="sm" 
+                <Pagination
+                  total={totalPages}
+                  value={currentPage}
+                  onChange={setCurrentPage}
+                  size="sm"
                 />
               </Group>
             )}
           </>
         )}
       </Card>
-
-      {/* Modal Détails */}
-      <Modal
-        opened={detailModalOpened}
-        onClose={() => setDetailModalOpened(false)}
-        title="Détails du mouvement"
-        size="md"
-        centered
-      >
-        {selectedMouvement && (
-          <Stack gap="md">
-            <SimpleGrid cols={2} spacing="md">
-              <div>
-                <Text size="xs" c="dimmed">Date</Text>
-                <Text fw={500}>{formatDate(selectedMouvement.date_mouvement)}</Text>
-              </div>
-              <div>
-                <Text size="xs" c="dimmed">Type</Text>
-                <Badge
-                  color={selectedMouvement.type_mouvement === "ENTREE" ? "green" : "red"}
-                  size="lg"
-                >
-                  {selectedMouvement.type_mouvement === "ENTREE" ? "📥 Entrée" : "📤 Sortie"}
-                </Badge>
-              </div>
-              <div>
-                <Text size="xs" c="dimmed">Produit</Text>
-                <Text fw={500}>{selectedMouvement.designation}</Text>
-              </div>
-              <div>
-                <Text size="xs" c="dimmed">Quantité</Text>
-                <Text fw={700} c={selectedMouvement.type_mouvement === "ENTREE" ? "green" : "red"}>
-                  {selectedMouvement.type_mouvement === "ENTREE" ? "+" : "-"}
-                  {formatNombre(selectedMouvement.qte_mouvement)}
-                </Text>
-              </div>
-              {selectedMouvement.prix_unitaire && (
-                <div>
-                  <Text size="xs" c="dimmed">Prix unitaire</Text>
-                  <Text fw={500}>{formatNombre(selectedMouvement.prix_unitaire)} €</Text>
-                </div>
-              )}
-              {selectedMouvement.total && (
-                <div>
-                  <Text size="xs" c="dimmed">Total</Text>
-                  <Text fw={700}>{formatNombre(selectedMouvement.total)} €</Text>
-                </div>
-              )}
-              {selectedMouvement.code_commande && (
-                <div>
-                  <Text size="xs" c="dimmed">Commande</Text>
-                  <Badge color="blue">{selectedMouvement.code_commande}</Badge>
-                </div>
-              )}
-              {selectedMouvement.code_decompte && (
-                <div>
-                  <Text size="xs" c="dimmed">Décompte</Text>
-                  <Badge color="orange">{selectedMouvement.code_decompte}</Badge>
-                </div>
-              )}
-            </SimpleGrid>
-            {selectedMouvement.notes && (
-              <>
-                <Divider />
-                <div>
-                  <Text size="xs" c="dimmed">Notes</Text>
-                  <Text>{selectedMouvement.notes}</Text>
-                </div>
-              </>
-            )}
-            <Button onClick={() => setDetailModalOpened(false)} mt="md">
-              Fermer
-            </Button>
-          </Stack>
-        )}
-      </Modal>
-
-      {/* Modal d'impression */}
-      <Modal
-        opened={printModalOpened}
-        onClose={() => setPrintModalOpened(false)}
-        title="Impression de l'historique"
-        size="md"
-        centered
-      >
-        <Stack align="center" py="xl">
-          <Loader size="lg" />
-          <Text>Préparation de l'impression...</Text>
-          <Text size="sm" c="dimmed">
-            {filteredMouvements.length} mouvements à imprimer
-          </Text>
-        </Stack>
-      </Modal>
     </Stack>
   );
-}
+};
+
+export default HistoriqueRevendeur;

@@ -14,8 +14,6 @@ import {
   IconFileText, IconAlertCircle, IconDownload
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { journalCaisseService } from '../../services/journalCaisseService';
 import { getDb } from '../../database/db';
 
@@ -88,6 +86,41 @@ const categorieColors: Record<string, string> = {
   'AUTRE_SORTIE': 'gray'
 };
 
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch {
+    return '-';
+  }
+};
+
+const formatDateSimple = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  } catch {
+    return '-';
+  }
+};
+
 export const JournalCaisse: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
@@ -112,104 +145,103 @@ export const JournalCaisse: React.FC = () => {
 
   const itemsPerPage = 15;
 
-const chargerDonnees = async () => {
-  setLoading(true);
-  try {
-    const db = await getDb();
-    
-    // Vérifier si la table journal_caisse existe
-    const tableExists = await db.select<any[]>(`
-      SELECT name FROM sqlite_master WHERE type='table' AND name='journal_caisse'
-    `);
-    
-    if (tableExists.length === 0) {
-      console.warn('⚠️ Table journal_caisse non trouvée');
-      setJournalEntries([]);
-      setCharges([]);
-      setSoldeActuel(0);
-      setLoading(false);
-      return;
-    }
-    
-    // ✅ Récupérer le solde actuel (tous les mouvements)
-    const soldeResult = await db.select<any[]>(`
-      SELECT 
-        COALESCE(SUM(CASE WHEN type_mouvement = 'ENTREE' THEN montant ELSE 0 END), 0) as total_entrees,
-        COALESCE(SUM(CASE WHEN type_mouvement = 'SORTIE' THEN montant ELSE 0 END), 0) as total_sorties
-      FROM journal_caisse
-    `);
-    
-    const solde = (soldeResult[0]?.total_entrees || 0) - (soldeResult[0]?.total_sorties || 0);
-    setSoldeActuel(solde);
-    console.log('💰 Solde actuel:', solde);
-    
-    // ✅ Récupérer les mouvements du jour - Utiliser date() pour comparer uniquement la date
-    // Sans l'heure, pour éviter les problèmes de format
-    const entries = await db.select<any[]>(`
-      SELECT *
-      FROM journal_caisse
-      WHERE date(date_journal) = date(?)
-      ORDER BY date_journal ASC
-    `, [selectedDate]);
-    
-    console.log(`📊 ${entries.length} mouvements trouvés pour le ${selectedDate}`);
-    setJournalEntries(entries);
-    
-    // ✅ Récupérer les charges du jour
-    const chargesTableExists = await db.select<any[]>(`
-      SELECT name FROM sqlite_master WHERE type='table' AND name='charges_fonctionnement'
-    `);
-    
-    if (chargesTableExists.length > 0) {
-      const chargesData = await db.select<any[]>(`
-        SELECT *
-        FROM charges_fonctionnement
-        WHERE date(date_charge) = date(?)
-        ORDER BY date_charge ASC
-      `, [selectedDate]);
+  const chargerDonnees = async () => {
+    setLoading(true);
+    try {
+      const db = await getDb();
       
-      console.log(`📊 ${chargesData.length} charges trouvées pour le ${selectedDate}`);
-      setCharges(chargesData);
-    } else {
-      setCharges([]);
+      // Vérifier si la table journal_caisse existe
+      const tableExists = await db.select<any[]>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='journal_caisse'
+      `);
+      
+      if (tableExists.length === 0) {
+        console.warn('⚠️ Table journal_caisse non trouvée');
+        setJournalEntries([]);
+        setCharges([]);
+        setSoldeActuel(0);
+        setLoading(false);
+        return;
+      }
+      
+      // Récupérer le solde actuel (tous les mouvements)
+      const soldeResult = await db.select<any[]>(`
+        SELECT 
+          COALESCE(SUM(CASE WHEN type_mouvement = 'ENTREE' THEN montant ELSE 0 END), 0) as total_entrees,
+          COALESCE(SUM(CASE WHEN type_mouvement = 'SORTIE' THEN montant ELSE 0 END), 0) as total_sorties
+        FROM journal_caisse
+      `);
+      
+      const solde = (soldeResult[0]?.total_entrees || 0) - (soldeResult[0]?.total_sorties || 0);
+      setSoldeActuel(solde);
+      console.log('💰 Solde actuel:', solde);
+      
+      // Récupérer les mouvements du jour
+      const startDate = selectedDate + ' 00:00:00';
+      const endDate = selectedDate + ' 23:59:59';
+      
+      const entries = await db.select<any[]>(`
+        SELECT *
+        FROM journal_caisse
+        WHERE date_journal >= ? AND date_journal <= ?
+        ORDER BY date_journal ASC
+      `, [startDate, endDate]);
+      
+      console.log(`📊 ${entries.length} mouvements trouvés pour le ${selectedDate}`);
+      setJournalEntries(entries);
+      
+      // Récupérer les charges du jour
+      const chargesTableExists = await db.select<any[]>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='charges_fonctionnement'
+      `);
+      
+      if (chargesTableExists.length > 0) {
+        const chargesData = await db.select<any[]>(`
+          SELECT *
+          FROM charges_fonctionnement
+          WHERE date_charge >= ? AND date_charge <= ?
+          ORDER BY date_charge ASC
+        `, [startDate, endDate]);
+        
+        console.log(`📊 ${chargesData.length} charges trouvées pour le ${selectedDate}`);
+        setCharges(chargesData);
+      } else {
+        setCharges([]);
+      }
+      
+      // Calculer le récapitulatif
+      const totalEntrees = entries.filter(e => e.type_mouvement === 'ENTREE').reduce((sum, e) => sum + e.montant, 0);
+      const totalSorties = entries.filter(e => e.type_mouvement === 'SORTIE').reduce((sum, e) => sum + e.montant, 0);
+      
+      const recapData: RecapJournalier = {
+        date_recap: selectedDate,
+        solde_initial: solde - totalEntrees + totalSorties,
+        total_entrees: totalEntrees,
+        total_sorties: totalSorties,
+        solde_final: solde,
+        total_ventes_comptoir: entries.filter(e => e.categorie === 'VENTE_COMPTOIR').reduce((sum, e) => sum + e.montant, 0),
+        total_reglements_factures: entries.filter(e => e.categorie === 'REGLEMENT_FACTURE').reduce((sum, e) => sum + e.montant, 0),
+        total_decomptes_revendeurs: entries.filter(e => e.categorie === 'DECOMPTE_REVENDEUR').reduce((sum, e) => sum + e.montant, 0),
+        total_charges: entries.filter(e => e.categorie === 'CHARGE_FONCTIONNEMENT').reduce((sum, e) => sum + e.montant, 0)
+      };
+      setRecap(recapData);
+      
+    } catch (error) {
+      console.error('❌ Erreur chargement:', error);
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les données',
+        color: 'red'
+      });
+    } finally {
+      setLoading(false);
     }
-    
-    // ✅ Calculer le récapitulatif
-    const totalEntrees = entries.filter(e => e.type_mouvement === 'ENTREE').reduce((sum, e) => sum + e.montant, 0);
-    const totalSorties = entries.filter(e => e.type_mouvement === 'SORTIE').reduce((sum, e) => sum + e.montant, 0);
-    
-    const recapData: RecapJournalier = {
-      date_recap: selectedDate,
-      solde_initial: solde - totalEntrees + totalSorties,
-      total_entrees: totalEntrees,
-      total_sorties: totalSorties,
-      solde_final: solde,
-      total_ventes_comptoir: entries.filter(e => e.categorie === 'VENTE_COMPTOIR').reduce((sum, e) => sum + e.montant, 0),
-      total_reglements_factures: entries.filter(e => e.categorie === 'REGLEMENT_FACTURE').reduce((sum, e) => sum + e.montant, 0),
-      total_decomptes_revendeurs: entries.filter(e => e.categorie === 'DECOMPTE_REVENDEUR').reduce((sum, e) => sum + e.montant, 0),
-      total_charges: entries.filter(e => e.categorie === 'CHARGE_FONCTIONNEMENT').reduce((sum, e) => sum + e.montant, 0)
-    };
-    setRecap(recapData);
-    
-  } catch (error) {
-    console.error('❌ Erreur chargement:', error);
-    notifications.show({
-      title: 'Erreur',
-      message: 'Impossible de charger les données',
-      color: 'red'
-    });
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   useEffect(() => {
     chargerDonnees();
   }, [selectedDate]);
 
-  // =====================================================
-  // HANDLE AJOUTER CHARGE
-  // =====================================================
   const handleAjouterCharge = async () => {
     if (!chargeForm.designation || chargeForm.montant <= 0 || !chargeForm.beneficiaire) {
       notifications.show({
@@ -261,11 +293,16 @@ const chargerDonnees = async () => {
   };
 
   // =====================================================
-  // HANDLE PRINT
+  // HANDLE PRINT - Version sans date-fns
   // =====================================================
   const handlePrint = () => {
     try {
-      const dateStr = format(new Date(selectedDate), 'dd/MM/yyyy', { locale: fr });
+      const dateObj = new Date(selectedDate);
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const dateStr = `${day}/${month}/${year}`;
+      
       const title = activeTab === 'journal' ? 'JOURNAL DE CAISSE' : 'CHARGES DE FONCTIONNEMENT';
       
       let totalEntrees = 0;
@@ -292,7 +329,7 @@ const chargerDonnees = async () => {
           tableRows += `
             <tr>
               <td style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${idx + 1}</td>
-              <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDate(entry.date_journal)}</td>
+              <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDateCustom(entry.date_journal)}</td>
               <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1;">
                 <div style="font-weight: 500; color: #1a1a2e;">${entry.designation || '-'}</div>
                 ${entry.reference ? `<div style="font-size: 10px; color: #8a8aa0; margin-top: 2px;">Réf: ${entry.reference}</div>` : ''}
@@ -317,7 +354,7 @@ const chargerDonnees = async () => {
           tableRows += `
             <tr>
               <td style="padding: 10px 12px; text-align: center; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${idx + 1}</td>
-              <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDate(charge.date_charge)}</td>
+              <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a; font-size: 11px;">${formatDateCustom(charge.date_charge)}</td>
               <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; font-weight: 500; color: #1a1a2e;">${charge.designation || '-'}</td>
               <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1; color: #4a4a6a;">${charge.beneficiaire || '-'}</td>
               <td style="padding: 10px 12px; border-bottom: 1px solid #e8ecf1;">
@@ -333,6 +370,14 @@ const chargerDonnees = async () => {
 
       const totalGeneral = activeTab === 'journal' ? soldeFinal : totalCharges;
       const totalEnLettres = convertirEnLettres(totalGeneral);
+
+      const now = new Date();
+      const nowDay = String(now.getDate()).padStart(2, '0');
+      const nowMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const nowYear = now.getFullYear();
+      const nowHours = String(now.getHours()).padStart(2, '0');
+      const nowMinutes = String(now.getMinutes()).padStart(2, '0');
+      const dateImpression = `${nowDay}/${nowMonth}/${nowYear} à ${nowHours}:${nowMinutes}`;
 
       const html = `
         <!DOCTYPE html>
@@ -610,6 +655,10 @@ const chargerDonnees = async () => {
                 <div class="sub">Nom, prénom et signature</div>
               </div>
             </div>
+
+            <div class="footer">
+              Document généré le ${dateImpression} — © ${new Date().getFullYear()} Gestion Pro
+            </div>
           </body>
         </html>
       `;
@@ -659,7 +708,7 @@ const chargerDonnees = async () => {
   };
 
   // =====================================================
-  // HANDLE EXPORT CSV
+  // HANDLE EXPORT CSV - Version sans date-fns
   // =====================================================
   const handleExportCSV = () => {
     try {
@@ -679,19 +728,20 @@ const chargerDonnees = async () => {
       if (activeTab === 'journal') {
         csvContent = 'N°;Date;Désignation;Type;Catégorie;Montant;Solde;Référence\n';
         journalEntries.forEach((entry: JournalEntry, idx: number) => {
-          csvContent += `${idx + 1};${formatDate(entry.date_journal)};${entry.designation || ''};${entry.type_mouvement || ''};${categorieLabels[entry.categorie] || entry.categorie || ''};${entry.montant || 0};${entry.solde_apres || 0};${entry.reference || ''}\n`;
+          csvContent += `${idx + 1};${formatDateCustom(entry.date_journal)};${entry.designation || ''};${entry.type_mouvement || ''};${categorieLabels[entry.categorie] || entry.categorie || ''};${entry.montant || 0};${entry.solde_apres || 0};${entry.reference || ''}\n`;
         });
       } else {
         csvContent = 'N°;Date;Désignation;Bénéficiaire;Catégorie;Montant;Référence\n';
         charges.forEach((charge: ChargeFonctionnement, idx: number) => {
           const catInfo = categoriesCharges.find(c => c.value === charge.categorie_charge);
-          csvContent += `${idx + 1};${formatDate(charge.date_charge)};${charge.designation || ''};${charge.beneficiaire || ''};${catInfo?.label || charge.categorie_charge || ''};${charge.montant || 0};${charge.reference_paiement || ''}\n`;
+          csvContent += `${idx + 1};${formatDateCustom(charge.date_charge)};${charge.designation || ''};${charge.beneficiaire || ''};${catInfo?.label || charge.categorie_charge || ''};${charge.montant || 0};${charge.reference_paiement || ''}\n`;
         });
       }
       
       const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
-      const dateStr = format(new Date(selectedDate), 'yyyy-MM-dd', { locale: fr });
+      const dateObj = new Date(selectedDate);
+      const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
       const fileName = `${activeTab === 'journal' ? 'journal_caisse' : 'charges'}_${dateStr}.csv`;
       link.href = URL.createObjectURL(blob);
       link.download = fileName;
@@ -721,15 +771,6 @@ const chargerDonnees = async () => {
   // =====================================================
   const formatMontant = (value: number): string => {
     return (value || 0).toLocaleString('fr-FR');
-  };
-
-  const formatDate = (dateStr: string): string => {
-    if (!dateStr) return '-';
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy HH:mm', { locale: fr });
-    } catch {
-      return '-';
-    }
   };
 
   const convertirEnLettres = (montant: number): string => {
@@ -885,7 +926,7 @@ const chargerDonnees = async () => {
               <div>
                 <Text c="white" size="xs">Date</Text>
                 <Text c="white" fw={700} size="xl">
-                  {selectedDate ? format(new Date(selectedDate), 'dd/MM/yyyy', { locale: fr }) : '-'}
+                  {formatDateSimple(selectedDate)}
                 </Text>
               </div>
             </Group>
@@ -991,7 +1032,7 @@ const chargerDonnees = async () => {
                       <Table.Tr>
                         <Table.Td colSpan={7} align="center">
                           <Text c="dimmed" py={40}>
-                            Aucun mouvement pour le {selectedDate ? format(new Date(selectedDate), 'dd/MM/yyyy', { locale: fr }) : '-'}
+                            Aucun mouvement pour le {formatDateSimple(selectedDate)}
                           </Text>
                           <Text c="dimmed" size="sm">Les ventes et règlements apparaîtront ici automatiquement</Text>
                         </Table.Td>
@@ -1003,7 +1044,7 @@ const chargerDonnees = async () => {
                           <Table.Tr key={entry.idJournal}>
                             <Table.Td fw={600}>{num}</Table.Td>
                             <Table.Td>
-                              <Text size="sm">{formatDate(entry.date_journal)}</Text>
+                              <Text size="sm">{formatDateCustom(entry.date_journal)}</Text>
                             </Table.Td>
                             <Table.Td>
                               <Text size="sm" fw={500}>{entry.designation || '-'}</Text>
@@ -1069,7 +1110,7 @@ const chargerDonnees = async () => {
                         return (
                           <Table.Tr key={charge.idCharge}>
                             <Table.Td fw={600}>{idx + 1}</Table.Td>
-                            <Table.Td>{formatDate(charge.date_charge)}</Table.Td>
+                            <Table.Td>{formatDateCustom(charge.date_charge)}</Table.Td>
                             <Table.Td>
                               <Text fw={500} size="sm">{charge.designation || '-'}</Text>
                               {charge.reference_paiement && (

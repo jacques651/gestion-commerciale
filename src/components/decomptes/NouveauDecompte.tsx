@@ -37,7 +37,6 @@ import { getDb } from '../../database/db';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { decompteRepository } from '../../database/repositories/decompteRepository';
 import { journalCaisseService } from '../../services/journalCaisseService';
-import { format } from 'date-fns';
 
 interface NouveauDecompteProps {
   decompteId?: number;
@@ -378,11 +377,14 @@ export default function NouveauDecompte({ decompteId, onSuccess, onCancel }: Nou
     setError(null);
     
     try {
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      
       const decompteInput = {
         idClient: selectedClientId,
         observation: observation || undefined,
-        periode_debut: format(new Date(), 'yyyy-MM-dd'),
-        periode_fin: format(new Date(), 'yyyy-MM-dd'),
+        periode_debut: dateStr,
+        periode_fin: dateStr,
         notes: undefined
       };
       

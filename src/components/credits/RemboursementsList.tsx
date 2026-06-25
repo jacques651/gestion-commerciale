@@ -1,5 +1,4 @@
 // src/components/credits/RemboursementsList.tsx
-
 import { useState, useEffect } from 'react';
 import {
   Card,
@@ -46,13 +45,30 @@ import {
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { creditRepository, Credit, Remboursement } from '../../database/repositories/creditRepository';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 
 interface RemboursementsListProps {
   creditId?: number;
   onClose?: () => void;
 }
+
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch {
+    return '-';
+  }
+};
 
 export default function RemboursementsList({ creditId }: RemboursementsListProps) {
   const [remboursements, setRemboursements] = useState<Remboursement[]>([]);
@@ -220,12 +236,9 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
     return (value || 0).toLocaleString('fr-FR');
   };
 
+  // ✅ Utiliser formatDateCustom au lieu de format de date-fns
   const formatDate = (dateStr: string): string => {
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy HH:mm', { locale: fr });
-    } catch {
-      return '-';
-    }
+    return formatDateCustom(dateStr);
   };
 
   const getModePaiementBadge = (mode: string) => {

@@ -4,15 +4,15 @@ import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper, 
-  Loader, Center} from '@mantine/core';
+  Loader, Center
+} from '@mantine/core';
 import {
   IconSearch, IconRefresh,
   IconCalendar, IconCash, IconPrinter, IconEye,
-  IconPlus, IconX} from '@tabler/icons-react';
+  IconPlus, IconX
+} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { useReactToPrint } from 'react-to-print';
 import { FormulaireReglement } from './FormulaireReglement';
 import { ReçuReglement } from './ReçuReglement';
@@ -38,6 +38,41 @@ interface ReglementWithCumul extends Reglement {
   montant_total_facture: number;
   statut_paiement: 'payee' | 'partielle' | 'non_payee';
 }
+
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  } catch {
+    return '-';
+  }
+};
+
+const formatDateTimeCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch {
+    return '-';
+  }
+};
 
 const ListeReglements: React.FC = () => {
   const printRef = useRef<HTMLDivElement>(null);
@@ -170,7 +205,6 @@ const ListeReglements: React.FC = () => {
   const reglementsFiltres = useMemo(() => {
     let filtered = [...reglements];
 
-    // Recherche
     if (recherche) {
       filtered = filtered.filter(r =>
         r.code_reglement?.toLowerCase().includes(recherche.toLowerCase()) ||
@@ -180,24 +214,20 @@ const ListeReglements: React.FC = () => {
       );
     }
 
-    // Client
     if (clientFiltre) {
       filtered = filtered.filter(r => r.idClient?.toString() === clientFiltre);
     }
 
-    // Statut
     if (statutFiltre) {
       filtered = filtered.filter(r => r.statut_paiement === statutFiltre);
     }
 
-    // Date début
     if (dateDebut) {
       const debut = new Date(dateDebut);
       debut.setHours(0, 0, 0, 0);
       filtered = filtered.filter(r => new Date(r.date_reglement) >= debut);
     }
 
-    // Date fin
     if (dateFin) {
       const fin = new Date(dateFin);
       fin.setHours(23, 59, 59, 999);
@@ -213,7 +243,6 @@ const ListeReglements: React.FC = () => {
     currentPage * itemsPerPage
   );
 
-  // Statistiques filtrées
   const filteredStats = {
     total: reglementsFiltres.length,
     montant: reglementsFiltres.reduce((sum, r) => sum + (r.montant || 0), 0),
@@ -231,10 +260,10 @@ const ListeReglements: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Impression de la liste
+  // ✅ Impression de la liste - sans date-fns
   const handlePrintList = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Liste_Reglements_${format(new Date(), 'dd-MM-yyyy')}`,
+    documentTitle: `Liste_Reglements_${new Date().toISOString().split('T')[0]}`,
   });
 
   const handleViewDetails = (reglement: ReglementWithCumul) => {
@@ -318,13 +347,9 @@ const ListeReglements: React.FC = () => {
     return num.toLocaleString('fr-FR');
   };
 
+  // ✅ Utiliser formatDateCustom au lieu de format de date-fns
   const formatDate = (dateStr: string): string => {
-    if (!dateStr) return '-';
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy', { locale: fr });
-    } catch {
-      return '-';
-    }
+    return formatDateCustom(dateStr);
   };
 
   const getStatutBadge = (statut: string) => {
@@ -526,7 +551,9 @@ const ListeReglements: React.FC = () => {
           {/* En-tête pour impression */}
           <div style={{ textAlign: 'center', marginBottom: 20, display: 'none' }}>
             <Title order={2}>Liste des règlements</Title>
-            <Text>Date d'impression: {format(new Date(), 'dd/MM/yyyy à HH:mm')}</Text>
+            <Text>
+              Date d'impression: {formatDateTimeCustom(new Date().toISOString())}
+            </Text>
             <Text>Total: {reglementsFiltres.length} règlement(s) - Montant total: {formatMontant(filteredStats.montant)} FCFA</Text>
           </div>
 
@@ -615,7 +642,7 @@ const ListeReglements: React.FC = () => {
                               </Tooltip>
                               
                               {reg.statut_paiement !== 'payee' && (
-                                <Tooltip label={`Régler`}>
+                                <Tooltip label="Régler">
                                   <ActionIcon
                                     size="md"
                                     color="green"
@@ -664,7 +691,7 @@ const ListeReglements: React.FC = () => {
           </Card>
         </div>
 
-        {/* Modals... (inchangés) */}
+        {/* Modal Détails */}
         <Modal
           opened={detailsModalOpen}
           onClose={() => setDetailsModalOpen(false)}

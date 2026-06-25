@@ -16,8 +16,6 @@ import {
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 
 interface CommandeRevendeur {
   idCommande: number;
@@ -35,14 +33,31 @@ interface CommandeRevendeur {
   idFactureRevendeur?: number;
 }
 
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  } catch {
+    return '-';
+  }
+};
+
 export const ListeCommandesRevendeur: React.FC = () => {
   const navigate = useNavigate();
   const [commandes, setCommandes] = useState<CommandeRevendeur[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [dateDebut, setDateDebut] = useState<Date | null>(null);
-  const [dateFin, setDateFin] = useState<Date | null>(null);
+  const [dateDebut, setDateDebut] = useState<string>('');
+  const [dateFin, setDateFin] = useState<string>('');
   const [clientsList, setClientsList] = useState<{ value: string; label: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedCommande, setSelectedCommande] = useState<CommandeRevendeur | null>(null);
@@ -187,8 +202,8 @@ export const ListeCommandesRevendeur: React.FC = () => {
 
   const resetFilters = () => {
     setSelectedClient(null);
-    setDateDebut(null);
-    setDateFin(null);
+    setDateDebut('');
+    setDateFin('');
     setSearchTerm('');
     setCurrentPage(1);
   };
@@ -269,7 +284,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
           </SimpleGrid>
         </Paper>
 
-        {/* FILTRES + BOUTONS - TOUS SUR LA MÊME LIGNE AVEC LARGEURS RÉDUITES */}
+        {/* FILTRES + BOUTONS */}
         <Card withBorder radius="lg" shadow="sm" p="sm">
           <Group grow align="flex-end" gap="xs">
             {/* Revendeur */}
@@ -301,8 +316,8 @@ export const ListeCommandesRevendeur: React.FC = () => {
             <TextInput
               label="Début"
               type="date"
-              value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''}
-              onChange={(e) => setDateDebut(e.target.value ? new Date(e.target.value) : null)}
+              value={dateDebut}
+              onChange={(e) => setDateDebut(e.target.value)}
               size="xs"
               styles={{ input: { fontSize: '12px' }, label: { fontSize: '11px' } }}
             />
@@ -311,8 +326,8 @@ export const ListeCommandesRevendeur: React.FC = () => {
             <TextInput
               label="Fin"
               type="date"
-              value={dateFin ? dateFin.toISOString().split('T')[0] : ''}
-              onChange={(e) => setDateFin(e.target.value ? new Date(e.target.value) : null)}
+              value={dateFin}
+              onChange={(e) => setDateFin(e.target.value)}
               size="xs"
               styles={{ input: { fontSize: '12px' }, label: { fontSize: '11px' } }}
             />
@@ -397,7 +412,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
                         </Table.Td>
                         <Table.Td>
                           <Text size="sm">
-                            {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
+                            {formatDateCustom(commande.date_commande)}
                           </Text>
                         </Table.Td>
                         <Table.Td>
@@ -497,7 +512,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
               </div>
               <div>
                 <Text size="sm" c="dimmed">Date</Text>
-                <Text fw={500}>{format(new Date(selectedCommande.date_commande), 'dd/MM/yyyy', { locale: fr })}</Text>
+                <Text fw={500}>{formatDateCustom(selectedCommande.date_commande)}</Text>
               </div>
               <div>
                 <Text size="sm" c="dimmed">Code facture</Text>

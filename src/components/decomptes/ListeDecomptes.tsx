@@ -46,8 +46,6 @@ import { notifications } from '@mantine/notifications';
 import { decompteRepository } from '../../database/repositories/decompteRepository';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { getDb } from '../../database/db';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 
 // Interface pour les détails du décompte (produits)
@@ -115,6 +113,41 @@ interface Statistiques {
   montantTotalCommission: number;
   montantTotalBenefice: number;
 }
+
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  } catch {
+    return '-';
+  }
+};
+
+const formatDateTimeCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch {
+    return '-';
+  }
+};
 
 export default function ListeDecomptes() {
   const navigate = useNavigate();
@@ -435,20 +468,13 @@ export default function ListeDecomptes() {
     }
   };
 
+  // ✅ Utiliser formatDateCustom au lieu de format de date-fns
   const formatDate = (dateStr: string) => {
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy', { locale: fr });
-    } catch {
-      return '-';
-    }
+    return formatDateCustom(dateStr);
   };
 
   const formatDateHeure = (dateStr: string) => {
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy HH:mm', { locale: fr });
-    } catch {
-      return '-';
-    }
+    return formatDateTimeCustom(dateStr);
   };
 
   const resetFilters = () => {

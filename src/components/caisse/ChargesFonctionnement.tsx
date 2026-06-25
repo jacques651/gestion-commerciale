@@ -15,8 +15,6 @@ import {
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { journalCaisseService } from '../../services/journalCaisseService';
 
 interface ChargeFonctionnement {
@@ -52,6 +50,25 @@ const categoriesCharges = [
 
 const getCategorieInfo = (code: string) => {
   return categoriesCharges.find(c => c.value === code) || categoriesCharges[6];
+};
+
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  } catch {
+    return '-';
+  }
 };
 
 export const ChargesFonctionnement: React.FC = () => {
@@ -183,7 +200,6 @@ export const ChargesFonctionnement: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // ✅ CORRECTION : Utiliser le service journalCaisseService
   const handleSubmit = async () => {
     if (!formData.designation.trim() || !formData.beneficiaire.trim() || formData.montant <= 0) {
       notifications.show({
@@ -197,7 +213,6 @@ export const ChargesFonctionnement: React.FC = () => {
     setSaving(true);
     try {
       const db = await getDb();
-      const now = new Date().toISOString();
 
       // Vérifier le solde avant d'ajouter
       const soldeAvant = await journalCaisseService.getSoldeActuel();
@@ -212,8 +227,6 @@ export const ChargesFonctionnement: React.FC = () => {
       }
 
       if (editing) {
-        // Pour la modification, on ne peut pas modifier le montant sans recalculer le journal
-        // Solution simplifiée : on met à jour la charge mais pas le journal
         await db.execute(`
           UPDATE charges_fonctionnement
           SET designation = ?, montant = ?, beneficiaire = ?, categorie_charge = ?, reference_paiement = ?, notes = ?
@@ -234,7 +247,6 @@ export const ChargesFonctionnement: React.FC = () => {
           color: 'green'
         });
       } else {
-        // ✅ AJOUTER LA CHARGE AVEC LE JOURNAL DE CAISSE
         const result = await journalCaisseService.ajouterCharge({
           designation: formData.designation.trim(),
           montant: formData.montant,
@@ -290,25 +302,21 @@ export const ChargesFonctionnement: React.FC = () => {
     setModalOpened(true);
   };
 
-  // ✅ CORRECTION : Supprimer la charge et son entrée dans le journal
   const handleDelete = async (idCharge: number) => {
     if (!confirm('Voulez-vous vraiment supprimer cette charge ?')) return;
 
     try {
       const db = await getDb();
       
-      // Récupérer l'ID journal associé
       const charge = await db.select<ChargeFonctionnement[]>(`
         SELECT idJournal, designation, montant FROM charges_fonctionnement WHERE idCharge = ?
       `, [idCharge]);
       
       if (charge.length > 0 && charge[0].idJournal) {
-        // Supprimer l'entrée du journal de caisse
         await db.execute(`DELETE FROM journal_caisse WHERE idJournal = ?`, [charge[0].idJournal]);
         console.log(`✅ Entrée journal ${charge[0].idJournal} supprimée`);
       }
       
-      // Supprimer la charge
       await db.execute(`DELETE FROM charges_fonctionnement WHERE idCharge = ?`, [idCharge]);
       
       notifications.show({
@@ -332,12 +340,9 @@ export const ChargesFonctionnement: React.FC = () => {
     return (value || 0).toLocaleString('fr-FR');
   };
 
+  // ✅ Utiliser formatDateCustom au lieu de format de date-fns
   const formatDate = (dateStr: string): string => {
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy HH:mm', { locale: fr });
-    } catch {
-      return '-';
-    }
+    return formatDateCustom(dateStr);
   };
 
   const filteredCharges = charges;

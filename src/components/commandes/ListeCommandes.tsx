@@ -1,147 +1,181 @@
-// src/components/commandes/ListeCommande.tsx
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/components/commandes/ListeCommandes.tsx
+import React, { useState, useEffect } from 'react';
 import {
-  Table,
-  Badge,
-  Button,
-  Group,
-  Text,
-  Modal,
-  Stack,
-  Paper,
-  Title,
-  Card,
-  ScrollArea,
-  ActionIcon,
-  Tooltip,
-  Select,
-  SimpleGrid,
-  ThemeIcon,
-  Flex,
-  Avatar,
-  Loader,
-  Pagination,
-  TextInput,
-  Box,
-  Alert,
-  Divider
+  Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
+  Pagination, Tooltip, ThemeIcon,
+  SimpleGrid, Select, TextInput, Badge, Flex, Paper,
+  Loader, Center, Grid, ScrollArea, Alert, Avatar,
+  Menu
 } from '@mantine/core';
-import '@mantine/dates/styles.css';
-import { useDisclosure } from '@mantine/hooks';
-import { notifications } from '@mantine/notifications';
-import { FormulaireCommande } from './FormulaireCommande';
-import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import {
-  IconCheck,
-  IconReceipt,
-  IconPackage,
-  IconRefresh,
-  IconShoppingBag,
-  IconAlertCircle,
-  IconPlus,
-  IconSearch,
-  IconCash,
-  IconTrash,
-  IconFileInvoice,
-  IconEye,
-  IconTruck,
-  IconBuildingStore,
-  IconX,
-  IconList,
-  IconMoneybag
-} from '@tabler/icons-react';
-import { useCommandes } from '../../hooks/useCommandes';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+  IconShoppingCart, IconSearch, IconRefresh, IconPlus,
+  IconEye, IconPrinter, IconEdit,
+  IconCash, IconTruck, 
+  IconAlertCircle, IconFileInvoice, 
+  IconCheck, IconX, IconClock} from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { useNavigate } from 'react-router-dom';
 import { getDb } from '../../database/db';
 
-interface CommandeDetail {
-  idDetail: number;
-  idProduit: number;
-  qte_commande: number;
-  prix_unitaire_vente: number;
-  code_produit: string;
-  designation: string;
-}
-
-interface CommandeComplete {
+interface Commande {
   idCommande: number;
   code_commande: string;
   idClient: number;
-  type_commande: string;
+  type_commande: 'STANDARD' | 'REVENDEUR';
   date_commande: string;
   montant_ht: number;
   montant_ttc: number;
-  code_facture?: string;
-  date_facture?: string;
-  idFacture?: number;
-  idFactureRevendeur?: number;
-  statut: string;
+  montant_net: number;
+  statut: 'BROUILLON' | 'CONFIRMEE' | 'LIVREE' | 'ANNULEE';
+  source: string;
   NomComplet: string;
   Societe: string;
   Tel: string;
-  details: CommandeDetail[];
+  details?: any[];
 }
 
-interface FactureRow {
-  idFacture: number;
-  code_facture: string;
-  montant_ttc: number;
-  montant_regle: number;
-  statut: string;
+interface Statistiques {
+  total: number;
+  totalStandard: number;
+  totalRevendeur: number;
+  totalConfirmée: number;
+  totalLivree: number;
+  totalAnnulee: number;
+  montantTotal: number;
 }
 
-export function ListeCommande() {
+const statutColors: Record<string, string> = {
+  'BROUILLON': 'gray',
+  'CONFIRMEE': 'blue',
+  'LIVREE': 'green',
+  'ANNULEE': 'red'
+};
+
+const statutLabels: Record<string, string> = {
+  'BROUILLON': '📝 Brouillon',
+  'CONFIRMEE': '✅ Confirmée',
+  'LIVREE': '📦 Livrée',
+  'ANNULEE': '❌ Annulée'
+};
+
+const typeLabels: Record<string, string> = {
+  'STANDARD': '🏷️ Standard',
+  'REVENDEUR': '🔄 Revendeur'
+};
+
+export const ListeCommandes: React.FC = () => {
   const navigate = useNavigate();
-  const [selectedCommande, setSelectedCommande] = useState<CommandeComplete | null>(null);
-  const [detailsOpened, { open: openDetails, close: closeDetails }] = useDisclosure(false);
-  const [formulaireOpened, setFormulaireOpened] = useState(false);
-  const [deleteConfirmOpened, setDeleteConfirmOpened] = useState(false);
-  const [commandeToDelete, setCommandeToDelete] = useState<number | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-
-  const [reglementModalOpened, setReglementModalOpened] = useState(false);
-  const [reglementData, setReglementData] = useState({
-    idFacture: 0,
-    idClient: 0,
-    montantMax: 0,
-    codeFacture: '',
-    clientNom: ''
-  });
-
-  const [statusFilter, setStatusFilter] = useState<string | null>('all');
-  const [typeFilter, setTypeFilter] = useState<string | null>('all');
+  const [commandes, setCommandes] = useState<Commande[]>([]);
+  const [filteredCommandes, setFilteredCommandes] = useState<Commande[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateDebut, setDateDebut] = useState<Date | null>(null);
-  const [dateFin, setDateFin] = useState<Date | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [statutFilter, setStatutFilter] = useState<string | null>(null);
+  const [dateDebut, setDateDebut] = useState<string>('');
+  const [dateFin, setDateFin] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [statistiques, setStatistiques] = useState<Statistiques>({
+    total: 0,
+    totalStandard: 0,
+    totalRevendeur: 0,
+    totalConfirmée: 0,
+    totalLivree: 0,
+    totalAnnulee: 0,
+    montantTotal: 0
+  });
 
   const itemsPerPage = 10;
 
-  const {
-    commandes,
-    loading,
-    refresh
-  } = useCommandes();
+  // ✅ Fonction de formatage de date personnalisée (sans date-fns)
+  const formatDate = (dateStr: string): string => {
+    if (!dateStr) return '-';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return '-';
+      
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch {
+      return '-';
+    }
+  };
 
-  // ✅ Mettre à jour quand les commandes changent
+  const chargerCommandes = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const db = await getDb();
+      
+      // Vérifier si la table commandes existe
+      const tableExists = await db.select<any[]>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='commandes'
+      `);
+      
+      if (tableExists.length === 0) {
+        setCommandes([]);
+        setFilteredCommandes([]);
+        setLoading(false);
+        return;
+      }
+
+      const result = await db.select<any[]>(`
+        SELECT 
+          c.*,
+          cl.NomComplet,
+          cl.Societe,
+          cl.Tel
+        FROM commandes c
+        LEFT JOIN clients cl ON cl.idClient = c.idClient
+        ORDER BY c.date_commande DESC
+      `);
+
+      const commandesData = result.map((row: any) => ({
+        ...row,
+        NomComplet: row.NomComplet || 'Client inconnu',
+        Societe: row.Societe || '',
+        Tel: row.Tel || ''
+      }));
+
+      setCommandes(commandesData);
+      setFilteredCommandes(commandesData);
+
+      // Calculer les statistiques
+      const stats: Statistiques = {
+        total: commandesData.length,
+        totalStandard: commandesData.filter((c: Commande) => c.type_commande === 'STANDARD').length,
+        totalRevendeur: commandesData.filter((c: Commande) => c.type_commande === 'REVENDEUR').length,
+        totalConfirmée: commandesData.filter((c: Commande) => c.statut === 'CONFIRMEE').length,
+        totalLivree: commandesData.filter((c: Commande) => c.statut === 'LIVREE').length,
+        totalAnnulee: commandesData.filter((c: Commande) => c.statut === 'ANNULEE').length,
+        montantTotal: commandesData.reduce((sum: number, c: Commande) => sum + (c.montant_ttc || 0), 0)
+      };
+      setStatistiques(stats);
+
+    } catch (error) {
+      console.error('Erreur chargement commandes:', error);
+      setError('Impossible de charger les commandes');
+      notifications.show({
+        title: 'Erreur',
+        message: 'Impossible de charger les commandes',
+        color: 'red'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (commandes.length > 0) {
-      console.log('📊 Commandes chargées:', commandes.length);
-    }
-  }, [commandes]);
+    chargerCommandes();
+  }, []);
 
-  const filteredCommandes = useMemo(() => {
+  useEffect(() => {
     let filtered = [...commandes];
-
-    if (statusFilter && statusFilter !== 'all') {
-      filtered = filtered.filter(c => c.statut === statusFilter);
-    }
-
-    if (typeFilter && typeFilter !== 'all') {
-      filtered = filtered.filter(c => c.type_commande === typeFilter);
-    }
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -152,20 +186,54 @@ export function ListeCommande() {
       );
     }
 
+    if (typeFilter) {
+      filtered = filtered.filter(c => c.type_commande === typeFilter);
+    }
+
+    if (statutFilter) {
+      filtered = filtered.filter(c => c.statut === statutFilter);
+    }
+
     if (dateDebut) {
-      const debut = new Date(dateDebut);
-      debut.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(c => new Date(c.date_commande) >= debut);
+      filtered = filtered.filter(c => c.date_commande >= dateDebut);
     }
 
     if (dateFin) {
-      const fin = new Date(dateFin);
-      fin.setHours(23, 59, 59, 999);
-      filtered = filtered.filter(c => new Date(c.date_commande) <= fin);
+      filtered = filtered.filter(c => c.date_commande <= dateFin + ' 23:59:59');
     }
 
-    return filtered;
-  }, [commandes, statusFilter, typeFilter, searchTerm, dateDebut, dateFin]);
+    setFilteredCommandes(filtered);
+    setCurrentPage(1);
+  }, [commandes, searchTerm, typeFilter, statutFilter, dateDebut, dateFin]);
+
+  const formatMontant = (value: number): string => {
+    return (value || 0).toLocaleString('fr-FR');
+  };
+
+  const getStatutBadge = (statut: string) => {
+    return (
+      <Badge color={statutColors[statut] || 'gray'} variant="light" size="sm">
+        {statutLabels[statut] || statut}
+      </Badge>
+    );
+  };
+
+  const getTypeBadge = (type: string) => {
+    return (
+      <Badge color={type === 'STANDARD' ? 'blue' : 'green'} variant="filled" size="sm">
+        {typeLabels[type] || type}
+      </Badge>
+    );
+  };
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setTypeFilter(null);
+    setStatutFilter(null);
+    setDateDebut('');
+    setDateFin('');
+    setCurrentPage(1);
+  };
 
   const totalPages = Math.ceil(filteredCommandes.length / itemsPerPage);
   const paginatedCommandes = filteredCommandes.slice(
@@ -173,917 +241,395 @@ export function ListeCommande() {
     currentPage * itemsPerPage
   );
 
-  const stats = {
-    total: commandes.length,
-    montantTotal: commandes.reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
-    livrees: commandes.filter(c => c.statut === 'LIVREE').length,
-    revendeurs: commandes.filter(c => c.type_commande === 'REVENDEUR').length,
-    standards: commandes.filter(c => c.type_commande === 'STANDARD' || c.type_commande === null || c.type_commande === '').length,
-    enCours: commandes.filter(c => c.statut === 'EN_COURS').length,
-    annulees: commandes.filter(c => c.statut === 'ANNULEE').length,
-    confirmees: commandes.filter(c => c.statut === 'CONFIRMEE').length
-  };
-
-  const resetFilters = () => {
-    setStatusFilter('all');
-    setTypeFilter('all');
-    setSearchTerm('');
-    setDateDebut(null);
-    setDateFin(null);
-    setCurrentPage(1);
-  };
-
-  const handleViewDetails = async (idCommande: number) => {
-    const { commandeRepository } = await import('../../database/repositories/commandeRepository');
-    const commande = await commandeRepository.getById(idCommande);
-    if (commande) {
-      setSelectedCommande(commande as CommandeComplete);
-      openDetails();
-    } else {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger les détails de la commande',
-        color: 'red'
-      });
-    }
-  };
-
-  const handleRefresh = async () => {
-    await refresh();
-    resetFilters();
-    notifications.show({
-      title: 'Actualisé',
-      message: 'La liste des commandes a été actualisée',
-      color: 'blue'
-    });
-  };
-
-  const handleGenererFacture = async (idCommande: number, typeCommande: string) => {
-    try {
-      const { factureRepository } = await import('../../database/repositories/factureRepository');
-      const { factureRevendeurRepository } = await import('../../database/repositories/factureRevendeurRepository');
-
-      if (typeCommande === 'REVENDEUR') {
-        await factureRevendeurRepository.createFromCommande(idCommande);
-      } else {
-        await factureRepository.createFromCommande(idCommande);
-      }
-
-      notifications.show({
-        title: 'Succès',
-        message: `Facture générée avec succès`,
-        color: 'green'
-      });
-      await refresh();
-    } catch (error) {
-      console.error('Erreur génération facture:', error);
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de générer la facture',
-        color: 'red'
-      });
-    }
-  };
-
-  interface CommandeReference {
-    idCommande: number;
-    idClient: number;
-    type_commande: string;
-    NomComplet: string;
-    code_facture?: string;
-    idFacture?: number | string;
-    idFactureRevendeur?: number | string;
+  if (loading) {
+    return (
+      <Center py={100}>
+        <Loader size="xl" />
+        <Text ml="md" c="dimmed">Chargement des commandes...</Text>
+      </Center>
+    );
   }
 
-  const handleRegler = async (commande: CommandeReference) => {
-    const db = await import('../../database/db').then(m => m.getDb());
-
-    if (commande.type_commande === 'REVENDEUR') {
-      notifications.show({
-        title: 'Décompte revendeur',
-        message: `Veuillez créer un décompte pour le revendeur ${commande.NomComplet}`,
-        color: 'blue'
-      });
-      return;
-    }
-
-    const result = await db.select<FactureRow[]>(`
-      SELECT idFacture, code_facture, montant_ttc, COALESCE(montant_regle, 0) as montant_regle, statut
-      FROM factures 
-      WHERE idCommande = ?
-    `, [commande.idCommande]);
-
-    if (result.length > 0) {
-      const facture = result[0];
-      const montantRestant = (facture.montant_ttc || 0) - (facture.montant_regle || 0);
-
-      if (montantRestant <= 0) {
-        notifications.show({
-          title: 'Information',
-          message: 'Cette facture est déjà entièrement réglée',
-          color: 'blue'
-        });
-        return;
-      }
-
-      setReglementData({
-        idFacture: facture.idFacture,
-        idClient: commande.idClient,
-        montantMax: montantRestant,
-        codeFacture: facture.code_facture,
-        clientNom: commande.NomComplet
-      });
-      setReglementModalOpened(true);
-    } else {
-      notifications.show({
-        title: 'Information',
-        message: 'Aucune facture trouvée pour cette commande. Veuillez générer la facture d\'abord.',
-        color: 'orange'
-      });
-    }
-  };
-
-  const peutSupprimerCommande = async (idCommande: number): Promise<{ peut: boolean; raison: string }> => {
-    const db = await getDb();
-
-    // Vérifier s'il y a des règlements associés
-    const reglements = await db.select<any[]>(`
-      SELECT COUNT(*) as count
-      FROM reglements r
-      INNER JOIN factures f ON f.idFacture = r.idFacture
-      WHERE f.idCommande = ?
-    `, [idCommande]);
-
-    if (reglements[0]?.count > 0) {
-      return { peut: false, raison: 'Des règlements ont déjà été effectués sur les factures de cette commande' };
-    }
-
-    // Vérifier s'il y a des décomptes associés
-    const decomptes = await db.select<any[]>(`
-      SELECT COUNT(*) as count
-      FROM decomptes
-      WHERE idFactureRevendeur IN (
-        SELECT idFactureRevendeur FROM factures_revendeur WHERE idCommande = ?
-      )
-    `, [idCommande]);
-
-    if (decomptes[0]?.count > 0) {
-      return { peut: false, raison: 'Des décomptes ont déjà été créés pour cette commande revendeur' };
-    }
-
-    // Vérifier s'il y a des factures
-    const factures = await db.select<any[]>(`
-      SELECT COUNT(*) as count
-      FROM factures
-      WHERE idCommande = ?
-    `, [idCommande]);
-
-    if (factures[0]?.count > 0) {
-      return { peut: false, raison: 'Des factures ont déjà été générées pour cette commande' };
-    }
-
-    // Vérifier s'il y a des factures revendeur
-    const facturesRev = await db.select<any[]>(`
-      SELECT COUNT(*) as count
-      FROM factures_revendeur
-      WHERE idCommande = ?
-    `, [idCommande]);
-
-    if (facturesRev[0]?.count > 0) {
-      return { peut: false, raison: 'Des factures revendeur ont déjà été générées pour cette commande' };
-    }
-
-    return { peut: true, raison: '' };
-  };
-
-  const handleDelete = async (idCommande: number) => {
-    setCommandeToDelete(idCommande);
-    
-    const { peut, raison } = await peutSupprimerCommande(idCommande);
-    
-    if (!peut) {
-      notifications.show({
-        title: '❌ Suppression impossible',
-        message: raison,
-        color: 'red',
-        autoClose: 8000
-      });
-      return;
-    }
-
-    setDeleteConfirmOpened(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!commandeToDelete) return;
-
-    setDeleteLoading(true);
-    try {
-      const db = await getDb();
-
-      // 1. Récupérer les détails
-      const details = await db.select<any[]>(`
-        SELECT idProduit, qte_commande
-        FROM commande_details
-        WHERE idCommande = ?
-      `, [commandeToDelete]);
-
-      // 2. Restaurer le stock
-      for (const detail of details) {
-        await db.execute(`
-          UPDATE products
-          SET qte_stock = qte_stock + ?
-          WHERE idProduit = ?
-        `, [detail.qte_commande, detail.idProduit]);
-      }
-
-      // 3. Supprimer les détails
-      await db.execute(`DELETE FROM commande_details WHERE idCommande = ?`, [commandeToDelete]);
-
-      // 4. Supprimer la commande
-      await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [commandeToDelete]);
-
-      notifications.show({
-        title: '✅ Succès',
-        message: `Commande supprimée et stock restauré (${details.length} produit(s))`,
-        color: 'green'
-      });
-
-      setDeleteConfirmOpened(false);
-      setCommandeToDelete(null);
-      await refresh();
-
-    } catch (error) {
-      console.error('Erreur suppression:', error);
-      notifications.show({
-        title: '❌ Erreur',
-        message: 'Impossible de supprimer la commande',
-        color: 'red'
-      });
-    } finally {
-      setDeleteLoading(false);
-    }
-  };
-
-  const handleVoirFacture = async (commande: CommandeReference) => {
-    try {
-      const { getDb } = await import('../../database/db');
-      const db = await getDb();
-
-      let facture = await db.select<any[]>(`
-        SELECT idFacture, code_facture, 'standard' as type
-        FROM factures 
-        WHERE idCommande = ?
-      `, [commande.idCommande]);
-
-      if (facture.length === 0) {
-        facture = await db.select<any[]>(`
-          SELECT idFactureRevendeur as idFacture, code_facture, 'revendeur' as type
-          FROM factures_revendeur 
-          WHERE idCommande = ?
-        `, [commande.idCommande]);
-      }
-
-      if (facture.length > 0) {
-        const f = facture[0];
-        if (f.type === 'revendeur') {
-          navigate(`/factures-revendeur/${f.idFacture}`);
-        } else {
-          navigate(`/factures/${f.idFacture}`);
-        }
-      } else {
-        notifications.show({
-          title: 'Facture introuvable',
-          message: 'Cette commande ne possède aucune facture',
-          color: 'red'
-        });
-      }
-    } catch (error) {
-      console.error('Erreur:', error);
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de trouver la facture',
-        color: 'red'
-      });
-    }
-  };
-
-  const getStatusBadge = (statut: string) => {
-    switch (statut) {
-      case 'CONFIRMEE':
-        return <Badge color="green" variant="light" size="sm">Confirmée</Badge>;
-      case 'EN_COURS':
-        return <Badge color="yellow" variant="light" size="sm">En cours</Badge>;
-      case 'LIVREE':
-        return <Badge color="blue" variant="light" size="sm">Livrée</Badge>;
-      case 'ANNULEE':
-        return <Badge color="red" variant="light" size="sm">Annulée</Badge>;
-      default:
-        return <Badge variant="light" size="sm">{statut || 'BROUILLON'}</Badge>;
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    return type === 'REVENDEUR' ? <IconPackage size={16} /> : <IconReceipt size={16} />;
-  };
-
-  const getTypeLabel = (type: string) => {
-    return type === 'REVENDEUR' ? 'Revendeur' : 'Standard';
-  };
-
-  if (loading && commandes.length === 0) {
+  if (error) {
     return (
-      <Card withBorder p="xl" ta="center">
-        <Loader size="xl" />
-        <Text mt="md">Chargement des commandes...</Text>
-      </Card>
+      <Center py={60}>
+        <Stack align="center" gap="md" style={{ maxWidth: 500 }}>
+          <Alert icon={<IconAlertCircle size={16} />} title="Erreur" color="red">
+            {error}
+          </Alert>
+          <Button 
+            leftSection={<IconRefresh size={16} />}
+            onClick={chargerCommandes}
+            variant="light"
+          >
+            Réessayer
+          </Button>
+        </Stack>
+      </Center>
     );
   }
 
   return (
-    <>
-      <Stack gap="lg" p="md">
-        {/* En-tête avec gradient */}
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-          <Flex justify="space-between" align="center" wrap="wrap">
-            <Group gap="md">
-              <ThemeIcon size={50} radius="md" color="white" variant="light">
-                <IconShoppingBag size={30} />
+    <Stack gap="lg" p="md">
+      {/* EN-TÊTE */}
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+        <Flex justify="space-between" align="center" wrap="wrap">
+          <Group gap="md">
+            <ThemeIcon size={50} radius="md" color="white" variant="light">
+              <IconShoppingCart size={30} />
+            </ThemeIcon>
+            <div>
+              <Title order={1} c="white">Commandes</Title>
+              <Text c="gray.3" size="sm">Gestion des commandes clients et revendeurs</Text>
+            </div>
+          </Group>
+          <Group>
+            <Button
+              variant="light"
+              color="white"
+              leftSection={<IconRefresh size={18} />}
+              onClick={chargerCommandes}
+            >
+              Actualiser
+            </Button>
+            <Button
+              variant="filled"
+              color="red"
+              leftSection={<IconPlus size={18} />}
+              onClick={() => navigate('/commandes/nouveau')}
+            >
+              Nouvelle commande
+            </Button>
+          </Group>
+        </Flex>
+
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="white" variant="light" size="lg">
+                <IconShoppingCart size={20} />
               </ThemeIcon>
               <div>
-                <Title order={1} c="white">Gestion des Commandes</Title>
-                <Text c="gray.3" size="sm">Suivez et gérez toutes vos commandes</Text>
+                <Text c="white" size="xs">Total commandes</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.total}</Text>
               </div>
             </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(46,125,50,0.3)' }}>
             <Group>
-              <Button
-                variant="light"
-                color="white"
-                leftSection={<IconPlus size={18} />}
-                onClick={() => setFormulaireOpened(true)}
-              >
-                Nouvelle commande
-              </Button>
-              <Button
-                variant="light"
-                color="white"
-                leftSection={<IconRefresh size={18} />}
-                onClick={handleRefresh}
-              >
-                Actualiser
-              </Button>
+              <ThemeIcon color="green" variant="light" size="lg">
+                <IconCheck size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Livrées</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.totalLivree}</Text>
+              </div>
             </Group>
-          </Flex>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(33,150,243,0.3)' }}>
+            <Group>
+              <ThemeIcon color="blue" variant="light" size="lg">
+                <IconClock size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Confirmées</Text>
+                <Text c="white" fw={700} size="xl">{statistiques.totalConfirmée}</Text>
+              </div>
+            </Group>
+          </Card>
+          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+            <Group>
+              <ThemeIcon color="yellow" variant="light" size="lg">
+                <IconCash size={20} />
+              </ThemeIcon>
+              <div>
+                <Text c="white" size="xs">Montant total</Text>
+                <Text c="white" fw={700} size="xl">{formatMontant(statistiques.montantTotal)} F</Text>
+              </div>
+            </Group>
+          </Card>
+        </SimpleGrid>
+      </Paper>
 
-          {/* Cartes statistiques */}
-          <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="white" variant="light" size="lg"><IconShoppingBag size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Total</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="green" variant="light" size="lg"><IconCheck size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Confirmées</Text><Text c="white" fw={700} size="xl">{stats.confirmees}</Text></div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconAlertCircle size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">En cours</Text><Text c="white" fw={700} size="xl">{stats.enCours}</Text></div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="blue" variant="light" size="lg"><IconTruck size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Livrées</Text><Text c="white" fw={700} size="xl">{stats.livrees}</Text></div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconReceipt size={20} /></ThemeIcon>
-                <div><Text c="white" size="xs">Montant total</Text><Text c="white" fw={700} size="xl">{stats.montantTotal.toLocaleString('fr-FR')} FCFA</Text></div>
-              </Group>
-            </Card>
-          </SimpleGrid>
-        </Paper>
-
-        {/* Filtres */}
-        <Card withBorder radius="lg" shadow="sm" p="xs">
-          <Group align="flex-end" gap="xs" style={{ flexWrap: 'wrap' }}>
-            {/* Recherche */}
-            <Box style={{ width: 130 }}>
+      {/* FILTRES */}
+      <Card withBorder radius="lg" shadow="sm" p="sm">
+        <Grid align="flex-end">
+          <Grid.Col span={3}>
+            <TextInput
+              label="Rechercher"
+              placeholder="Code, client..."
+              leftSection={<IconSearch size={14} />}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <Select
+              label="Type"
+              placeholder="Tous"
+              data={[
+                { value: 'STANDARD', label: '🏷️ Standard' },
+                { value: 'REVENDEUR', label: '🔄 Revendeur' }
+              ]}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              clearable
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <Select
+              label="Statut"
+              placeholder="Tous"
+              data={[
+                { value: 'BROUILLON', label: '📝 Brouillon' },
+                { value: 'CONFIRMEE', label: '✅ Confirmée' },
+                { value: 'LIVREE', label: '📦 Livrée' },
+                { value: 'ANNULEE', label: '❌ Annulée' }
+              ]}
+              value={statutFilter}
+              onChange={setStatutFilter}
+              clearable
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <TextInput
+              label="Date début"
+              type="date"
+              value={dateDebut}
+              onChange={(e) => setDateDebut(e.target.value)}
+              size="xs"
+            />
+          </Grid.Col>
+          <Grid.Col span={3}>
+            <Group justify="flex-end" gap="xs">
               <TextInput
-                placeholder="Rechercher..."
-                leftSection={<IconSearch size={12} />}
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                size="xs"
-                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-              />
-            </Box>
-
-            {/* Statut */}
-            <Box style={{ width: 100 }}>
-              <Select
-                placeholder="Statut"
-                value={statusFilter}
-                onChange={(value) => {
-                  setStatusFilter(value);
-                  setCurrentPage(1);
-                }}
-                data={[
-                  { value: 'all', label: 'Tous' },
-                  { value: 'CONFIRMEE', label: 'Confirmée' },
-                  { value: 'EN_COURS', label: 'En cours' },
-                  { value: 'LIVREE', label: 'Livrée' },
-                  { value: 'ANNULEE', label: 'Annulée' }
-                ]}
-                size="xs"
-                clearable
-                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-              />
-            </Box>
-
-            {/* Type */}
-            <Box style={{ width: 100 }}>
-              <Select
-                placeholder="Type"
-                value={typeFilter}
-                onChange={(value) => {
-                  setTypeFilter(value);
-                  setCurrentPage(1);
-                }}
-                data={[
-                  { value: 'all', label: 'Tous' },
-                  { value: 'STANDARD', label: 'Standard' },
-                  { value: 'REVENDEUR', label: 'Revendeur' }
-                ]}
-                size="xs"
-                clearable
-                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-              />
-            </Box>
-
-            {/* Date début */}
-            <Box style={{ width: 110 }}>
-              <TextInput
-                placeholder="Début"
+                label="Date fin"
                 type="date"
-                value={dateDebut instanceof Date ? dateDebut.toISOString().split('T')[0] : ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setDateDebut(val ? new Date(val) : null);
-                }}
+                value={dateFin}
+                onChange={(e) => setDateFin(e.target.value)}
                 size="xs"
-                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
+                style={{ flex: 1 }}
               />
-            </Box>
-
-            {/* Date fin */}
-            <Box style={{ width: 110 }}>
-              <TextInput
-                placeholder="Fin"
-                type="date"
-                value={dateFin instanceof Date ? dateFin.toISOString().split('T')[0] : ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setDateFin(val ? new Date(val) : null);
-                }}
-                size="xs"
-                styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
-              />
-            </Box>
-
-            {/* BOUTONS D'ACTION */}
-            <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flexWrap: 'wrap' }}>
-              <Button
-                leftSection={<IconList size={12} />}
-                variant="filled"
-                color="blue"
-                onClick={() => navigate('/commandes')}
-                size="xs"
-                style={{ fontSize: '10px', padding: '4px 8px' }}
-              >
-                Toutes
-              </Button>
-              <Button
-                leftSection={<IconBuildingStore size={12} />}
-                variant="light"
-                color="cyan"
-                onClick={() => navigate('/commandes/standard')}
-                size="xs"
-                style={{ fontSize: '10px', padding: '4px 8px' }}
-              >
-                Standard
-              </Button>
-              <Button
-                leftSection={<IconTruck size={12} />}
-                variant="light"
-                color="green"
-                onClick={() => navigate('/commandes/revendeur')}
-                size="xs"
-                style={{ fontSize: '10px', padding: '4px 8px' }}
-              >
-                Revendeurs
-              </Button>
-              <Button
-                leftSection={<IconMoneybag size={12} />}
-                variant="light"
-                color="teal"
-                onClick={() => navigate('/reglements')}
-                size="xs"
-                style={{ fontSize: '10px', padding: '4px 8px' }}
-              >
-                Règlements
-              </Button>
               <Button
                 variant="light"
-                color="red"
+                color="gray"
+                leftSection={<IconX size={14} />}
                 onClick={resetFilters}
                 size="xs"
-                leftSection={<IconX size={12} />}
-                style={{ fontSize: '10px', padding: '4px 8px' }}
+                style={{ marginTop: 20 }}
               >
                 Effacer
               </Button>
             </Group>
-          </Group>
-        </Card>
+          </Grid.Col>
+        </Grid>
+      </Card>
 
-        {/* Tableau des commandes */}
-        <Card withBorder radius="lg" shadow="sm" p={0}>
-          <ScrollArea h="calc(100vh - 480px)">
-            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
-              <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                <Table.Tr>
-                  <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>N°</Table.Th>
-                  <Table.Th c="white" style={{ width: 150, fontSize: '13px', fontWeight: 600 }}>Code</Table.Th>
-                  <Table.Th c="white" style={{ width: 180, fontSize: '13px', fontWeight: 600 }}>Client</Table.Th>
-                  <Table.Th c="white" style={{ width: 100, fontSize: '13px', fontWeight: 600 }}>Date</Table.Th>
-                  <Table.Th c="white" style={{ width: 90, fontSize: '13px', fontWeight: 600 }}>Type</Table.Th>
-                  <Table.Th c="white" style={{ width: 120, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>Montant HT</Table.Th>
-                  <Table.Th c="white" style={{ width: 130, fontSize: '13px', fontWeight: 600 }}>Code Facture</Table.Th>
-                  <Table.Th c="white" style={{ width: 100, fontSize: '13px', fontWeight: 600 }}>Date Facture</Table.Th>
-                  <Table.Th c="white" style={{ width: 250, textAlign: 'center', fontSize: '13px', fontWeight: 600 }}>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {paginatedCommandes.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={9} align="center">
-                      <Stack align="center" py={50}>
-                        <IconShoppingBag size={50} color="gray" />
-                        <Text c="dimmed">Aucune commande trouvée</Text>
-                        <Button variant="light" onClick={resetFilters} size="xs">
-                          Réinitialiser les filtres
-                        </Button>
-                      </Stack>
-                    </Table.Td>
+      {/* TABLEAU */}
+      <Card withBorder radius="lg" shadow="sm" p={0}>
+        {filteredCommandes.length === 0 ? (
+          <Center py={60}>
+            <Stack align="center" gap="sm">
+              <IconShoppingCart size={48} color="#868e96" />
+              <Text c="dimmed" size="lg" fw={500}>
+                Aucune commande trouvée
+              </Text>
+              <Text c="dimmed" size="sm">
+                {searchTerm || typeFilter || statutFilter || dateDebut || dateFin
+                  ? 'Aucune commande ne correspond aux filtres appliqués'
+                  : 'Commencez par créer une nouvelle commande'}
+              </Text>
+              <Button 
+                variant="light" 
+                color="blue"
+                leftSection={<IconPlus size={16} />}
+                onClick={() => navigate('/commandes/nouveau')}
+              >
+                Nouvelle commande
+              </Button>
+            </Stack>
+          </Center>
+        ) : (
+          <>
+            <ScrollArea h={500}>
+              <Table striped highlightOnHover verticalSpacing="xs">
+                <Table.Thead>
+                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                    <Table.Th c="white" w={40}>N°</Table.Th>
+                    <Table.Th c="white">Code</Table.Th>
+                    <Table.Th c="white">Client</Table.Th>
+                    <Table.Th c="white">Type</Table.Th>
+                    <Table.Th c="white">Date</Table.Th>
+                    <Table.Th c="white" ta="right">Montant</Table.Th>
+                    <Table.Th c="white" ta="center">Statut</Table.Th>
+                    <Table.Th c="white" ta="center" w={150}>Actions</Table.Th>
                   </Table.Tr>
-                ) : (
-                  paginatedCommandes.map((commande, index) => {
-                    // ✅ Vérifier si la commande a une facture
-                    const hasFacture = commande.code_facture || commande.idFacture || commande.idFactureRevendeur;
-                    
+                </Table.Thead>
+                <Table.Tbody>
+                  {paginatedCommandes.map((commande, idx) => {
+                    const num = (currentPage - 1) * itemsPerPage + idx + 1;
                     return (
                       <Table.Tr key={commande.idCommande}>
-                        <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                          <Text fw={600} size="sm">{index + 1 + (currentPage - 1) * itemsPerPage}</Text>
+                        <Table.Td fw={600}>{num}</Table.Td>
+                        <Table.Td>
+                          <Text fw={500} size="xs">{commande.code_commande}</Text>
                         </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Badge color="blue" variant="light" size="sm">
-                            {commande.code_commande || '-'}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Group gap="sm" wrap="nowrap">
+                        <Table.Td>
+                          <Group gap="xs">
                             <Avatar size="sm" radius="xl" color="blue">
                               {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
                             </Avatar>
-                            <div>
-                              <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
+                            <Stack gap={0}>
+                              <Text size="xs" fw={500}>{commande.NomComplet || 'Inconnu'}</Text>
                               {commande.Societe && (
                                 <Text size="xs" c="dimmed">{commande.Societe}</Text>
                               )}
-                            </div>
+                            </Stack>
                           </Group>
                         </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Text size="sm">
-                            {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
-                          </Text>
+                        <Table.Td>{getTypeBadge(commande.type_commande)}</Table.Td>
+                        <Table.Td>
+                          <Text size="xs">{formatDate(commande.date_commande)}</Text>
                         </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Badge
-                            color={commande.type_commande === 'REVENDEUR' ? 'green' : 'blue'}
-                            variant="light"
-                            size="sm"
-                            leftSection={commande.type_commande === 'REVENDEUR' ? <IconPackage size={12} /> : <IconReceipt size={12} />}
-                          >
-                            {commande.type_commande === 'REVENDEUR' ? 'Revendeur' : 'Standard'}
-                          </Badge>
+                        <Table.Td ta="right">
+                          <Text fw={600} c="blue" size="xs">{formatMontant(commande.montant_ttc)} F</Text>
                         </Table.Td>
-                        <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                          <Text fw={600} size="sm" c="blue">
-                            {commande.montant_ht.toLocaleString('fr-FR')} FCFA
-                          </Text>
-                        </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Text fw={500} size="sm" c={hasFacture ? 'green' : 'dimmed'}>
-                            {commande.code_facture || '-'}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td style={{ verticalAlign: 'middle' }}>
-                          <Text size="sm" c={commande.date_facture ? 'green' : 'dimmed'}>
-                            {commande.date_facture
-                              ? format(new Date(commande.date_facture), 'dd/MM/yyyy', { locale: fr })
-                              : '-'}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                          <Group gap="4" justify="center" wrap="nowrap">
+                        <Table.Td ta="center">{getStatutBadge(commande.statut)}</Table.Td>
+                        <Table.Td ta="center">
+                          <Group gap={4} justify="center">
                             <Tooltip label="Voir détails">
                               <ActionIcon
-                                variant="subtle"
+                                variant="light"
                                 color="blue"
-                                size="md"
-                                onClick={() => handleViewDetails(commande.idCommande)}
+                                size="sm"
+                                onClick={() => navigate(`/commandes/${commande.idCommande}`)}
                               >
-                                <IconEye size={18} />
+                                <IconEye size={14} />
                               </ActionIcon>
                             </Tooltip>
-
-                            {hasFacture && (
-                              <Tooltip label="Voir facture">
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="grape"
-                                  size="md"
-                                  onClick={() => handleVoirFacture(commande)}
-                                >
-                                  <IconFileInvoice size={18} />
-                                </ActionIcon>
-                              </Tooltip>
-                            )}
-
-                            {commande.type_commande !== 'REVENDEUR' && (
-                              <Tooltip label="Régler">
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="green"
-                                  size="md"
-                                  onClick={() => handleRegler(commande)}
-                                >
-                                  <IconCash size={18} />
-                                </ActionIcon>
-                              </Tooltip>
-                            )}
-
-                            {!hasFacture && (
-                              <Tooltip label="Générer facture">
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="grape"
-                                  size="md"
-                                  onClick={() => handleGenererFacture(commande.idCommande, commande.type_commande)}
-                                >
-                                  <IconReceipt size={18} />
-                                </ActionIcon>
-                              </Tooltip>
-                            )}
-
-                            <Tooltip label="Supprimer">
+                            <Tooltip label="Imprimer">
                               <ActionIcon
-                                variant="subtle"
-                                color="red"
-                                size="md"
-                                onClick={() => handleDelete(commande.idCommande)}
+                                variant="light"
+                                color="teal"
+                                size="sm"
+                                onClick={() => navigate(`/commandes/${commande.idCommande}/print`)}
                               >
-                                <IconTrash size={18} />
+                                <IconPrinter size={14} />
                               </ActionIcon>
                             </Tooltip>
+                            {commande.statut === 'BROUILLON' && (
+                              <Tooltip label="Modifier">
+                                <ActionIcon
+                                  variant="light"
+                                  color="orange"
+                                  size="sm"
+                                  onClick={() => navigate(`/commandes/${commande.idCommande}/edit`)}
+                                >
+                                  <IconEdit size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                            )}
+                            {commande.statut !== 'ANNULEE' && commande.statut !== 'LIVREE' && (
+                              <Menu position="bottom-end" shadow="md" width={200}>
+                                <Menu.Target>
+                                  <ActionIcon variant="light" color="gray" size="sm">
+                                    <IconFileInvoice size={14} />
+                                  </ActionIcon>
+                                </Menu.Target>
+                                <Menu.Dropdown>
+                                  <Menu.Item 
+                                    leftSection={<IconCheck size={14} />}
+                                    onClick={() => {
+                                      notifications.show({
+                                        title: 'Information',
+                                        message: `Confirmation de la commande ${commande.code_commande}`,
+                                        color: 'blue'
+                                      });
+                                    }}
+                                  >
+                                    Confirmer
+                                  </Menu.Item>
+                                  <Menu.Item 
+                                    leftSection={<IconTruck size={14} />}
+                                    onClick={() => {
+                                      notifications.show({
+                                        title: 'Information',
+                                        message: `Livraison de la commande ${commande.code_commande}`,
+                                        color: 'blue'
+                                      });
+                                    }}
+                                  >
+                                    Livrer
+                                  </Menu.Item>
+                                  <Menu.Divider />
+                                  <Menu.Item 
+                                    leftSection={<IconX size={14} />}
+                                    color="red"
+                                    onClick={() => {
+                                      notifications.show({
+                                        title: 'Information',
+                                        message: `Annulation de la commande ${commande.code_commande}`,
+                                        color: 'red'
+                                      });
+                                    }}
+                                  >
+                                    Annuler
+                                  </Menu.Item>
+                                </Menu.Dropdown>
+                              </Menu>
+                            )}
                           </Group>
                         </Table.Td>
                       </Table.Tr>
                     );
-                  })
-                )}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+                  })}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
 
-          {totalPages > 1 && (
-            <Group justify="center" p="md">
-              <Pagination
-                total={totalPages}
-                value={currentPage}
-                onChange={setCurrentPage}
-                size="md"
-              />
-            </Group>
-          )}
-        </Card>
-      </Stack>
-
-      {/* Modal Détails Commande */}
-      <Modal
-        opened={detailsOpened}
-        onClose={closeDetails}
-        title={`Détails de la commande ${selectedCommande?.code_commande}`}
-        size="xl"
-        scrollAreaComponent={ScrollArea.Autosize}
-      >
-        {selectedCommande && (
-          <Stack gap="md">
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-              <div>
-                <Text size="sm" c="dimmed">Client</Text>
-                <Text fw={500}>{selectedCommande.NomComplet}</Text>
-              </div>
-              <div>
-                <Text size="sm" c="dimmed">Société</Text>
-                <Text fw={500}>{selectedCommande.Societe || '-'}</Text>
-              </div>
-              <div>
-                <Text size="sm" c="dimmed">Téléphone</Text>
-                <Text fw={500}>{selectedCommande.Tel || '-'}</Text>
-              </div>
-              <div>
-                <Text size="sm" c="dimmed">Date</Text>
-                <Text fw={500}>
-                  {format(new Date(selectedCommande.date_commande), 'dd/MM/yyyy HH:mm', { locale: fr })}
-                </Text>
-              </div>
-              <div>
-                <Text size="sm" c="dimmed">Type</Text>
-                <Group gap={4}>
-                  {getTypeIcon(selectedCommande.type_commande)}
-                  <Text>{getTypeLabel(selectedCommande.type_commande)}</Text>
-                </Group>
-              </div>
-              <div>
-                <Text size="sm" c="dimmed">Statut</Text>
-                {getStatusBadge(selectedCommande.statut)}
-              </div>
-              {selectedCommande.code_facture && (
-                <>
-                  <div>
-                    <Text size="sm" c="dimmed">Code Facture</Text>
-                    <Text fw={500}>{selectedCommande.code_facture}</Text>
-                  </div>
-                  <div>
-                    <Text size="sm" c="dimmed">Date Facture</Text>
-                    <Text fw={500}>
-                      {selectedCommande.date_facture
-                        ? format(new Date(selectedCommande.date_facture), 'dd/MM/yyyy', { locale: fr })
-                        : '-'}
-                    </Text>
-                  </div>
-                </>
-              )}
-            </SimpleGrid>
-
-            <div>
-              <Text fw={700} mb="sm">Produits commandés</Text>
-              <ScrollArea style={{ maxHeight: 300 }}>
-                <Table striped>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Code</Table.Th>
-                      <Table.Th>Désignation</Table.Th>
-                      <Table.Th ta="right">Quantité</Table.Th>
-                      <Table.Th ta="right">Prix unitaire</Table.Th>
-                      <Table.Th ta="right">Total</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {selectedCommande.details?.map((detail, idx) => (
-                      <Table.Tr key={idx}>
-                        <Table.Td>
-                          <Text size="sm">{detail.code_produit}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm">{detail.designation}</Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="sm">{detail.qte_commande}</Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="sm">{detail.prix_unitaire_vente.toLocaleString('fr-FR')} FCFA</Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="sm" fw={500}>
-                            {(detail.qte_commande * detail.prix_unitaire_vente).toLocaleString('fr-FR')} FCFA
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-            </div>
-
-            <div style={{ borderTop: '1px solid var(--mantine-color-gray-3)', paddingTop: 16 }}>
-              <Group justify="space-between">
-                <div>
-                  <Text size="sm" c="dimmed">Montant HT</Text>
-                  <Text fw={500} size="lg">
-                    {selectedCommande.montant_ht.toLocaleString('fr-FR')} FCFA
-                  </Text>
-                </div>
-                <div>
-                  <Text size="sm" c="dimmed">Montant TTC</Text>
-                  <Text fw={700} size="xl" c="blue">
-                    {selectedCommande.montant_ttc.toLocaleString('fr-FR')} FCFA
-                  </Text>
-                </div>
+            {totalPages > 1 && (
+              <Group justify="center" p="md">
+                <Pagination
+                  total={totalPages}
+                  value={currentPage}
+                  onChange={setCurrentPage}
+                  size="sm"
+                />
               </Group>
-            </div>
-          </Stack>
+            )}
+          </>
         )}
-      </Modal>
+      </Card>
 
-      {/* Modal de règlement */}
-      <FormulaireReglement
-        opened={reglementModalOpened}
-        onClose={() => {
-          setReglementModalOpened(false);
-          refresh();
-        }}
-        idFacture={reglementData.idFacture}
-        idClient={reglementData.idClient}
-        montantMax={reglementData.montantMax}
-      />
-
-      {/* Formulaire de création de commande */}
-      <FormulaireCommande
-        opened={formulaireOpened}
-        onClose={() => {
-          setFormulaireOpened(false);
-          refresh();
-        }}
-      />
-
-      {/* Modal de confirmation de suppression */}
-      <Modal
-        opened={deleteConfirmOpened}
-        onClose={() => {
-          setDeleteConfirmOpened(false);
-          setCommandeToDelete(null);
-        }}
-        title="⚠️ Confirmation de suppression"
-        size="md"
-        centered
-        styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 600 },
-          body: { padding: '20px' }
-        }}
-      >
-        <Stack gap="md">
-          <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
-            <Text fw={600}>Attention !</Text>
-            <Text size="sm">
-              Cette action est irréversible. La suppression de cette commande :
+      {/* RÉSUMÉ */}
+      <Paper withBorder p="sm" radius="lg">
+        <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+          <Group gap="lg">
+            <Text size="xs" c="dimmed">
+              Total: <strong>{filteredCommandes.length}</strong> commandes
             </Text>
-            <ul style={{ marginTop: 8, paddingLeft: 20 }}>
-              <li>Supprimera définitivement la commande</li>
-              <li>Restaurera les quantités en stock</li>
-              <li>Supprimera les détails de la commande</li>
-            </ul>
-          </Alert>
-
-          <Text size="sm" c="dimmed">
-            Êtes-vous sûr de vouloir continuer ?
-          </Text>
-
-          <Divider />
-
-          <Group justify="flex-end">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setDeleteConfirmOpened(false);
-                setCommandeToDelete(null);
-              }}
-              disabled={deleteLoading}
-            >
-              Annuler
-            </Button>
-            <Button
-              color="red"
-              onClick={confirmDelete}
-              loading={deleteLoading}
-              leftSection={<IconTrash size={16} />}
-            >
-              Confirmer la suppression
-            </Button>
+            <Text size="xs" c="dimmed">
+              Montant total: <strong>{formatMontant(statistiques.montantTotal)} FCFA</strong>
+            </Text>
           </Group>
-        </Stack>
-      </Modal>
-    </>
+          <Group gap="xs">
+            <Badge color="blue" size="sm">
+              Standard: {statistiques.totalStandard}
+            </Badge>
+            <Badge color="green" size="sm">
+              Revendeur: {statistiques.totalRevendeur}
+            </Badge>
+            <Badge color="gray" size="sm">
+              Brouillon: {commandes.filter(c => c.statut === 'BROUILLON').length}
+            </Badge>
+          </Group>
+        </Flex>
+      </Paper>
+    </Stack>
   );
-}
+};
 
-export default ListeCommande;
+export default ListeCommandes;

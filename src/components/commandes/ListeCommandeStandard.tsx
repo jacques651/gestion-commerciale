@@ -17,8 +17,6 @@ import {
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { FormulaireCommande } from './FormulaireCommande';
 import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import { useCommandes } from '../../hooks/useCommandes';
@@ -47,6 +45,23 @@ interface FactureRow {
   statut: string;
 }
 
+// ✅ Fonction de formatage de date personnalisée (sans date-fns)
+const formatDateCustom = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '-';
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  } catch {
+    return '-';
+  }
+};
+
 export const ListeCommandeStandard: React.FC = () => {
   const navigate = useNavigate();
   useCommandes();
@@ -55,8 +70,8 @@ export const ListeCommandeStandard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>('all');
-  const [dateDebut, setDateDebut] = useState<Date | null>(null);
-  const [dateFin, setDateFin] = useState<Date | null>(null);
+  const [dateDebut, setDateDebut] = useState<string>('');
+  const [dateFin, setDateFin] = useState<string>('');
   const [clientsList, setClientsList] = useState<{ value: string; label: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedCommande, setSelectedCommande] = useState<CommandeStandard | null>(null);
@@ -280,8 +295,8 @@ export const ListeCommandeStandard: React.FC = () => {
   const resetFilters = () => {
     setSelectedClient(null);
     setStatusFilter('all');
-    setDateDebut(null);
-    setDateFin(null);
+    setDateDebut('');
+    setDateFin('');
     setSearchTerm('');
     setCurrentPage(1);
   };
@@ -384,10 +399,9 @@ export const ListeCommandeStandard: React.FC = () => {
           </SimpleGrid>
         </Paper>
 
-        {/* FILTRES + BOUTONS - TOUS SUR LA MÊME LIGNE AVEC LARGEURS RÉDUITES */}
+        {/* FILTRES */}
         <Card withBorder radius="lg" shadow="sm" p="xs">
           <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
-            {/* Client - largeur réduite */}
             <Box style={{ width: 160 }}>
               <Select
                 label="Client"
@@ -402,7 +416,6 @@ export const ListeCommandeStandard: React.FC = () => {
               />
             </Box>
             
-            {/* Statut - largeur réduite */}
             <Box style={{ width: 160 }}>
               <Select
                 label="Statut"
@@ -422,31 +435,28 @@ export const ListeCommandeStandard: React.FC = () => {
               />
             </Box>
             
-            {/* Date début - largeur réduite */}
             <Box style={{ width: 160 }}>
               <TextInput
                 label="Début"
                 type="date"
-                value={dateDebut ? dateDebut.toISOString().split('T')[0] : ''}
-                onChange={(e) => setDateDebut(e.target.value ? new Date(e.target.value) : null)}
+                value={dateDebut}
+                onChange={(e) => setDateDebut(e.target.value)}
                 size="xs"
                 styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
             </Box>
             
-            {/* Date fin - largeur réduite */}
             <Box style={{ width: 160 }}>
               <TextInput
                 label="Fin"
                 type="date"
-                value={dateFin ? dateFin.toISOString().split('T')[0] : ''}
-                onChange={(e) => setDateFin(e.target.value ? new Date(e.target.value) : null)}
+                value={dateFin}
+                onChange={(e) => setDateFin(e.target.value)}
                 size="xs"
                 styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
             </Box>
             
-            {/* Recherche - largeur réduite */}
             <Box style={{ width: 300 }}>
               <TextInput
                 label="Recherche"
@@ -459,7 +469,6 @@ export const ListeCommandeStandard: React.FC = () => {
               />
             </Box>
             
-            {/* BOUTONS D'ACTION - compactés */}
             <Group gap="xs" align="flex-end" style={{ paddingBottom: 2, flex: 1, justifyContent: 'flex-end' }}>
               <Button 
                 leftSection={<IconList size={12} />} 
@@ -552,7 +561,7 @@ export const ListeCommandeStandard: React.FC = () => {
                         </Table.Td>
                         <Table.Td>
                           <Text size="sm">
-                            {format(new Date(commande.date_commande), 'dd/MM/yyyy', { locale: fr })}
+                            {formatDateCustom(commande.date_commande)}
                           </Text>
                         </Table.Td>
                         <Table.Td>
@@ -674,7 +683,7 @@ export const ListeCommandeStandard: React.FC = () => {
               </div>
               <div>
                 <Text size="sm" c="dimmed">Date</Text>
-                <Text fw={500}>{format(new Date(selectedCommande.date_commande), 'dd/MM/yyyy', { locale: fr })}</Text>
+                <Text fw={500}>{formatDateCustom(selectedCommande.date_commande)}</Text>
               </div>
               <div>
                 <Text size="sm" c="dimmed">Code facture</Text>
