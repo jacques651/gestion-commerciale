@@ -48,19 +48,6 @@ interface Statistiques {
   montantTotal: number;
 }
 
-const statutColors: Record<string, string> = {
-  'BROUILLON': 'gray',
-  'CONFIRMEE': 'blue',
-  'LIVREE': 'green',
-  'ANNULEE': 'red'
-};
-
-const statutLabels: Record<string, string> = {
-  'BROUILLON': '📝 Brouillon',
-  'CONFIRMEE': '✅ Confirmée',
-  'LIVREE': '📦 Livrée',
-  'ANNULEE': '❌ Annulée'
-};
 
 const typeLabels: Record<string, string> = {
   'STANDARD': '🏷️ Standard',

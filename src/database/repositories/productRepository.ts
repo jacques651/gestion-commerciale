@@ -2,6 +2,7 @@
 import { getDb } from '../db';
 
 export interface Product {
+  [x: string]: number | string | undefined;
   idProduit: number;
   code_produit: string;
   designation: string;

@@ -41,7 +41,7 @@ import { notifications } from '@mantine/notifications';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getDb } from '../../database/db';
 import { clientRepository } from '../../database/repositories/clientRepository';
-import { journalCaisseService } from '../../services/journalCaisseService';
+
 
 interface NouveauDecompteProps {
   decompteId?: number;

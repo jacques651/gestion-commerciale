@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
 import Navbar from './components/common/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { getDb, isDatabaseConnected } from './database/db';
 import { initDatabaseWithMigrations } from './database/runMigration';
 import { DatabaseVersionManager } from './database/versionManager';
 import { MigrationManagerComponent } from './components/MigrationManager';
@@ -97,56 +96,6 @@ const LoadingFallback = () => (
 );
 
 // Vérification de la base de données (sans réinitialisation)
-function DatabaseStatus() {
-  const [isReady, setIsReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const checkDb = async () => {
-      try {
-        console.log('🔄 Vérification de la base de données...');
-
-        if (isDatabaseConnected()) {
-          const db = await getDb();
-
-          const tables = await db.select<{ count: number }[]>(`
-            SELECT COUNT(*) as count FROM sqlite_master 
-            WHERE type='table' AND name NOT LIKE 'sqlite_%'
-          `);
-
-          console.log(`✅ Base de données prête - ${tables[0]?.count || 0} tables disponibles`);
-          setIsReady(true);
-        } else {
-          throw new Error('Connexion DB échouée');
-        }
-      } catch (err) {
-        console.error('❌ Erreur DB:', err);
-        setError(err instanceof Error ? err.message : 'Erreur inconnue');
-      }
-    };
-
-    checkDb();
-  }, []);
-
-  if (error) {
-    return (
-      <Center style={{ height: '100vh' }}>
-        <Notification title="Erreur Base de données" color="red">
-          {error}
-          <Button onClick={() => window.location.reload()} size="xs" mt="md">
-            Réessayer
-          </Button>
-        </Notification>
-      </Center>
-    );
-  }
-
-  if (!isReady) {
-    return <LoadingFallback />;
-  }
-
-  return null;
-}
 
 // ✅ RouteGuard basé sur les permissions
 function RouteGuard({

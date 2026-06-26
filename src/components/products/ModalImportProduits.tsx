@@ -238,15 +238,15 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
 
       const timestamp = Date.now();
       const random = Math.floor(Math.random() * 10000);
-      const codeProduit = `PROD-${timestamp.toString().slice(-4)}-${random.toString().slice(-4)}`;
+      const codeProduit = timestamp * 10000 + random;
 
       // Valeurs par défaut
       const uniteBase = row.unite_base || 'pièce';
-      const seuilAlerte = row.seuil_alerte ? parseFloat(row.seuil_alerte) : 10;
-      const prixAchat = row.prix_achat_base ? parseFloat(row.prix_achat_base) : 0;
-      const prixVenteDetail = row.prix_vente_detail ? parseFloat(row.prix_vente_detail) : 0;
-      const prixVenteGros = row.prix_vente_gros ? parseFloat(row.prix_vente_gros) : 0;
-      const qteStock = row.qte_stock ? parseFloat(row.qte_stock) : 0;
+      const seuilAlerte = row.seuil_alerte ? parseFloat(String(row.seuil_alerte)) : 10;
+      const prixAchat = row.prix_achat_base ? parseFloat(String(row.prix_achat_base)) : 0;
+      const prixVenteDetail = row.prix_vente_detail ? parseFloat(String(row.prix_vente_detail)) : 0;
+      const prixVenteGros = row.prix_vente_gros ? parseFloat(String(row.prix_vente_gros)) : 0;
+      const qteStock = row.qte_stock ? parseFloat(String(row.qte_stock)) : 0;
       const methodeGestion = row.methode_gestion_stock || 'PMP';
 
       // Si seul le prix d'achat est fourni, on utilise une marge par défaut

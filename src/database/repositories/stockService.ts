@@ -48,7 +48,7 @@ async entreeStock(data: EntreeStockInput): Promise<ResultStock> {
     }
 
     // Utiliser la marge_fixe passée ou celle du produit
-    const margeFixe = data.marge_fixe ?? product.commission_pourcentage ?? 5000;
+    const margeFixe = Number(data.marge_fixe ?? product.commission_pourcentage ?? 5000);
     
     // Calculer le nouveau prix de vente
     const nouveauPrixVente = data.prix_achat + margeFixe;

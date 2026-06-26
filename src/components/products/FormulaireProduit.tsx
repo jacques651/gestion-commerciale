@@ -27,7 +27,6 @@ import {
   IconChartBar
 } from '@tabler/icons-react';
 import { useProducts } from '../../hooks/useProducts';
-import { CreateProductInput } from '../../database/repositories/productRepository';
 
 interface FormulaireProduitProps {
   opened: boolean;
@@ -94,7 +93,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [uniteModalOpen, setUniteModalOpen] = useState(false);
   
-  const [formData, setFormData] = useState<CreateProductInput>({
+  const [formData, setFormData] = useState<any>({
     code_produit: '',
     designation: '',
     categorie: '',
@@ -115,10 +114,10 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
         setGeneratingCode(true);
         try {
           const code = await getNextProductCode();
-          setFormData(prev => ({ ...prev, code_produit: code }));
+          setFormData((prev: any) => ({ ...prev, code_produit: code }));
         } catch (error) {
           console.error('Erreur génération code:', error);
-          setFormData(prev => ({ ...prev, code_produit: `PROD-${Date.now().toString().slice(-4)}` }));
+          setFormData((prev: any) => ({ ...prev, code_produit: `PROD-${Date.now().toString().slice(-4)}` }));
         } finally {
           setGeneratingCode(false);
         }
