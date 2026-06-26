@@ -14,11 +14,11 @@ import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 const DebugPanel = lazy(() => import('./components/debug/DebugPanel'));
 
-// ==================== FACTURES DÉTAILS (imports directs car utilisés dans les routes) ====================
+// ==================== FACTURES DÉTAILS ====================
 import DetailFacture from './components/factures/DetailFacture';
 import DetailFactureRevendeur from './components/factures/DetailFactureRevendeur';
-import ListeCommandes from './components/commandes/ListeCommandes';
 import HistoriqueRevendeur from './components/pages/revendeurs/HistoriqueRevendeur';
+import ListeCommandes from './components/commandes/ListeCommandes';
 
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
@@ -34,20 +34,25 @@ const ListeVentes = lazy(() => import('./components/ventes/ListeVentes'));
 const ListeCommandeStandard = lazy(() => import('./components/commandes/ListeCommandeStandard'));
 const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
 const FormulaireCommande = lazy(() => import('./components/commandes/FormulaireCommande'));
+const FicheCommande = lazy(() => import('./components/commandes/FicheCommande'));
 
 // ==================== REVENDEURS ====================
 const ListeFacturesRevendeur = lazy(() => import('./components/factures/ListeFacturesRevendeur'));
+
+// ==================== DECOMPTES ====================
+const ListeDecomptes = lazy(() => import('./components/decomptes/ListeDecomptes'));
 const DetailDecompte = lazy(() => import('./components/decomptes/DetailDecompte'));
 const PrintRecuDecompte = lazy(() => import('./components/decomptes/PrintRecuDecompte'));
+const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompte'));
+
+// ==================== REVENDEURS (suite) ====================
 const ListeStockRevendeur = lazy(() => import('./components/pages/revendeurs/ListeStockRevendeur'));
 const DashboardRevendeurs = lazy(() => import('./components/pages/revendeurs/DashboardRevendeurs'));
-const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompte'));
 
 // ==================== PRODUITS & STOCK ====================
 const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
 
 // ==================== FINANCES ====================
-const ListeDecomptes = lazy(() => import('./components/decomptes/ListeDecomptes'));
 const ListeReglements = lazy(() => import('./components/reglements/ListeReglements'));
 
 // ==================== CAISSE ====================
@@ -211,11 +216,11 @@ function RouteGuard({
   return <>{children}</>;
 }
 
-// Wrapper pour NouveauDecompte avec navigation et gestion de l'ID
+// ✅ Wrapper pour NouveauDecompte avec navigation et gestion de l'ID
 function NouveauDecompteWrapper() {
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   // Extraire l'ID de l'URL pour la modification
   const match = location.pathname.match(/\/decomptes\/(\d+)\/modifier/);
   const decompteId = match ? parseInt(match[1]) : undefined;
@@ -227,6 +232,44 @@ function NouveauDecompteWrapper() {
       onCancel={() => navigate('/decomptes')}
     />
   );
+}
+
+// ✅ Wrapper pour NouvelleCommande
+function NouvelleCommandeWrapper() {
+  const navigate = useNavigate();
+  const [opened, setOpened] = useState(true);
+
+  const handleClose = () => {
+    setOpened(false);
+    navigate('/commandes');
+  };
+
+  return (
+    <FormulaireCommande
+      opened={opened}
+      onClose={handleClose}
+    />
+  );
+}
+
+// ✅ Wrapper pour FicheCommande
+function FicheCommandeWrapper() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Extraire l'ID de l'URL
+  const match = location.pathname.match(/\/commandes\/(\d+)/);
+  const commandeId = match ? parseInt(match[1]) : undefined;
+
+  const handleBack = () => {
+    navigate('/commandes');
+  };
+
+  if (!commandeId) {
+    return <Text>Commande non trouvée</Text>;
+  }
+
+  return <FicheCommande commandeId={commandeId} onBack={handleBack} />;
 }
 
 // ==================== APP AUTHENTIFIÉE ====================
@@ -272,7 +315,13 @@ function AuthenticatedApp() {
     <AppShell
       padding="md"
       navbar={{ width: 260, breakpoint: 'sm' }}
-      styles={{ main: { height: '100%', overflow: 'auto', backgroundColor: '#f5f7fa' } }}
+      styles={{
+        main: {
+          minHeight: '100vh',
+          overflow: 'visible',
+          backgroundColor: '#f5f7fa'
+        }
+      }}
     >
       <AppShell.Navbar>
         <Navbar userRole={user?.role} userName={user?.nom} onLogout={handleLogout} />
@@ -312,7 +361,19 @@ function AuthenticatedApp() {
             } />
             <Route path="/commandes/nouveau" element={
               <RouteGuard requiredPermissions={['commandes.create']}>
-                <FormulaireCommande opened={true} onClose={() => { }} />
+                <NouvelleCommandeWrapper />
+              </RouteGuard>
+            } />
+            {/* ✅ Route pour voir les détails d'une commande */}
+            <Route path="/commandes/:id" element={
+              <RouteGuard requiredPermissions={['commandes.view']}>
+                <FicheCommandeWrapper />
+              </RouteGuard>
+            } />
+            {/* ✅ Route pour l'impression d'une commande */}
+            <Route path="/commandes/:id/print" element={
+              <RouteGuard requiredPermissions={['commandes.view']}>
+                <FicheCommandeWrapper />
               </RouteGuard>
             } />
 
@@ -397,7 +458,6 @@ function AuthenticatedApp() {
                 <PrintRecuDecompte />
               </RouteGuard>
             } />
-            {/* ✅ ROUTE POUR LA MODIFICATION */}
             <Route path="/decomptes/:id/modifier" element={
               <RouteGuard requiredPermissions={['revendeurs.decomptes']}>
                 <NouveauDecompteWrapper />
@@ -602,7 +662,7 @@ function App() {
         <BrowserRouter>
           <AuthProvider>
             <Notifications position="top-right" />
-            <DatabaseStatus />
+            {/* <DatabaseStatus /> */}
             <AuthenticatedApp />
           </AuthProvider>
         </BrowserRouter>

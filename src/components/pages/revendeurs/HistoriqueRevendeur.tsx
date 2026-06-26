@@ -134,10 +134,10 @@ export const HistoriqueRevendeur: React.FC = () => {
         ORDER BY d.date_decompte DESC
       `);
 
-      // Récupérer les mouvements de stock revendeur
+      // ✅ Récupérer les mouvements de stock revendeur - CORRIGÉ
       const mouvements = await db.select<any[]>(`
         SELECT 
-          mr.idMouvement as id,
+          mr.idMouvementRevendeur as id,
           mr.date_mouvement as date,
           'STOCK' as type,
           mr.type_mouvement as reference,

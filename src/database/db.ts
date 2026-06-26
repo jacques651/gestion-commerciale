@@ -266,9 +266,13 @@ CREATE TABLE IF NOT EXISTS decomptes (
     periode_debut TEXT,
     periode_fin TEXT,
     notes TEXT,
+    id_facture_approvisionnement INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (idClient) REFERENCES clients(idClient)
+
+    FOREIGN KEY (idClient) REFERENCES clients(idClient),
+    FOREIGN KEY (id_facture_approvisionnement)
+        REFERENCES factures_approvisionnement(idFactureAppro)
 );
 
 CREATE TABLE IF NOT EXISTS decompte_details (
@@ -447,6 +451,36 @@ CREATE TABLE IF NOT EXISTS facture_details (
     qte REAL NOT NULL,
     prix_unitaire REAL NOT NULL,
     FOREIGN KEY (idFacture) REFERENCES factures(idFacture) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+);
+
+-- Table des factures d'approvisionnement
+CREATE TABLE IF NOT EXISTS factures_approvisionnement (
+    idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_facture TEXT UNIQUE NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    idDecompte INTEGER NOT NULL,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    reference_decompte TEXT,
+    notes TEXT,
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+);
+
+-- Table des détails des factures d'approvisionnement
+CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
+    idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFactureAppro INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_achat REAL NOT NULL,
+    prix_vente REAL NOT NULL,
+    total_ht REAL NOT NULL,
+    total_ttc REAL NOT NULL,
+    FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
     FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
@@ -762,98 +796,108 @@ INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
 `;
 
 export const getDb = async (): Promise<Database> => {
-  if (dbInstance) return dbInstance;
+    if (dbInstance) return dbInstance;
 
-  try {
-    dbInstance = await Database.load('sqlite:gestion-commerciale.db');
+    try {
+        dbInstance = await Database.load('sqlite:gestion-commerciale.db');
 
-    // 🔥 IMPORTANT
-    await dbInstance.execute('PRAGMA foreign_keys = ON;');
-    await dbInstance.execute('PRAGMA journal_mode = WAL;');
-    await dbInstance.execute('PRAGMA synchronous = NORMAL;');
-    await dbInstance.execute('PRAGMA busy_timeout = 30000;');
+        // 🔥 IMPORTANT
+        await dbInstance.execute('PRAGMA foreign_keys = ON;');
+        await dbInstance.execute('PRAGMA journal_mode = WAL;');
+        await dbInstance.execute('PRAGMA synchronous = NORMAL;');
+        await dbInstance.execute('PRAGMA busy_timeout = 30000;');
 
-    console.log('✅ Base de données connectée');
-    return dbInstance;
+        console.log('✅ Base de données connectée');
+        return dbInstance;
 
-  } catch (error) {
-    console.error('❌ Erreur de connexion:', error);
-    throw error;
-  }
+    } catch (error) {
+        console.error('❌ Erreur de connexion:', error);
+        throw error;
+    }
 };
 // src/database/db.ts - Ajouter cette fonction
 export async function debugLocks() {
-  try {
-    const db = await getDb();
-    const result = await db.select(`
+    try {
+        const db = await getDb();
+        const result = await db.select(`
       SELECT 
         pid,
         status,
         sql
       FROM pragma_vfs_list()
     `);
-    console.log('🔍 Verrous actifs:', result);
-  } catch (error) {
-    console.error('Erreur debug locks:', error);
-  }
+        console.log('🔍 Verrous actifs:', result);
+    } catch (error) {
+        console.error('Erreur debug locks:', error);
+    }
 }
 
 export const initDatabase = async (): Promise<void> => {
-  try {
-    const db = await getDb();
-    
-    console.log('🚀 Initialisation de la base de données...');
-    
-    // Exécuter le schéma complet
-    await db.execute(SCHEMA_SQL);
-    console.log('✅ Schéma SQL exécuté avec succès');
-    
-    // Vérification des tables principales
-    const tables = await db.select<any[]>(`
+    try {
+        const db = await getDb();
+
+        console.log('🚀 Initialisation de la base de données...');
+
+        // Exécuter le schéma complet
+        await db.execute(SCHEMA_SQL);
+        try {
+            await db.execute(`
+    ALTER TABLE decomptes
+    ADD COLUMN id_facture_approvisionnement INTEGER
+  `);
+
+            console.log('✅ Colonne id_facture_approvisionnement ajoutée');
+        } catch (error) {
+            console.log('ℹ️ Colonne déjà existante');
+        }
+        console.log('✅ Schéma SQL exécuté avec succès');
+
+        // Vérification des tables principales
+        const tables = await db.select<any[]>(`
       SELECT name FROM sqlite_master 
       WHERE type='table' 
       ORDER BY name
     `);
-    
-    console.log('📊 Tables créées:', tables.map(t => t.name).join(', '));
-    
-    // Vérifier que la table products a bien toutes les colonnes
-    const columns = await db.select<any[]>(`
+
+        console.log('📊 Tables créées:', tables.map(t => t.name).join(', '));
+
+        // Vérifier que la table products a bien toutes les colonnes
+        const columns = await db.select<any[]>(`
       PRAGMA table_info(products)
     `);
-    
-    console.log('📋 Colonnes de products:', columns.map(c => c.name).join(', '));
-    
-    // Vérifier les tables de crédits
-    const creditTables = tables.filter(t => t.name === 'credits' || t.name === 'remboursements');
-    if (creditTables.length > 0) {
-      console.log('✅ Tables de crédits créées:', creditTables.map(t => t.name).join(', '));
-    } else {
-      console.warn('⚠️ Les tables de crédits n\'ont pas été créées');
+
+        console.log('📋 Colonnes de products:', columns.map(c => c.name).join(', '));
+
+        // Vérifier les tables de crédits
+        const creditTables = tables.filter(t => t.name === 'credits' || t.name === 'remboursements');
+        if (creditTables.length > 0) {
+            console.log('✅ Tables de crédits créées:', creditTables.map(t => t.name).join(', '));
+        } else {
+            console.warn('⚠️ Les tables de crédits n\'ont pas été créées');
+        }
+
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';
+        console.error('❌ Erreur initialisation:', errorMsg);
+        throw error;
     }
-    
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';
-    console.error('❌ Erreur initialisation:', errorMsg);
-    throw error;
-  }
 };
 
 export const closeDatabase = async (): Promise<void> => {
-  if (dbInstance) {
-    await dbInstance.close();
-    dbInstance = null;
-    console.log('🔒 Base déconnectée');
-  }
+    if (dbInstance) {
+        await dbInstance.close();
+        dbInstance = null;
+        console.log('🔒 Base déconnectée');
+    }
 };
 
 export const isDatabaseConnected = (): boolean => {
-  return dbInstance !== null;
+    return dbInstance !== null;
 };
 
 export default {
-  getDb,
-  initDatabase,
-  closeDatabase,
-  isDatabaseConnected
+    getDb,
+    initDatabase,
+    closeDatabase,
+    isDatabaseConnected
 };

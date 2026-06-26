@@ -4,15 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
   Pagination, TextInput, Paper, Box, SimpleGrid,
-  Loader, ThemeIcon, Flex, Modal, Center} from '@mantine/core';
+  Loader, ThemeIcon, Flex, Modal, Center
+} from '@mantine/core';
 import {
   IconPrinter, IconDownload, IconSearch, IconRefresh, IconFileInvoice,
   IconTruck, IconCurrencyFrank, IconReceipt, IconCash, IconAlertCircle,
-  IconList, IconListDetails} from '@tabler/icons-react';
+  IconList, IconListDetails
+} from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
 import NouveauDecompte from '../decomptes/NouveauDecompte';
-import { generateFactureRevendeurCode } from '../../services/codeGeneratorService';
 
 interface FactureRevendeur {
   idFactureRevendeur: number;
@@ -27,18 +28,6 @@ interface FactureRevendeur {
   client_societe?: string;
 }
 
-interface DetailFacture {
-  idDetailFactureRevendeur: number;
-  idProduit: number;
-  qte_commande: number;
-  prix_achat_base: number;
-  prix_unitaire_vente: number;
-  designation: string;
-  code_produit: string;
-  categorie: string;
-  unite_base: string;
-}
-
 export const ListeFacturesRevendeur: React.FC = () => {
   const navigate = useNavigate();
   const [factures, setFactures] = useState<FactureRevendeur[]>([]);
@@ -48,8 +37,6 @@ export const ListeFacturesRevendeur: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [decompteModalOpened, setDecompteModalOpened] = useState(false);
   const [selectedFacture, setSelectedFacture] = useState<FactureRevendeur | null>(null);
-  const [selectedDetails, setSelectedDetails] = useState<DetailFacture[]>([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
   
   const itemsPerPage = 10;
 
@@ -62,7 +49,6 @@ export const ListeFacturesRevendeur: React.FC = () => {
     try {
       const db = await getDb();
       
-      // Vérifier si la table existe
       const tables = await db.select<{ name: string }[]>(`
         SELECT name FROM sqlite_master WHERE type='table' AND name='factures_revendeur'
       `);
@@ -74,7 +60,6 @@ export const ListeFacturesRevendeur: React.FC = () => {
         return;
       }
       
-      // ✅ Récupérer les factures avec les montants calculés
       const result = await db.select<any[]>(`
         SELECT 
           fr.idFactureRevendeur,
@@ -97,11 +82,9 @@ export const ListeFacturesRevendeur: React.FC = () => {
       
       console.log(`📊 ${result.length} factures chargées`);
       
-      // ✅ Si des montants sont à 0, les recalculer
       let facturesCorrigees = 0;
       for (const f of result) {
         if ((f.montant_ht === 0 || f.montant_ttc === 0) && f.nb_details > 0) {
-          // Recalculer les montants
           const details = await db.select<any[]>(`
             SELECT qte_commande, prix_achat_base, prix_unitaire_vente
             FROM factures_revendeur_details
@@ -151,62 +134,9 @@ export const ListeFacturesRevendeur: React.FC = () => {
     }
   }, []);
 
-  // ✅ Générer un code facture
-  const genererCodeFacture = async (idFactureRevendeur: number): Promise<string> => {
-    try {
-      const code = await generateFactureRevendeurCode();
-      const db = await getDb();
-      await db.execute(
-        `UPDATE factures_revendeur SET code_facture = ? WHERE idFactureRevendeur = ?`,
-        [code, idFactureRevendeur]
-      );
-      console.log(`✅ Code facture généré: ${code}`);
-      return code;
-    } catch (error) {
-      console.error('❌ Erreur génération code facture:', error);
-      throw error;
-    }
-  };
-
   useEffect(() => {
     chargerFactures();
   }, [chargerFactures]);
-
-  // ✅ Charger les détails d'une facture
-  const chargerDetailsFacture = async (idFactureRevendeur: number): Promise<DetailFacture[]> => {
-    try {
-      const db = await getDb();
-      
-      const tables = await db.select<{ name: string }[]>(`
-        SELECT name FROM sqlite_master WHERE type='table' AND name='factures_revendeur_details'
-      `);
-      
-      if (tables.length === 0) {
-        return [];
-      }
-      
-      const details = await db.select<DetailFacture[]>(`
-        SELECT 
-          frd.idDetailFactureRevendeur,
-          frd.idProduit,
-          frd.qte_commande,
-          frd.prix_achat_base,
-          frd.prix_unitaire_vente,
-          p.designation,
-          p.code_produit,
-          p.categorie,
-          p.unite_base
-        FROM factures_revendeur_details frd
-        INNER JOIN products p ON p.idProduit = frd.idProduit
-        WHERE frd.idFactureRevendeur = ?
-      `, [idFactureRevendeur]);
-      
-      return details;
-    } catch (error) {
-      console.error('❌ Erreur chargement détails:', error);
-      return [];
-    }
-  };
 
   const formatMontant = (value: number): string => {
     return (value || 0).toLocaleString('fr-FR');
@@ -236,41 +166,73 @@ export const ListeFacturesRevendeur: React.FC = () => {
     }
   };
 
-  // ✅ Créer le décompte
+  // ✅ Créer le décompte en utilisant stock_revendeur
   const handleCreerDecompte = async (facture: FactureRevendeur) => {
-    setLoadingDetails(true);
     try {
-      let factureAvecDetails = { ...facture };
+      const db = await getDb();
       
-      if (!facture.code_facture || facture.code_facture === 'FR-XXXX') {
-        const newCode = await genererCodeFacture(facture.idFactureRevendeur);
-        factureAvecDetails.code_facture = newCode;
-      }
+      // ✅ Utiliser stock_revendeur comme source de vérité
+      const produitsStock = await db.select<any[]>(`
+        SELECT 
+          sr.idStockRevendeur,
+          sr.idProduit,
+          sr.qte_stock,
+          sr.prix_achat,
+          sr.prix_vente,
+          sr.commission_pourcentage,
+          p.designation,
+          p.code_produit,
+          p.categorie,
+          p.unite_base
+        FROM stock_revendeur sr
+        INNER JOIN products p ON p.idProduit = sr.idProduit
+        WHERE sr.idRevendeur = ?
+          AND sr.qte_stock > 0
+        ORDER BY p.designation
+      `, [facture.idRevendeur]);
       
-      const details = await chargerDetailsFacture(facture.idFactureRevendeur);
-      
-      if (details.length === 0) {
+      if (produitsStock.length === 0) {
         notifications.show({
           title: '⚠️ Attention',
-          message: 'Cette facture n\'a pas de détails. Veuillez la recréer.',
+          message: 'Ce revendeur n\'a plus de produits en stock.',
           color: 'orange'
         });
-        setLoadingDetails(false);
         return;
       }
       
-      setSelectedDetails(details);
-      setSelectedFacture(factureAvecDetails);
-      setDecompteModalOpened(true);
+      const produitsDecompte = produitsStock.map((d: any) => ({
+        idProduit: d.idProduit,
+        idStockRevendeur: d.idStockRevendeur,
+        designation: d.designation || 'Produit',
+        code_produit: d.code_produit || '',
+        categorie: d.categorie || 'Non catégorisé',
+        prix_achat: d.prix_achat || 0,
+        prix_vente: d.prix_vente || 0,
+        commission_pourcentage: d.commission_pourcentage || 60,
+        qte_stock: d.qte_stock || 0,
+        qte_decompte: 1,
+        total: (d.prix_vente || 0) * 1,
+        unite_base: d.unite_base || 'pièce'
+      }));
+
+      console.log(`📦 ${produitsDecompte.length} produits disponibles en stock pour le décompte`);
+      
+      navigate('/decomptes/nouveau', {
+        state: {
+          clientId: facture.idRevendeur,
+          produitsPreSelectionnes: produitsDecompte,
+          clientNom: facture.client_nom || facture.client_societe,
+          factureId: facture.idFactureRevendeur
+        }
+      });
+      
     } catch (error) {
       console.error('❌ Erreur:', error);
       notifications.show({
         title: 'Erreur',
-        message: 'Impossible de charger les détails de la facture',
+        message: 'Impossible de charger les produits en stock',
         color: 'red'
       });
-    } finally {
-      setLoadingDetails(false);
     }
   };
 
@@ -471,7 +433,6 @@ export const ListeFacturesRevendeur: React.FC = () => {
           </Group>
         </Card>
 
-        {/* Barre d'actions supplémentaires */}
         <Card withBorder radius="lg" shadow="sm" p="md">
           <Group justify="center" gap="md">
             <Button 
@@ -595,65 +556,23 @@ export const ListeFacturesRevendeur: React.FC = () => {
 
       <Modal
         opened={decompteModalOpened}
-        onClose={() => {
-          setDecompteModalOpened(false);
-          setSelectedFacture(null);
-          setSelectedDetails([]);
-          chargerFactures();
-        }}
-        size="95%"
-        title={`Nouveau décompte - Facture ${selectedFacture?.code_facture || ''}`}
-        centered
-        fullScreen
+        onClose={() => setDecompteModalOpened(false)}
+        title={`Décompte - ${selectedFacture?.client_nom || ''}`}
+        size="xl"
       >
-        {loadingDetails ? (
-          <Center py={50}>
-            <Loader />
-            <Text ml="md">Chargement des détails de la facture...</Text>
-          </Center>
-        ) : (
-          selectedFacture && (
-            <NouveauDecompte
-              onSuccess={() => {
-                setDecompteModalOpened(false);
-                setSelectedFacture(null);
-                setSelectedDetails([]);
-                chargerFactures();
-                notifications.show({
-                  title: '✅ Succès',
-                  message: `Décompte créé pour la facture ${selectedFacture.code_facture}`,
-                  color: 'green'
-                });
-              }}
-              onCancel={() => {
-                setDecompteModalOpened(false);
-                setSelectedFacture(null);
-                setSelectedDetails([]);
-              }}
-              facturePredefinie={{
-                idFactureRevendeur: selectedFacture.idFactureRevendeur,
-                code_facture: selectedFacture.code_facture,
-                idRevendeur: selectedFacture.idRevendeur,
-                date_facture: selectedFacture.date_facture,
-                montant_ht: selectedFacture.montant_ht,
-                montant_ttc: selectedFacture.montant_ttc,
-                commission: selectedFacture.commission,
-                statut: selectedFacture.statut,
-                client_nom: selectedFacture.client_nom,
-                client_societe: selectedFacture.client_societe,
-                details: selectedDetails.map(d => ({
-                  idProduit: d.idProduit,
-                  designation: d.designation,
-                  code_produit: d.code_produit,
-                  categorie: d.categorie,
-                  unite_base: d.unite_base,
-                  qte_commande: d.qte_commande,
-                  prix_achat_base: d.prix_achat_base,
-                  prix_unitaire_vente: d.prix_unitaire_vente
-                }))
-              }}
-            />
-          )
+        {selectedFacture && (
+          <NouveauDecompte
+            clientId={selectedFacture.idRevendeur}
+            onSuccess={() => {
+              setDecompteModalOpened(false);
+              setSelectedFacture(null);
+              chargerFactures();
+            }}
+            onCancel={() => {
+              setDecompteModalOpened(false);
+              setSelectedFacture(null);
+            }}
+          />
         )}
       </Modal>
     </>

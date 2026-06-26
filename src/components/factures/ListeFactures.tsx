@@ -2,15 +2,16 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Table, Button, Group, Badge, ActionIcon, Stack, Title, Card, Text, Tooltip,
+  Table, Button, Group, Badge, Stack, Title, Card, Text, 
   Pagination, Select, Grid, Box, Loader, Paper, Flex, ThemeIcon, SimpleGrid,
-  TextInput, Modal, Divider, Avatar
+  TextInput, Modal, Divider, ActionIcon, Tooltip
 } from '@mantine/core';
 import {
-  IconEye, IconPrinter, IconDownload, IconSearch, IconRefresh, IconX,
+  IconPrinter, IconSearch, IconRefresh, IconX,
   IconFileInvoice, IconCalendar, IconBuildingStore,
-  IconTruck, IconCurrencyFrank, IconCash, IconReceipt, IconArrowBackUp,
-  IconShoppingBag
+  IconTruck, IconCurrencyFrank, IconReceipt, IconArrowBackUp,
+  IconShoppingBag, IconPlus, IconEye, IconDownload,
+  IconCash
 } from '@tabler/icons-react';
 import { useFactures } from '../../hooks/useFactures';
 import { factureRepository } from '../../database/repositories/factureRepository';
@@ -82,10 +83,8 @@ export const ListeFactures: React.FC = () => {
       const factureId = facture.idFacture || facture.idFactureRevendeur;
       
       if (isRevendeurFacture(facture)) {
-        // ✅ Récupérer la facture revendeur complète
         completeFacture = await factureRevendeurRepository.getById(factureId);
       } else {
-        // ✅ Récupérer la facture standard complète
         completeFacture = await factureRepository.getById(factureId);
       }
       
@@ -304,7 +303,6 @@ export const ListeFactures: React.FC = () => {
       }
       
       if (completeFacture) {
-        // ✅ Créer un PDF simplifié ou un JSON
         const dataStr = JSON.stringify(completeFacture, null, 2);
         const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
         const codeFacture = completeFacture.code_facture || 'facture';
@@ -421,6 +419,14 @@ export const ListeFactures: React.FC = () => {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  // ✅ Fonction pour obtenir la clé unique d'une facture
+  const getUniqueKey = (facture: any): string => {
+    const isRevendeur = isRevendeurFacture(facture);
+    const id = isRevendeur ? facture.idFactureRevendeur : facture.idFacture;
+    const prefix = isRevendeur ? 'revendeur' : 'standard';
+    return `${prefix}-${id}`;
+  };
 
   if (loading && localFactures.length === 0) {
     return (
@@ -630,109 +636,116 @@ export const ListeFactures: React.FC = () => {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedFactures.map((facture: any, index) => {
-                  const typeLabel = getTypeFactureLabel(facture);
-                  const uniqueKey = facture.idFacture || facture.idFactureRevendeur || index;
-                  const clientName = facture.NomComplet || '-';
-                  const codeFacture = facture.code_facture || '-';
-                  const dateFacture = facture.date_facture || facture.date_commande;
-
-                  return (
-                    <Table.Tr key={uniqueKey}>
-                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                        <Text fw={600} size="sm">{(currentPage - 1) * itemsPerPage + index + 1}</Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Group gap="sm" wrap="nowrap">
-                          <Avatar size="sm" radius="xl" color={typeLabel === "Revendeur" ? "green" : "blue"}>
-                            {clientName.charAt(0).toUpperCase()}
-                          </Avatar>
-                          <Text fw={500} size="sm" lineClamp={1}>{clientName}</Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Text size="sm">
-                          {dateFacture ? new Date(dateFacture).toLocaleDateString("fr-FR") : "-"}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Badge 
-                          size="sm" 
-                          color={typeLabel === "Revendeur" ? "green" : "blue"} 
-                          variant="light"
-                          leftSection={typeLabel === "Revendeur" ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+                {paginatedFactures.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={7} align="center">
+                      <Stack align="center" py={50}>
+                        <IconFileInvoice size={50} color="#ccc" />
+                        <Text c="dimmed">Aucune facture trouvée</Text>
+                        <Button 
+                          variant="light" 
+                          color="blue" 
+                          leftSection={<IconPlus size={16} />} 
+                          onClick={() => navigate('/commandes/nouveau')}
                         >
-                          {typeLabel}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                        <Text fw={600} size="sm" c="blue">{formatMontant(facture.montant_ttc)} FCFA</Text>
-                      </Table.Td>
-                      <Table.Td style={{ verticalAlign: 'middle' }}>
-                        <Text fw={500} size="sm">{codeFacture}</Text>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                        <Group gap="4" justify="center" wrap="nowrap">
-                          <Tooltip label="Voir détails">
-                            <ActionIcon 
-                              variant="light" 
-                              color="blue" 
-                              size="sm" 
-                              onClick={() => handleViewFacture(facture)} 
-                              loading={loadingDetails}
-                            >
-                              <IconEye size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Régler">
-                            <ActionIcon 
-                              variant="light" 
-                              color="green" 
-                              size="sm" 
-                              onClick={() => handleRegler(facture)}
-                            >
-                              <IconCash size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Reçu de règlement">
-                            <ActionIcon 
-                              variant="light" 
-                              color="orange" 
-                              size="sm" 
-                              onClick={() => handleGenererRecu(facture)}
-                            >
-                              <IconReceipt size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Imprimer">
-                            <ActionIcon 
-                              variant="light" 
-                              color="teal" 
-                              size="sm" 
-                              onClick={handlePrint}
-                            >
-                              <IconPrinter size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-
-                          <Tooltip label="Télécharger">
-                            <ActionIcon 
-                              variant="light" 
-                              color="grape" 
-                              size="sm" 
-                              onClick={() => handleDownload(facture)}
-                            >
-                              <IconDownload size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
+                          Créer une commande
+                        </Button>
+                      </Stack>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  paginatedFactures.map((facture, index) => {
+                    const num = (currentPage - 1) * itemsPerPage + index + 1;
+                    const isRevendeur = isRevendeurFacture(facture);
+                    const uniqueKey = getUniqueKey(facture);
+                    
+                    return (
+                      <Table.Tr key={uniqueKey}>
+                        <Table.Td ta="center" fw={600}>{num}</Table.Td>
+                        <Table.Td fw={500}>{facture.NomComplet || facture.client_nom || '-'}</Table.Td>
+                        <Table.Td>{facture.date_facture ? new Date(facture.date_facture).toLocaleDateString('fr-FR') : '-'}</Table.Td>
+                        <Table.Td>
+                          <Badge 
+                            size="sm" 
+                            color={isRevendeur ? 'green' : 'blue'} 
+                            variant="light"
+                            leftSection={isRevendeur ? <IconTruck size={12} /> : <IconBuildingStore size={12} />}
+                          >
+                            {isRevendeur ? 'Revendeur' : 'Standard'}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text fw={700} c="green">
+                            {formatMontant(facture.montant_ttc || 0)} FCFA
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text fw={600} size="sm" c={facture.code_facture ? 'blue' : 'dimmed'}>
+                            {facture.code_facture || 'FAC-XXXX'}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td ta="center">
+                          <Group gap={4} justify="center" wrap="nowrap">
+                            <Tooltip label="Voir la facture">
+                              <ActionIcon
+                                variant="light"
+                                color="blue"
+                                size="md"
+                                onClick={() => handleViewFacture(facture)}
+                              >
+                                <IconEye size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Régler">
+                              <ActionIcon
+                                variant="light"
+                                color="green"
+                                size="md"
+                                onClick={() => handleRegler(facture)}
+                              >
+                                <IconCash size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Générer reçu">
+                              <ActionIcon
+                                variant="light"
+                                color="grape"
+                                size="md"
+                                onClick={() => handleGenererRecu(facture)}
+                              >
+                                <IconReceipt size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Imprimer">
+                              <ActionIcon
+                                variant="light"
+                                color="teal"
+                                size="md"
+                                onClick={() => {
+                                  setSelectedFacture(facture);
+                                  setFactureModalOpened(true);
+                                  setTimeout(() => handlePrint(), 500);
+                                }}
+                              >
+                                <IconPrinter size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Télécharger">
+                              <ActionIcon
+                                variant="light"
+                                color="gray"
+                                size="md"
+                                onClick={() => handleDownload(facture)}
+                              >
+                                <IconDownload size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })
+                )}
               </Table.Tbody>
             </Table>
           </Box>

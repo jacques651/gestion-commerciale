@@ -6,12 +6,12 @@ import { getDb } from './db';
  */
 export const runSchemaMigration = async (): Promise<void> => {
   console.log('🚀 [runSchemaMigration] Début de l\'exécution...');
-  
+
   try {
     console.log('🔄 [runSchemaMigration] Connexion à la base de données...');
     const db = await getDb();
     console.log('✅ [runSchemaMigration] Base de données connectée');
-    
+
     // Vérifier si la table config_generale existe (indique que le schéma est déjà installé)
     console.log('🔍 [runSchemaMigration] Vérification des tables existantes...');
     const tables = await db.select<{ name: string }[]>(`
@@ -20,7 +20,7 @@ export const runSchemaMigration = async (): Promise<void> => {
       ORDER BY name
     `);
     console.log('📊 [runSchemaMigration] Tables existantes:', tables.map(t => t.name));
-    
+
     // Vérifier spécifiquement les tables du journal de caisse
     const hasJournalCaisse = tables.some(t => t.name === 'journal_caisse');
     const hasCharges = tables.some(t => t.name === 'charges_fonctionnement');
@@ -28,13 +28,13 @@ export const runSchemaMigration = async (): Promise<void> => {
     const hasCategoriesCharges = tables.some(t => t.name === 'categories_charges');
     const hasCredits = tables.some(t => t.name === 'credits');
     const hasRemboursements = tables.some(t => t.name === 'remboursements');
-    
+
     console.log(`📋 [runSchemaMigration] Tables de caisse: Journal=${hasJournalCaisse}, Charges=${hasCharges}, Recap=${hasRecap}, Categories=${hasCategoriesCharges}`);
     console.log(`📋 [runSchemaMigration] Tables de crédits: Credits=${hasCredits}, Remboursements=${hasRemboursements}`);
-    
+
     // Vérifier si le schéma est déjà installé
     const hasConfigGenerale = tables.some(t => t.name === 'config_generale');
-    
+
     if (!hasConfigGenerale || !hasJournalCaisse) {
       console.log('⚠️ [runSchemaMigration] Schéma incomplet, exécution du schéma complet...');
       await db.execute(SCHEMA_SQL);
@@ -43,7 +43,7 @@ export const runSchemaMigration = async (): Promise<void> => {
       console.log('ℹ️ [runSchemaMigration] Tables déjà existantes, exécution des migrations...');
       await runMigrations(db);
     }
-    
+
     // Vérifier à nouveau les tables
     const tablesAfter = await db.select<{ name: string }[]>(`
       SELECT name FROM sqlite_master 
@@ -51,7 +51,7 @@ export const runSchemaMigration = async (): Promise<void> => {
       ORDER BY name
     `);
     console.log('📊 [runSchemaMigration] Tables après migration:', tablesAfter.map(t => t.name));
-    
+
     // Vérifier les tables de caisse
     const hasJournalCaisseAfter = tablesAfter.some(t => t.name === 'journal_caisse');
     const hasChargesAfter = tablesAfter.some(t => t.name === 'charges_fonctionnement');
@@ -59,43 +59,43 @@ export const runSchemaMigration = async (): Promise<void> => {
     const hasCategoriesChargesAfter = tablesAfter.some(t => t.name === 'categories_charges');
     const hasCreditsAfter = tablesAfter.some(t => t.name === 'credits');
     const hasRemboursementsAfter = tablesAfter.some(t => t.name === 'remboursements');
-    
+
     console.log(`✅ [runSchemaMigration] Tables de caisse après migration: Journal=${hasJournalCaisseAfter}, Charges=${hasChargesAfter}, Recap=${hasRecapAfter}, Categories=${hasCategoriesChargesAfter}`);
     console.log(`✅ [runSchemaMigration] Tables de crédits après migration: Credits=${hasCreditsAfter}, Remboursements=${hasRemboursementsAfter}`);
-    
+
     // Créer les tables manuellement si elles n'existent pas
     if (!hasJournalCaisseAfter) {
       console.error('❌ [runSchemaMigration] La table journal_caisse n\'a pas été créée !');
       await createCaisseTables(db);
     }
-    
+
     if (!hasChargesAfter) {
       console.error('❌ [runSchemaMigration] La table charges_fonctionnement n\'a pas été créée !');
       await createCaisseTables(db);
     }
-    
+
     if (!hasRecapAfter) {
       console.error('❌ [runSchemaMigration] La table recapitulatif_journalier n\'a pas été créée !');
       await createCaisseTables(db);
     }
-    
+
     if (!hasCategoriesChargesAfter) {
       console.error('❌ [runSchemaMigration] La table categories_charges n\'a pas été créée !');
       await createCaisseTables(db);
     }
-    
+
     if (!hasCreditsAfter) {
       console.error('❌ [runSchemaMigration] La table credits n\'a pas été créée !');
       await createCreditsTables(db);
     }
-    
+
     if (!hasRemboursementsAfter) {
       console.error('❌ [runSchemaMigration] La table remboursements n\'a pas été créée !');
       await createCreditsTables(db);
     }
-    
+
     console.log('✅ [runSchemaMigration] Migration terminée avec succès');
-    
+
   } catch (error) {
     console.error('❌ [runSchemaMigration] Erreur:', error);
     throw error;
@@ -107,7 +107,7 @@ export const runSchemaMigration = async (): Promise<void> => {
  */
 const createCaisseTables = async (db: any): Promise<void> => {
   console.log('🔄 Création des tables de caisse...');
-  
+
   try {
     // Journal de caisse
     await db.execute(`
@@ -129,7 +129,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table journal_caisse créée');
-    
+
     // Charges de fonctionnement
     await db.execute(`
       CREATE TABLE IF NOT EXISTS charges_fonctionnement (
@@ -150,7 +150,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table charges_fonctionnement créée');
-    
+
     // Catégories de charges
     await db.execute(`
       CREATE TABLE IF NOT EXISTS categories_charges (
@@ -162,7 +162,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table categories_charges créée');
-    
+
     // Récapitulatif journalier
     await db.execute(`
       CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
@@ -180,7 +180,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table recapitulatif_journalier créée');
-    
+
     // Index
     await db.execute(`
       CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
@@ -190,7 +190,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
     `);
     console.log('✅ Index créés');
-    
+
     // Données initiales
     await db.execute(`
       INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
@@ -203,12 +203,12 @@ const createCaisseTables = async (db: any): Promise<void> => {
       ('AUTRE', 'Autres charges')
     `);
     console.log('✅ Données initiales des catégories de charges insérées');
-    
+
     // Journal initial avec solde à 0
     const journalCount = await db.select(`
       SELECT COUNT(*) as count FROM journal_caisse
     `) as { count: number }[];
-    
+
     if (journalCount[0]?.count === 0) {
       await db.execute(`
         INSERT INTO journal_caisse (code_journal, date_journal, type_mouvement, categorie, designation, montant, solde_apres)
@@ -216,9 +216,9 @@ const createCaisseTables = async (db: any): Promise<void> => {
       `);
       console.log('✅ Solde initial à 0 créé');
     }
-    
+
     console.log('✅ Toutes les tables de caisse sont créées');
-    
+
   } catch (error) {
     console.error('❌ Erreur création tables de caisse:', error);
     throw error;
@@ -230,7 +230,7 @@ const createCaisseTables = async (db: any): Promise<void> => {
  */
 const createCreditsTables = async (db: any): Promise<void> => {
   console.log('🔄 Création des tables de crédits...');
-  
+
   try {
     // Table des crédits
     await db.execute(`
@@ -253,7 +253,7 @@ const createCreditsTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table credits créée');
-    
+
     // Table des remboursements
     await db.execute(`
       CREATE TABLE IF NOT EXISTS remboursements (
@@ -272,7 +272,7 @@ const createCreditsTables = async (db: any): Promise<void> => {
       )
     `);
     console.log('✅ Table remboursements créée');
-    
+
     // Index pour améliorer les performances
     await db.execute(`
       CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
@@ -282,9 +282,9 @@ const createCreditsTables = async (db: any): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
     `);
     console.log('✅ Index des crédits créés');
-    
+
     console.log('✅ Toutes les tables de crédits sont créées');
-    
+
   } catch (error) {
     console.error('❌ Erreur création tables de crédits:', error);
     throw error;
@@ -297,21 +297,23 @@ const createCreditsTables = async (db: any): Promise<void> => {
 export const runMigrations = async (db: any): Promise<void> => {
   console.log('🔄 [runMigrations] Vérification des migrations...');
   let migrationCount = 0;
-  
+
   try {
     // 1. Vérifier les colonnes de decomptes
     console.log('📋 [runMigrations] Vérification de la table decomptes...');
     try {
       const tableInfo = await db.select(`PRAGMA table_info(decomptes)`);
+      console.log('=== STRUCTURE DE DECOMPTES ===');
+      tableInfo.forEach((col: any) => console.log(col.name));
       const columns = tableInfo.map((c: any) => c.name);
       console.log(`   Colonnes existantes: ${columns.join(', ')}`);
-      
+
       if (!columns.includes('taux_commission')) {
         console.log('🔄 Ajout de la colonne taux_commission à decomptes...');
         await db.execute(`ALTER TABLE decomptes ADD COLUMN taux_commission REAL DEFAULT 60`);
         migrationCount++;
       }
-      
+
       if (!columns.includes('idFactureRevendeur')) {
         console.log('🔄 Ajout de la colonne idFactureRevendeur à decomptes...');
         await db.execute(`ALTER TABLE decomptes ADD COLUMN idFactureRevendeur INTEGER`);
@@ -320,20 +322,20 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur decomptes:', error);
     }
-    
+
     // 2. Vérifier les colonnes de decompte_details
     console.log('📋 [runMigrations] Vérification de la table decompte_details...');
     try {
       const detailsInfo = await db.select(`PRAGMA table_info(decompte_details)`);
       const detailsColumns = detailsInfo.map((c: any) => c.name);
       console.log(`   Colonnes existantes: ${detailsColumns.join(', ')}`);
-      
+
       if (!detailsColumns.includes('benefice')) {
         console.log('🔄 Ajout de la colonne benefice à decompte_details...');
         await db.execute(`ALTER TABLE decompte_details ADD COLUMN benefice REAL DEFAULT 0`);
         migrationCount++;
       }
-      
+
       if (!detailsColumns.includes('commission')) {
         console.log('🔄 Ajout de la colonne commission à decompte_details...');
         await db.execute(`ALTER TABLE decompte_details ADD COLUMN commission REAL DEFAULT 0`);
@@ -342,14 +344,14 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur decompte_details:', error);
     }
-    
+
     // 3. Vérifier factures_revendeur
     console.log('📋 [runMigrations] Vérification de la table factures_revendeur...');
     try {
       const facturesRevInfo = await db.select(`PRAGMA table_info(factures_revendeur)`);
       const facturesRevColumns = facturesRevInfo.map((c: any) => c.name);
       console.log(`   Colonnes existantes: ${facturesRevColumns.join(', ')}`);
-      
+
       if (!facturesRevColumns.includes('taux_commission')) {
         console.log('🔄 Ajout de la colonne taux_commission à factures_revendeur...');
         await db.execute(`ALTER TABLE factures_revendeur ADD COLUMN taux_commission REAL DEFAULT 60`);
@@ -358,14 +360,14 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur factures_revendeur:', error);
     }
-    
+
     // 4. Vérifier reglements
     console.log('📋 [runMigrations] Vérification de la table reglements...');
     try {
       const reglementsInfo = await db.select(`PRAGMA table_info(reglements)`);
       const reglementsColumns = reglementsInfo.map((c: any) => c.name);
       console.log(`   Colonnes existantes: ${reglementsColumns.join(', ')}`);
-      
+
       if (!reglementsColumns.includes('code_reglement')) {
         console.log('🔄 Ajout de la colonne code_reglement à reglements...');
         await db.execute(`ALTER TABLE reglements ADD COLUMN code_reglement TEXT`);
@@ -374,12 +376,12 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur reglements:', error);
     }
-    
+
     // 5. Vérifier factures_revendeur_details
     console.log('📋 [runMigrations] Vérification de la table factures_revendeur_details...');
     try {
       const detailsFRInfo = await db.select(`PRAGMA table_info(factures_revendeur_details)`);
-      
+
       if (detailsFRInfo.length === 0) {
         console.log('🔄 Création de la table factures_revendeur_details...');
         await db.execute(`
@@ -399,12 +401,12 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur factures_revendeur_details:', error);
     }
-    
+
     // 6. Vérifier reglements_revendeur
     console.log('📋 [runMigrations] Vérification de la table reglements_revendeur...');
     try {
       const reglementsRevInfo = await db.select(`PRAGMA table_info(reglements_revendeur)`);
-      
+
       if (reglementsRevInfo.length === 0) {
         console.log('🔄 Création de la table reglements_revendeur...');
         await db.execute(`
@@ -426,10 +428,10 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur reglements_revendeur:', error);
     }
-    
+
     // 7. Vérifier les tables de caisse
     console.log('📋 [runMigrations] Vérification des tables de caisse...');
-    
+
     // Vérifier journal_caisse
     try {
       const journalInfo = await db.select(`PRAGMA table_info(journal_caisse)`);
@@ -458,7 +460,7 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur journal_caisse:', error);
     }
-    
+
     // Vérifier charges_fonctionnement
     try {
       const chargesInfo = await db.select(`PRAGMA table_info(charges_fonctionnement)`);
@@ -487,7 +489,7 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur charges_fonctionnement:', error);
     }
-    
+
     // Vérifier categories_charges
     try {
       const categoriesInfo = await db.select(`PRAGMA table_info(categories_charges)`);
@@ -503,7 +505,7 @@ export const runMigrations = async (db: any): Promise<void> => {
           )
         `);
         migrationCount++;
-        
+
         // Insérer les catégories par défaut
         await db.execute(`
           INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
@@ -519,7 +521,7 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur categories_charges:', error);
     }
-    
+
     // Vérifier recapitulatif_journalier
     try {
       const recapInfo = await db.select(`PRAGMA table_info(recapitulatif_journalier)`);
@@ -545,10 +547,10 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur recapitulatif_journalier:', error);
     }
-    
+
     // 8. Vérifier les tables de crédits
     console.log('📋 [runMigrations] Vérification des tables de crédits...');
-    
+
     // Vérifier credits
     try {
       const creditsInfo = await db.select(`PRAGMA table_info(credits)`);
@@ -574,7 +576,7 @@ export const runMigrations = async (db: any): Promise<void> => {
           )
         `);
         migrationCount++;
-        
+
         // Créer les index pour credits
         await db.execute(`
           CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
@@ -585,7 +587,7 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur credits:', error);
     }
-    
+
     // Vérifier remboursements
     try {
       const remboursementsInfo = await db.select(`PRAGMA table_info(remboursements)`);
@@ -608,7 +610,7 @@ export const runMigrations = async (db: any): Promise<void> => {
           )
         `);
         migrationCount++;
-        
+
         // Créer les index pour remboursements
         await db.execute(`
           CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredit);
@@ -618,9 +620,9 @@ export const runMigrations = async (db: any): Promise<void> => {
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur remboursements:', error);
     }
-    
+
     console.log(`✅ [runMigrations] ${migrationCount} migration(s) exécutée(s)`);
-    
+
   } catch (error) {
     console.error('❌ [runMigrations] Erreur lors des migrations:', error);
     throw error;

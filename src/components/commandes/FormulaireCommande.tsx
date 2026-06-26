@@ -132,10 +132,19 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       if (client) {
         const newType = client.TypeClient === 'revendeur' ? 'REVENDEUR' : 'STANDARD';
         setTypeCommande(newType);
+        
+        // ✅ Si c'est un revendeur, mettre la commission par défaut à 60%
+        if (newType === 'REVENDEUR') {
+          setCommissionPourcentage(60);
+        } else {
+          setCommissionPourcentage(0);
+        }
+        
         debug.logInfo('Client sélectionné', {
           clientId: selectedClientId,
           clientName: client.NomComplet,
-          type: newType
+          type: newType,
+          commission: newType === 'REVENDEUR' ? 60 : 0
         });
       }
     } else {
@@ -388,406 +397,391 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     return totalQte > 0 ? total / totalQte : 0;
   };
 
+  const handleSubmit = async () => {
+    if (!selectedClientId) {
+      notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
+      return;
+    }
 
-// src/components/commandes/FormulaireCommande.tsx
-// Remplacer la fonction handleSubmit par celle-ci :
+    if (cart.length === 0) {
+      notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
+      return;
+    }
 
-const handleSubmit = async () => {
-  if (!selectedClientId) {
-    notifications.show({ title: 'Erreur', message: 'Sélectionnez un client', color: 'red' });
-    return;
-  }
+    setSubmitting(true);
+    let db: Db | null = null;
+    let finalCode = '';
+    let idCommande = 0;
+    let maxRetries = 10;
+    let retryDelay = 200;
 
-  if (cart.length === 0) {
-    notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
-    return;
-  }
-
-  setSubmitting(true);
-  let db: Db | null = null;
-  let finalCode = '';
-  let idCommande = 0;
-  let maxRetries = 10;
-  let retryDelay = 200;
-
-  // Fonction pour exécuter avec retry et réinitialisation de la connexion
-  const executeWithRetry = async <T,>(
-    operation: () => Promise<T>,
-    retries = maxRetries
-  ): Promise<T> => {
-    try {
-      // S'assurer que la connexion est valide
-      if (!db) {
-        db = (await getDb()) as Db;
-        // Forcer la réinitialisation de la connexion
-        try {
-          await db.execute('PRAGMA busy_timeout = 30000');
-          await db.execute('PRAGMA journal_mode = WAL');
-          await db.execute('PRAGMA synchronous = NORMAL');
-        } catch (e) {
-          console.warn('Impossible de configurer la base:', e);
-        }
-      }
-      return await operation();
-    } catch (error: any) {
-      if (error?.message?.includes('database is locked') && retries > 0) {
-        console.log(`⚠️ Base verrouillée, tentative ${maxRetries - retries + 1}/${maxRetries}...`);
-        
-        // Réinitialiser la connexion
-        try {
+    const executeWithRetry = async <T,>(
+      operation: () => Promise<T>,
+      retries = maxRetries
+    ): Promise<T> => {
+      try {
+        if (!db) {
           db = (await getDb()) as Db;
-        } catch (e) {
-          console.warn('Impossible de réinitialiser la connexion:', e);
+          try {
+            await db.execute('PRAGMA busy_timeout = 30000');
+            await db.execute('PRAGMA journal_mode = WAL');
+            await db.execute('PRAGMA synchronous = NORMAL');
+          } catch (e) {
+            console.warn('Impossible de configurer la base:', e);
+          }
         }
-        
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-        retryDelay *= 1.5;
-        return executeWithRetry(operation, retries - 1);
+        return await operation();
+      } catch (error: any) {
+        if (error?.message?.includes('database is locked') && retries > 0) {
+          console.log(`⚠️ Base verrouillée, tentative ${maxRetries - retries + 1}/${maxRetries}...`);
+          
+          try {
+            db = (await getDb()) as Db;
+          } catch (e) {
+            console.warn('Impossible de réinitialiser la connexion:', e);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 1.5;
+          return executeWithRetry(operation, retries - 1);
+        }
+        throw error;
       }
-      throw error;
-    }
-  };
+    };
 
-  try {
-    // Initialiser la connexion avec les bons paramètres
-    db = (await getDb()) as Db;
-    
-    // Configurer la base pour réduire les verrous
-    await db.execute('PRAGMA busy_timeout = 30000');
-    await db.execute('PRAGMA journal_mode = WAL');
-    await db.execute('PRAGMA synchronous = NORMAL');
+    try {
+      db = (await getDb()) as Db;
+      
+      await db.execute('PRAGMA busy_timeout = 30000');
+      await db.execute('PRAGMA journal_mode = WAL');
+      await db.execute('PRAGMA synchronous = NORMAL');
 
-    // Génération du code unique
-    finalCode = await executeWithRetry(async () => {
-      return await generateUniqueCode(codeCommande);
-    });
+      finalCode = await executeWithRetry(async () => {
+        return await generateUniqueCode(codeCommande);
+      });
 
-    if (finalCode !== codeCommande) {
-      setCodeCommande(finalCode);
-    }
+      if (finalCode !== codeCommande) {
+        setCodeCommande(finalCode);
+      }
 
-    const montantHT = montantTotal / 1.18;
-    const dateCommande = new Date().toISOString();
+      const montantHT = montantTotal / 1.18;
+      const dateCommande = new Date().toISOString();
 
-    // Vérifier que le client existe
-    const clientCheck = await executeWithRetry(async () => {
-      return await db!.select(
-        `SELECT COUNT(*) as count FROM clients WHERE idClient = ?`,
-        [parseInt(selectedClientId)]
-      );
-    });
+      const clientCheck = await executeWithRetry(async () => {
+        return await db!.select(
+          `SELECT COUNT(*) as count FROM clients WHERE idClient = ?`,
+          [parseInt(selectedClientId)]
+        );
+      });
 
-    if (!clientCheck[0]?.count) {
-      throw new Error('Client introuvable dans la base de données');
-    }
+      if (!clientCheck[0]?.count) {
+        throw new Error('Client introuvable dans la base de données');
+      }
 
-    // 1. Insertion de la commande
-    const result = await executeWithRetry(async () => {
-      return await db!.execute(
-        `
-        INSERT INTO commandes (
-          code_commande,
-          idClient,
-          type_commande,
-          date_commande,
-          montant_ht,
-          montant_ttc,
-          statut,
-          montant_tva,
-          montant_net,
-          source
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          finalCode,
-          parseInt(selectedClientId),
-          typeCommande,
-          dateCommande,
-          montantHT,
-          typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-          'CONFIRMEE',
-          montantTotal - montantHT,
-          typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-          'DIRECT'
-        ]
-      );
-    });
-
-    idCommande = Number(result.lastInsertId);
-
-    // 2. Insertion des détails de la commande - UN PAR UN avec retry individuel
-    for (const item of cart) {
-      await executeWithRetry(async () => {
+      // 1. Insertion de la commande
+      const result = await executeWithRetry(async () => {
         return await db!.execute(
           `
-          INSERT INTO commande_details (
-            idCommande,
-            idProduit,
-            qte_commande,
-            prix_unitaire_vente,
-            remise
+          INSERT INTO commandes (
+            code_commande,
+            idClient,
+            type_commande,
+            date_commande,
+            montant_ht,
+            montant_ttc,
+            statut,
+            montant_tva,
+            montant_net,
+            source
           )
-          VALUES (?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
-            idCommande,
-            item.idProduit,
-            item.quantite_commande,
-            item.prix_vente,
-            0
+            finalCode,
+            parseInt(selectedClientId),
+            typeCommande,
+            dateCommande,
+            montantHT,
+            typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
+            'CONFIRMEE',
+            montantTotal - montantHT,
+            typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
+            'DIRECT'
           ]
         );
       });
-    }
 
-    // 3. Traitement selon le type de commande
-    if (typeCommande === 'STANDARD') {
-      let beneficeTotalCalcul = 0;
-      let coutTotalAchat = 0;
+      idCommande = Number(result.lastInsertId);
 
+      // 2. Insertion des détails de la commande
       for (const item of cart) {
         await executeWithRetry(async () => {
-          // Vérifier le stock
-          const stockCheck = await db!.select(
-            `SELECT qte_stock FROM products WHERE idProduit = ?`,
-            [item.idProduit]
-          );
-
-          const stockDisponible = stockCheck[0]?.qte_stock || 0;
-          if (stockDisponible < item.quantite_commande) {
-            throw new Error(`Stock insuffisant pour ${item.designation}. Disponible: ${stockDisponible}`);
-          }
-
-          // Récupérer le prix d'achat
-          const product = await db!.select(
-            `SELECT prix_achat_base FROM products WHERE idProduit = ?`,
-            [item.idProduit]
-          );
-
-          const prixAchat = product[0]?.prix_achat_base || 0;
-          coutTotalAchat += prixAchat * item.quantite_commande;
-          beneficeTotalCalcul += (item.prix_vente - prixAchat) * item.quantite_commande;
-
-          const stockAvant = stockDisponible;
-          const stockApres = stockDisponible - item.quantite_commande;
-
-          // Mettre à jour le stock
-          await db!.execute(
+          return await db!.execute(
             `
-            UPDATE products
-            SET qte_stock = qte_stock - ?
-            WHERE idProduit = ? AND qte_stock >= ?
-            `,
-            [item.quantite_commande, item.idProduit, item.quantite_commande]
-          );
-
-          // Enregistrer le mouvement de stock
-          await db!.execute(
-            `
-            INSERT INTO mouvements_stock (
+            INSERT INTO commande_details (
+              idCommande,
               idProduit,
-              type_mouvement,
-              quantite,
-              stock_avant,
-              stock_apres,
-              prix_unitaire,
-              reference,
-              notes,
-              date_mouvement
+              qte_commande,
+              prix_unitaire_vente,
+              remise
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             `,
             [
+              idCommande,
               item.idProduit,
-              'SORTIE',
               item.quantite_commande,
-              stockAvant,
-              stockApres,
               item.prix_vente,
-              finalCode,
-              `Commande ${finalCode} - ${selectedClientDetails?.NomComplet || 'Client'}`,
-              new Date().toISOString()
+              0
             ]
           );
         });
       }
 
-      notifications.show({
-        title: '✅ Commande standard enregistrée',
-        message:
-          `${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
-          `💰 CA: ${(beneficeTotalCalcul + coutTotalAchat).toLocaleString()} FCFA\n` +
-          `📊 Coût d'achat: ${coutTotalAchat.toLocaleString()} FCFA\n` +
-          `📈 Bénéfice: ${beneficeTotalCalcul.toLocaleString()} FCFA\n` +
-          `📋 Code: ${finalCode}`,
-        color: 'green',
-        autoClose: 8000
-      });
+      // 3. Traitement selon le type de commande
+      if (typeCommande === 'STANDARD') {
+        let beneficeTotalCalcul = 0;
+        let coutTotalAchat = 0;
 
-    } else {
-      // Type REVENDEUR
-      for (const item of cart) {
-        await executeWithRetry(async () => {
-          // Vérifier le stock
-          const stockCheck = await db!.select(
-            `SELECT qte_stock FROM products WHERE idProduit = ?`,
-            [item.idProduit]
-          );
+        for (const item of cart) {
+          await executeWithRetry(async () => {
+            const stockCheck = await db!.select(
+              `SELECT qte_stock FROM products WHERE idProduit = ?`,
+              [item.idProduit]
+            );
 
-          const stockDisponible = stockCheck[0]?.qte_stock || 0;
-          if (stockDisponible < item.quantite_commande) {
-            throw new Error(`Stock insuffisant pour ${item.designation}. Disponible: ${stockDisponible}`);
-          }
+            const stockDisponible = stockCheck[0]?.qte_stock || 0;
+            if (stockDisponible < item.quantite_commande) {
+              throw new Error(`Stock insuffisant pour ${item.designation}. Disponible: ${stockDisponible}`);
+            }
 
-          const stockAvant = stockDisponible;
-          const stockApres = stockDisponible - item.quantite_commande;
+            const product = await db!.select(
+              `SELECT prix_achat_base FROM products WHERE idProduit = ?`,
+              [item.idProduit]
+            );
 
-          // Mettre à jour le stock principal
-          await db!.execute(
-            `
-            UPDATE products
-            SET qte_stock = qte_stock - ?
-            WHERE idProduit = ? AND qte_stock >= ?
-            `,
-            [item.quantite_commande, item.idProduit, item.quantite_commande]
-          );
+            const prixAchat = product[0]?.prix_achat_base || 0;
+            coutTotalAchat += prixAchat * item.quantite_commande;
+            beneficeTotalCalcul += (item.prix_vente - prixAchat) * item.quantite_commande;
 
-          // Mettre à jour le stock du revendeur
-          await db!.execute(
-            `
-            INSERT INTO stock_revendeur (
-              idRevendeur,
-              idProduit,
-              qte_stock,
-              prix_achat,
-              prix_vente,
-              commission_pourcentage
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(idRevendeur, idProduit)
-            DO UPDATE SET 
-              qte_stock = qte_stock + ?,
-              prix_achat = ?,
-              prix_vente = ?,
-              commission_pourcentage = ?
-            `,
-            [
-              parseInt(selectedClientId),
-              item.idProduit,
-              item.quantite_commande,
-              item.prix_achat_base || 0,
-              item.prix_vente,
-              commissionPourcentage,
-              item.quantite_commande,
-              item.prix_achat_base || 0,
-              item.prix_vente,
-              commissionPourcentage
-            ]
-          );
+            const stockAvant = stockDisponible;
+            const stockApres = stockDisponible - item.quantite_commande;
 
-          // Enregistrer le mouvement du revendeur
-          await db!.execute(
-            `
-            INSERT INTO mouvements_revendeur (
-              idProduit,
-              idRevendeur,
-              idCommande,
-              type_mouvement,
-              qte_mouvement,
-              date_mouvement
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            `,
-            [
-              item.idProduit,
-              parseInt(selectedClientId),
-              idCommande,
-              'ENTREE',
-              item.quantite_commande,
-              new Date().toISOString()
-            ]
-          );
+            await db!.execute(
+              `
+              UPDATE products
+              SET qte_stock = qte_stock - ?
+              WHERE idProduit = ? AND qte_stock >= ?
+              `,
+              [item.quantite_commande, item.idProduit, item.quantite_commande]
+            );
 
-          // Enregistrer le mouvement de stock
-          await db!.execute(
-            `
-            INSERT INTO mouvements_stock (
-              idProduit,
-              type_mouvement,
-              quantite,
-              stock_avant,
-              stock_apres,
-              prix_unitaire,
-              reference,
-              notes,
-              date_mouvement
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [
-              item.idProduit,
-              'SORTIE_REVENDEUR',
-              item.quantite_commande,
-              stockAvant,
-              stockApres,
-              item.prix_vente,
-              finalCode,
-              `Commande revendeur ${finalCode} - ${selectedClientDetails?.NomComplet || 'Client'}`,
-              new Date().toISOString()
-            ]
-          );
+            await db!.execute(
+              `
+              INSERT INTO mouvements_stock (
+                idProduit,
+                type_mouvement,
+                quantite,
+                stock_avant,
+                stock_apres,
+                prix_unitaire,
+                reference,
+                notes,
+                date_mouvement
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `,
+              [
+                item.idProduit,
+                'SORTIE',
+                item.quantite_commande,
+                stockAvant,
+                stockApres,
+                item.prix_vente,
+                finalCode,
+                `Commande ${finalCode} - ${selectedClientDetails?.NomComplet || 'Client'}`,
+                new Date().toISOString()
+              ]
+            );
+          });
+        }
+
+        notifications.show({
+          title: '✅ Commande standard enregistrée',
+          message:
+            `${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
+            `💰 CA: ${(beneficeTotalCalcul + coutTotalAchat).toLocaleString()} FCFA\n` +
+            `📊 Coût d'achat: ${coutTotalAchat.toLocaleString()} FCFA\n` +
+            `📈 Bénéfice: ${beneficeTotalCalcul.toLocaleString()} FCFA\n` +
+            `📋 Code: ${finalCode}`,
+          color: 'green',
+          autoClose: 8000
+        });
+
+      } else {
+        // ✅ Type REVENDEUR - avec commission par défaut à 60%
+        const commissionParDefaut = commissionPourcentage > 0 ? commissionPourcentage : 60;
+        
+        for (const item of cart) {
+          await executeWithRetry(async () => {
+            const stockCheck = await db!.select(
+              `SELECT qte_stock FROM products WHERE idProduit = ?`,
+              [item.idProduit]
+            );
+
+            const stockDisponible = stockCheck[0]?.qte_stock || 0;
+            if (stockDisponible < item.quantite_commande) {
+              throw new Error(`Stock insuffisant pour ${item.designation}. Disponible: ${stockDisponible}`);
+            }
+
+            const stockAvant = stockDisponible;
+            const stockApres = stockDisponible - item.quantite_commande;
+
+            // Mettre à jour le stock principal
+            await db!.execute(
+              `
+              UPDATE products
+              SET qte_stock = qte_stock - ?
+              WHERE idProduit = ? AND qte_stock >= ?
+              `,
+              [item.quantite_commande, item.idProduit, item.quantite_commande]
+            );
+
+            // ✅ Mettre à jour le stock du revendeur avec commission par défaut
+            await db!.execute(
+              `
+              INSERT INTO stock_revendeur (
+                idRevendeur,
+                idProduit,
+                qte_stock,
+                prix_achat,
+                prix_vente,
+                commission_pourcentage
+              )
+              VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(idRevendeur, idProduit)
+              DO UPDATE SET 
+                qte_stock = qte_stock + ?,
+                prix_achat = ?,
+                prix_vente = ?,
+                commission_pourcentage = ?
+              `,
+              [
+                parseInt(selectedClientId),
+                item.idProduit,
+                item.quantite_commande,
+                item.prix_achat_base || 0,
+                item.prix_vente,
+                commissionParDefaut,
+                item.quantite_commande,
+                item.prix_achat_base || 0,
+                item.prix_vente,
+                commissionParDefaut
+              ]
+            );
+
+            // Enregistrer le mouvement du revendeur
+            await db!.execute(
+              `
+              INSERT INTO mouvements_revendeur (
+                idProduit,
+                idRevendeur,
+                idCommande,
+                type_mouvement,
+                qte_mouvement,
+                date_mouvement
+              )
+              VALUES (?, ?, ?, ?, ?, ?)
+              `,
+              [
+                item.idProduit,
+                parseInt(selectedClientId),
+                idCommande,
+                'ENTREE',
+                item.quantite_commande,
+                new Date().toISOString()
+              ]
+            );
+
+            // Enregistrer le mouvement de stock
+            await db!.execute(
+              `
+              INSERT INTO mouvements_stock (
+                idProduit,
+                type_mouvement,
+                quantite,
+                stock_avant,
+                stock_apres,
+                prix_unitaire,
+                reference,
+                notes,
+                date_mouvement
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `,
+              [
+                item.idProduit,
+                'SORTIE_REVENDEUR',
+                item.quantite_commande,
+                stockAvant,
+                stockApres,
+                item.prix_vente,
+                finalCode,
+                `Commande revendeur ${finalCode} - ${selectedClientDetails?.NomComplet || 'Client'}`,
+                new Date().toISOString()
+              ]
+            );
+          });
+        }
+
+        notifications.show({
+          title: '✅ Commande revendeur enregistrée',
+          message:
+            `Commande revendeur ${finalCode} créée.\n` +
+            `📦 ${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
+            `💰 Montant total: ${montantTotal.toLocaleString()} FCFA\n` +
+            `📊 Bénéfice total: ${beneficeTotal.toLocaleString()} FCFA\n` +
+            `📊 Commission (${commissionParDefaut}%): ${commissionTotale.toLocaleString()} FCFA\n` +
+            `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA`,
+          color: 'green',
+          autoClose: 8000
         });
       }
 
-      notifications.show({
-        title: '✅ Commande revendeur enregistrée',
-        message:
-          `Commande revendeur ${finalCode} créée.\n` +
-          `📦 ${cart.length} produit(s) commandé(s) (${totalPieces} pièces)\n` +
-          `💰 Montant total: ${montantTotal.toLocaleString()} FCFA\n` +
-          `📊 Bénéfice total: ${beneficeTotal.toLocaleString()} FCFA\n` +
-          `📊 Commission (${commissionPourcentage}%): ${commissionTotale.toLocaleString()} FCFA\n` +
-          `💵 Net à payer: ${montantApresCommission.toLocaleString()} FCFA`,
-        color: 'green',
-        autoClose: 8000
-      });
+      await refreshProducts();
+      onClose();
+
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Erreur lors de la création de la commande';
+
+      if (errorMessage.includes('database is locked')) {
+        notifications.show({
+          title: '⏳ Base de données verrouillée',
+          message: 'Veuillez réessayer dans quelques instants. Si le problème persiste, fermez les autres fenêtres.',
+          color: 'orange',
+          autoClose: 8000
+        });
+      } else if (errorMessage.includes('UNIQUE constraint failed')) {
+        notifications.show({
+          title: '❌ Erreur de code',
+          message: 'Un problème est survenu avec le code de la commande. Veuillez réessayer.',
+          color: 'red',
+        });
+        setCodeCommande(`CMD-${Date.now()}`);
+      } else {
+        notifications.show({
+          title: '❌ Erreur',
+          message: errorMessage,
+          color: 'red',
+          autoClose: 5000
+        });
+      }
+
+      console.error('Erreur lors de la création de la commande:', error);
+    } finally {
+      setSubmitting(false);
     }
-
-    await refreshProducts();
-    onClose();
-
-  } catch (error: any) {
-    const errorMessage = error?.message || 'Erreur lors de la création de la commande';
-
-    if (errorMessage.includes('database is locked')) {
-      notifications.show({
-        title: '⏳ Base de données verrouillée',
-        message: 'Veuillez réessayer dans quelques instants. Si le problème persiste, fermez les autres fenêtres.',
-        color: 'orange',
-        autoClose: 8000
-      });
-    } else if (errorMessage.includes('UNIQUE constraint failed')) {
-      notifications.show({
-        title: '❌ Erreur de code',
-        message: 'Un problème est survenu avec le code de la commande. Veuillez réessayer.',
-        color: 'red',
-      });
-      setCodeCommande(`CMD-${Date.now()}`);
-    } else {
-      notifications.show({
-        title: '❌ Erreur',
-        message: errorMessage,
-        color: 'red',
-        autoClose: 5000
-      });
-    }
-
-    console.error('Erreur lors de la création de la commande:', error);
-  } finally {
-    setSubmitting(false);
-  }
-};
+  };
 
   const clientData = clients.map(c => ({
     value: c.idClient.toString(),

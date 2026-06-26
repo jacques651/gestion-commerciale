@@ -43,12 +43,10 @@ import {
   IconEye
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { decompteRepository } from '../../database/repositories/decompteRepository';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { getDb } from '../../database/db';
 import { useNavigate } from 'react-router-dom';
 
-// Interface pour les détails du décompte (produits)
 interface DecompteDetail {
   idDetailRevendeur: number;
   idDecompte: number;
@@ -74,7 +72,6 @@ interface DecompteDetail {
   produit_categorie?: string;
 }
 
-// Interface pour le décompte avec ses détails
 interface Decompte {
   idDecompte: number;
   idClient: number;
@@ -114,17 +111,14 @@ interface Statistiques {
   montantTotalBenefice: number;
 }
 
-// ✅ Fonction de formatage de date personnalisée (sans date-fns)
 const formatDateCustom = (dateStr: string): string => {
   if (!dateStr) return '-';
   try {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return '-';
-    
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
-    
     return `${day}/${month}/${year}`;
   } catch {
     return '-';
@@ -136,13 +130,11 @@ const formatDateTimeCustom = (dateStr: string): string => {
   try {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return '-';
-    
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
-    
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   } catch {
     return '-';
@@ -182,7 +174,6 @@ export default function ListeDecomptes() {
 
   const itemsPerPage = 15;
 
-  // Fonctions de navigation
   const handleViewReceipt = (decompte: Decompte) => {
     navigate(`/decomptes/${decompte.idDecompte}/reçu`);
   };
@@ -200,13 +191,11 @@ export default function ListeDecomptes() {
     navigate(`/decomptes/${decompte.idDecompte}/print`);
   };
 
-  // Chargement initial
   useEffect(() => {
     loadRevendeurs();
     loadDecomptes();
   }, []);
 
-  // Filtrage
   useEffect(() => {
     let filtered = [...decomptes];
 
@@ -277,61 +266,107 @@ export default function ListeDecomptes() {
     }
   };
 
-  const getDecompteDetails = async (idDecompte: number): Promise<DecompteDetail[]> => {
-    try {
-      const db = await getDb();
+const loadDecomptes = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-      const details = await db.select<any[]>(
-        `
-        SELECT 
-          dd.*,
-          p.designation as produit_designation,
-          p.code_produit,
-          p.categorie as produit_categorie,
-          p.prix_achat_base,
-          p.prix_vente_gros,
-          p.commission_pourcentage as produit_commission,
-          COALESCE(
-            (
-              SELECT sr.qte_stock 
-              FROM stock_revendeur sr 
-              WHERE sr.idRevendeur = d.idClient 
-                AND sr.idProduit = dd.idProduit
-            ), 
-            0
-          ) as stock_actuel_revendeur
-        FROM decompte_details dd
-        INNER JOIN products p ON p.idProduit = dd.idProduit
-        INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
-        WHERE dd.idDecompte = ?
-        `,
-        [idDecompte]
-      );
+    const db = await getDb();
 
-      return details.map(d => {
-        const prixAchat = d.prix_achat || d.prix_achat_base || 0;
-        const prixVente = d.prix_vente || d.prix_vente_gros || 0;
-        const qteDecompte = d.qte_decompte || 0;
-        const stockActuel = d.stock_actuel_revendeur || 0;
+    // ✅ Requête avec les bons noms de colonnes pour les deux tables
+    const results = await db.select<any[]>(`
+      SELECT 
+        d.idDecompte,
+        d.idClient,
+        d.date_decompte,
+        d.code_decompte,
+        d.montant_achat,
+        d.montant_vente,
+        d.montant_benefice,
+        d.montant_commission,
+        d.montant_net,
+        d.statut,
+        d.observation,
+        d.periode_debut,
+        d.periode_fin,
+        d.notes,
+        cl.NomComplet,
+        cl.Societe,
+        dd.idDetailRevendeur,
+        dd.idProduit,
+        dd.qte_decompte,
+        dd.prix_achat,
+        dd.prix_vente,
+        dd.commission_pourcentage,
+        dd.designation,
+        dd.total,
+        p.code_produit,
+        p.categorie as produit_categorie,
+        p.prix_achat_base,
+        p.prix_vente_gros,
+        COALESCE(sr.qte_stock, 0) as stock_actuel_revendeur
+      FROM decomptes d
+      LEFT JOIN clients cl ON d.idClient = cl.idClient
+      LEFT JOIN decompte_details dd ON d.idDecompte = dd.idDecompte
+      LEFT JOIN products p ON dd.idProduit = p.idProduit
+      LEFT JOIN stock_revendeur sr ON sr.idRevendeur = d.idClient AND sr.idProduit = dd.idProduit
+      ORDER BY d.date_decompte DESC
+    `);
+
+    console.log("📊 Résultats de la requête:", results.length);
+
+    // ✅ Grouper les résultats par décompte
+    const decomptesMap = new Map<number, Decompte>();
+
+    for (const row of results) {
+      if (!decomptesMap.has(row.idDecompte)) {
+        decomptesMap.set(row.idDecompte, {
+          idDecompte: row.idDecompte,
+          idClient: row.idClient,
+          code_decompte: row.code_decompte || `DCP-${row.idDecompte}`,
+          date_decompte: row.date_decompte || new Date().toISOString(),
+          montant_achat: row.montant_achat || 0,
+          montant_vente: row.montant_vente || 0,
+          montant_benefice: row.montant_benefice || 0,
+          montant_commission: row.montant_commission || 0,
+          montant_net: row.montant_net || 0,
+          statut: row.statut || 'brouillon',
+          observation: row.observation,
+          periode_debut: row.periode_debut,
+          periode_fin: row.periode_fin,
+          notes: row.notes,
+          NomComplet: row.NomComplet,
+          Societe: row.Societe,
+          details: []
+        });
+      }
+
+      // Ajouter le détail si présent
+      if (row.idDetailRevendeur) {
+        const decompte = decomptesMap.get(row.idDecompte)!;
+        const prixAchat = row.prix_achat || row.prix_achat_base || 0;
+        const prixVente = row.prix_vente || row.prix_vente_gros || 0;
+        const qteDecompte = row.qte_decompte || 0;
+        const stockActuel = row.stock_actuel_revendeur || 0;
         const qteInitiale = stockActuel + qteDecompte;
         const totalAchat = prixAchat * qteDecompte;
-        const totalVente = d.total || (prixVente * qteDecompte);
+        const totalVente = row.total || (prixVente * qteDecompte);
         const benefice = totalVente - totalAchat;
-        const commission = benefice * ((d.commission_pourcentage || d.produit_commission || 0) / 100);
-        const codeFacture = `F_${String(d.idDecompte).padStart(6, '0')}`;
+        const commission = benefice * ((row.commission_pourcentage || 0) / 100);
+        const codeFacture = `F_${String(row.idDecompte).padStart(6, '0')}`;
 
-        return {
-          idDetailRevendeur: d.idDetailRevendeur,
-          idDecompte: d.idDecompte,
-          idProduit: d.idProduit,
+        const detail: DecompteDetail = {
+          idDetailRevendeur: row.idDetailRevendeur,
+          idDecompte: row.idDecompte,
+          idProduit: row.idProduit,
           qte_decompte: qteDecompte,
           prix_achat: prixAchat,
           prix_vente: prixVente,
-          commission_pourcentage: d.commission_pourcentage || d.produit_commission || 0,
-          designation: d.produit_designation || d.designation || 'Produit',
+          commission_pourcentage: row.commission_pourcentage || 0,
+          designation: row.designation || 'Produit',
           total: totalVente,
           codeFacture: codeFacture,
-          categorie: d.produit_categorie || 'Non catégorisé',
+          categorie: row.produit_categorie || 'Non catégorisé',
           qteInitiale: qteInitiale,
           qteVendue: qteDecompte,
           qteRestante: qteInitiale - qteDecompte,
@@ -341,82 +376,65 @@ export default function ListeDecomptes() {
           totalVente: totalVente,
           benefice: benefice,
           commission: commission,
-          produit_designation: d.produit_designation,
-          produit_categorie: d.produit_categorie
+          produit_designation: row.designation,
+          produit_categorie: row.produit_categorie
         };
-      });
-    } catch (error) {
-      console.error('Erreur chargement détails:', error);
-      return [];
+
+        decompte.details!.push(detail);
+
+        // ✅ Accumuler les montants à partir des détails
+        decompte.montant_achat += totalAchat;
+        decompte.montant_vente += totalVente;
+        decompte.montant_benefice += benefice;
+        decompte.montant_commission += commission;
+        decompte.montant_net = decompte.montant_vente - decompte.montant_commission;
+      }
     }
-  };
 
-  const loadDecomptes = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    const decomptesArray = Array.from(decomptesMap.values());
+    setDecomptes(decomptesArray);
 
-      const data = await decompteRepository.getAll();
-
-      const enrichedData = await Promise.all(
-        data.map(async (decompte: any) => {
-          try {
-            const details = await getDecompteDetails(decompte.idDecompte);
-            return {
-              ...decompte,
-              details: details || []
-            };
-          } catch (error) {
-            console.error(`Erreur chargement détails pour décompte ${decompte.idDecompte}:`, error);
-            return {
-              ...decompte,
-              details: []
-            };
-          }
-        })
-      );
-
-      setDecomptes(enrichedData);
-
-      const codes = new Set<string>();
-      enrichedData.forEach((d: Decompte) => {
-        d.details?.forEach((detail: DecompteDetail) => {
-          if (detail.codeFacture) {
-            codes.add(detail.codeFacture);
-          }
-        });
+    // Mettre à jour les options de code facture
+    const codes = new Set<string>();
+    decomptesArray.forEach((d: Decompte) => {
+      d.details?.forEach((detail: DecompteDetail) => {
+        if (detail.codeFacture) {
+          codes.add(detail.codeFacture);
+        }
       });
-      const codeOptions = Array.from(codes).sort().map((code: string) => ({
-        value: code,
-        label: code
-      }));
-      setCodeFactureOptions(codeOptions);
+    });
+    const codeOptions = Array.from(codes).sort().map((code: string) => ({
+      value: code,
+      label: code
+    }));
+    setCodeFactureOptions(codeOptions);
 
-      const stats = {
-        total: enrichedData.length,
-        totalValide: enrichedData.filter((d: Decompte) => d.statut === 'valide').length,
-        totalPaye: enrichedData.filter((d: Decompte) => d.statut === 'paye').length,
-        totalAnnule: enrichedData.filter((d: Decompte) => d.statut === 'annule').length,
-        totalBrouillon: enrichedData.filter((d: Decompte) => d.statut === 'brouillon').length,
-        montantTotal: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_net || 0), 0),
-        montantTotalVente: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_vente || 0), 0),
-        montantTotalCommission: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_commission || 0), 0),
-        montantTotalBenefice: enrichedData.reduce((sum: number, d: Decompte) => sum + (d.montant_benefice || 0), 0)
-      };
-      setStatistiques(stats);
+    // Statistiques
+    const stats = {
+      total: decomptesArray.length,
+      totalValide: decomptesArray.filter((d: Decompte) => d.statut === 'valide').length,
+      totalPaye: decomptesArray.filter((d: Decompte) => d.statut === 'paye').length,
+      totalAnnule: decomptesArray.filter((d: Decompte) => d.statut === 'annule').length,
+      totalBrouillon: decomptesArray.filter((d: Decompte) => d.statut === 'brouillon').length,
+      montantTotal: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_net || 0), 0),
+      montantTotalVente: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_vente || 0), 0),
+      montantTotalCommission: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_commission || 0), 0),
+      montantTotalBenefice: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_benefice || 0), 0)
+    };
+    setStatistiques(stats);
 
-    } catch (error: any) {
-      console.error('Erreur chargement décomptes:', error);
-      setError(error?.message || 'Impossible de charger les décomptes');
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger les décomptes',
-        color: 'red'
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  } catch (error: any) {
+    console.error('Erreur chargement décomptes:', error);
+    setError(error?.message || 'Impossible de charger les décomptes');
+    notifications.show({
+      title: 'Erreur',
+      message: 'Impossible de charger les décomptes',
+      color: 'red'
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const calculerStatistiques = (data: Decompte[]) => {
     const totalValide = data.filter(d => d.statut === 'valide').length;
@@ -468,7 +486,6 @@ export default function ListeDecomptes() {
     }
   };
 
-  // ✅ Utiliser formatDateCustom au lieu de format de date-fns
   const formatDate = (dateStr: string) => {
     return formatDateCustom(dateStr);
   };
@@ -512,7 +529,31 @@ export default function ListeDecomptes() {
     setLoading(true);
 
     try {
-      await decompteRepository.delete(idDecompte);
+      const db = await getDb();
+
+      // Récupérer les détails pour restaurer les stocks
+      const details = await db.select<any[]>(`
+        SELECT idProduit, QteDecompte
+        FROM decompte_details
+        WHERE idDecompte = ?
+      `, [idDecompte]);
+
+      // Restaurer les stocks
+      for (const detail of details) {
+        await db.execute(`
+          UPDATE stock_revendeur 
+          SET qte_stock = qte_stock + ?
+          WHERE idProduit = ? AND idRevendeur = (
+            SELECT idClient FROM decomptes WHERE idDecompte = ?
+          )
+        `, [detail.QteDecompte, detail.idProduit, idDecompte]);
+      }
+
+      // Supprimer les détails
+      await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [idDecompte]);
+      
+      // Supprimer le décompte
+      await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [idDecompte]);
 
       notifications.show({
         title: '✅ Succès',
@@ -521,9 +562,7 @@ export default function ListeDecomptes() {
         autoClose: 3000
       });
 
-      setTimeout(() => {
-        loadDecomptes();
-      }, 500);
+      await loadDecomptes();
 
     } catch (error: any) {
       console.error('Erreur lors de la suppression:', error);
@@ -542,10 +581,6 @@ export default function ListeDecomptes() {
         color: 'red',
         autoClose: 5000
       });
-
-      setTimeout(() => {
-        loadDecomptes();
-      }, 1000);
     } finally {
       setLoading(false);
     }
@@ -876,7 +911,7 @@ export default function ListeDecomptes() {
         </Stack>
       </Paper>
 
-      {/* Liste des décomptes - AVEC FUSION DE CELLULES */}
+      {/* Liste des décomptes */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
         {loading ? (
           <Center py={100}>
@@ -947,7 +982,6 @@ export default function ListeDecomptes() {
                     const num = (currentPage - 1) * itemsPerPage + idx + 1;
 
                     if (decompte.details && decompte.details.length > 0) {
-                      // AVEC FUSION DE CELLULES - les infos communes sont fusionnées
                       return decompte.details.map((detail, detailIdx) => {
                         const benefice = detail.totalVente - detail.totalAchat;
                         const commission = detail.commission;
@@ -1044,7 +1078,6 @@ export default function ListeDecomptes() {
                         );
                       });
                     } else {
-                      // Cas sans détails - une seule ligne
                       return (
                         <Table.Tr key={decompte.idDecompte}>
                           <Table.Td ta="center">
