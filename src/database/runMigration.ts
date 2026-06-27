@@ -39,10 +39,11 @@ export const runSchemaMigration = async (): Promise<void> => {
       console.log('⚠️ [runSchemaMigration] Schéma incomplet, exécution du schéma complet...');
       await db.execute(SCHEMA_SQL);
       console.log('✅ [runSchemaMigration] Schéma SQL exécuté avec succès');
-    } else {
-      console.log('ℹ️ [runSchemaMigration] Tables déjà existantes, exécution des migrations...');
-      await runMigrations(db);
     }
+
+    // Toujours exécuter les migrations pour garantir toutes les colonnes ALTER TABLE
+    console.log('🔄 [runSchemaMigration] Exécution des migrations complémentaires...');
+    await runMigrations(db);
 
     // Vérifier à nouveau les tables
     const tablesAfter = await db.select<{ name: string }[]>(`
@@ -319,6 +320,18 @@ export const runMigrations = async (db: any): Promise<void> => {
         await db.execute(`ALTER TABLE decomptes ADD COLUMN idFactureRevendeur INTEGER`);
         migrationCount++;
       }
+      if (!columns.includes('periode_debut')) {
+        await db.execute(`ALTER TABLE decomptes ADD COLUMN periode_debut TEXT`);
+        migrationCount++;
+      }
+      if (!columns.includes('periode_fin')) {
+        await db.execute(`ALTER TABLE decomptes ADD COLUMN periode_fin TEXT`);
+        migrationCount++;
+      }
+      if (!columns.includes('notes')) {
+        await db.execute(`ALTER TABLE decomptes ADD COLUMN notes TEXT`);
+        migrationCount++;
+      }
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur decomptes:', error);
     }
@@ -339,6 +352,24 @@ export const runMigrations = async (db: any): Promise<void> => {
       if (!detailsColumns.includes('commission')) {
         console.log('🔄 Ajout de la colonne commission à decompte_details...');
         await db.execute(`ALTER TABLE decompte_details ADD COLUMN commission REAL DEFAULT 0`);
+        migrationCount++;
+      }
+
+      if (!detailsColumns.includes('qte_avant_decompte')) {
+        console.log('🔄 Ajout de la colonne qte_avant_decompte à decompte_details...');
+        await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_avant_decompte REAL DEFAULT 0`);
+        migrationCount++;
+      }
+      if (!detailsColumns.includes('commission_pourcentage')) {
+        await db.execute(`ALTER TABLE decompte_details ADD COLUMN commission_pourcentage REAL DEFAULT 0`);
+        migrationCount++;
+      }
+      if (!detailsColumns.includes('designation')) {
+        await db.execute(`ALTER TABLE decompte_details ADD COLUMN designation TEXT`);
+        migrationCount++;
+      }
+      if (!detailsColumns.includes('total')) {
+        await db.execute(`ALTER TABLE decompte_details ADD COLUMN total REAL DEFAULT 0`);
         migrationCount++;
       }
     } catch (error) {
@@ -375,6 +406,71 @@ export const runMigrations = async (db: any): Promise<void> => {
       }
     } catch (error) {
       console.warn('⚠️ [runMigrations] Erreur sur reglements:', error);
+    }
+
+    // 4b. Vérifier products — methode_gestion_stock (manquant dans ancienne SCHEMA_SQL)
+    console.log('📋 [runMigrations] Vérification de la table products...');
+    try {
+      const productsInfo = await db.select(`PRAGMA table_info(products)`);
+      const productsColumns = productsInfo.map((c: any) => c.name);
+      console.log(`   Colonnes existantes: ${productsColumns.join(', ')}`);
+
+      if (!productsColumns.includes('methode_gestion_stock')) {
+        console.log('🔄 Ajout de la colonne methode_gestion_stock à products...');
+        await db.execute(`ALTER TABLE products ADD COLUMN methode_gestion_stock TEXT DEFAULT 'FIFO'`);
+        migrationCount++;
+      }
+      if (!productsColumns.includes('idUniteStockage')) {
+        await db.execute(`ALTER TABLE products ADD COLUMN idUniteStockage INTEGER`);
+        migrationCount++;
+      }
+      if (!productsColumns.includes('commission_pourcentage')) {
+        await db.execute(`ALTER TABLE products ADD COLUMN commission_pourcentage REAL DEFAULT 0`);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur products:', error);
+    }
+
+    // 4c. Vérifier commandes — colonnes manquantes dans ancienne SCHEMA_SQL
+    console.log('📋 [runMigrations] Vérification de la table commandes...');
+    try {
+      const commandesInfo = await db.select(`PRAGMA table_info(commandes)`);
+      const commandesColumns = commandesInfo.map((c: any) => c.name);
+
+      const commandesMissingCols: [string, string][] = [
+        ['adresse_livraison', 'TEXT'],
+        ['montant_tva', 'REAL DEFAULT 0'],
+        ['montant_remise', 'REAL DEFAULT 0'],
+        ['montant_net', 'REAL DEFAULT 0'],
+        ['source', "TEXT DEFAULT 'DIRECT'"],
+        ['notes', 'TEXT'],
+        ['signature_base64', 'TEXT'],
+        ['date_facture', 'DATE'],
+      ];
+      for (const [col, def] of commandesMissingCols) {
+        if (!commandesColumns.includes(col)) {
+          await db.execute(`ALTER TABLE commandes ADD COLUMN ${col} ${def}`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur commandes:', error);
+    }
+
+    // 4d. Vérifier utilisateurs — permissions
+    console.log('📋 [runMigrations] Vérification de la table utilisateurs...');
+    try {
+      const utilisateursInfo = await db.select(`PRAGMA table_info(utilisateurs)`);
+      const utilisateursColumns = utilisateursInfo.map((c: any) => c.name);
+
+      if (!utilisateursColumns.includes('permissions')) {
+        console.log('🔄 Ajout de la colonne permissions à utilisateurs...');
+        await db.execute(`ALTER TABLE utilisateurs ADD COLUMN permissions TEXT DEFAULT '{}'`);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur utilisateurs:', error);
     }
 
     // 5. Vérifier factures_revendeur_details
@@ -621,6 +717,41 @@ export const runMigrations = async (db: any): Promise<void> => {
       console.warn('⚠️ [runMigrations] Erreur sur remboursements:', error);
     }
 
+    // Migration : table debug_logs
+    try {
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS debug_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp TEXT NOT NULL,
+          level TEXT NOT NULL,
+          category TEXT NOT NULL,
+          message TEXT NOT NULL,
+          details TEXT,
+          stack TEXT,
+          app_version TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.execute(`CREATE INDEX IF NOT EXISTS idx_debug_logs_timestamp ON debug_logs(timestamp DESC)`);
+      await db.execute(`CREATE INDEX IF NOT EXISTS idx_debug_logs_level ON debug_logs(level)`);
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur debug_logs:', error);
+    }
+
+    // Migration : colonnes montant_ht / montant_tva dans factures
+    try {
+      const colsFact = (await db.select(`PRAGMA table_info(factures)`)) as any[];
+      const factCols = colsFact.map((c: any) => c.name);
+      if (!factCols.includes('montant_ht')) {
+        await db.execute(`ALTER TABLE factures ADD COLUMN montant_ht REAL DEFAULT 0`);
+      }
+      if (!factCols.includes('montant_tva')) {
+        await db.execute(`ALTER TABLE factures ADD COLUMN montant_tva REAL DEFAULT 0`);
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur factures colonnes:', error);
+    }
+
     console.log(`✅ [runMigrations] ${migrationCount} migration(s) exécutée(s)`);
 
   } catch (error) {
@@ -800,6 +931,8 @@ CREATE TABLE IF NOT EXISTS products (
     qte_stock REAL DEFAULT 0,
     seuil_alerte REAL DEFAULT 10,
     prix_moyen_pondere REAL DEFAULT 0,
+    methode_gestion_stock TEXT DEFAULT 'FIFO',
+    idUniteStockage INTEGER,
     date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
     est_supprime INTEGER DEFAULT 0
 );
@@ -829,10 +962,18 @@ CREATE TABLE IF NOT EXISTS commandes (
     idClient INTEGER NOT NULL,
     type_commande TEXT NOT NULL,
     date_commande DATETIME DEFAULT CURRENT_TIMESTAMP,
+    adresse_livraison TEXT,
     montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
     montant_ttc REAL DEFAULT 0,
-    code_facture TEXT,
+    montant_remise REAL DEFAULT 0,
+    montant_net REAL DEFAULT 0,
     statut TEXT DEFAULT 'BROUILLON',
+    source TEXT DEFAULT 'DIRECT',
+    notes TEXT,
+    signature_base64 TEXT,
+    code_facture TEXT,
+    date_facture DATE,
     FOREIGN KEY(idClient) REFERENCES clients(idClient)
 );
 
@@ -875,10 +1016,13 @@ CREATE TABLE IF NOT EXISTS decomptes (
     montant_benefice REAL DEFAULT 0,
     montant_commission REAL DEFAULT 0,
     montant_net REAL DEFAULT 0,
-    statut TEXT DEFAULT 'EN_ATTENTE',
+    statut TEXT DEFAULT 'brouillon',
     observation TEXT,
     taux_commission REAL DEFAULT 60,
     idFactureRevendeur INTEGER,
+    periode_debut TEXT,
+    periode_fin TEXT,
+    notes TEXT,
     FOREIGN KEY(idClient) REFERENCES clients(idClient)
 );
 
@@ -887,10 +1031,14 @@ CREATE TABLE IF NOT EXISTS decompte_details (
     idDecompte INTEGER NOT NULL,
     idProduit INTEGER NOT NULL,
     qte_decompte REAL NOT NULL DEFAULT 0,
+    qte_avant_decompte REAL DEFAULT 0,
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
     benefice REAL DEFAULT 0,
     commission REAL DEFAULT 0,
+    commission_pourcentage REAL DEFAULT 0,
+    designation TEXT,
+    total REAL DEFAULT 0,
     FOREIGN KEY(idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
     FOREIGN KEY(idProduit) REFERENCES products(idProduit)
 );
@@ -973,6 +1121,8 @@ CREATE TABLE IF NOT EXISTS factures (
     idClient INTEGER NOT NULL,
     idCommande INTEGER,
     date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
     montant_ttc REAL DEFAULT 0,
     montant_regle REAL DEFAULT 0,
     statut TEXT DEFAULT 'EN_ATTENTE',
@@ -1055,6 +1205,7 @@ CREATE TABLE IF NOT EXISTS utilisateurs (
     mot_de_passe_hash TEXT NOT NULL,
     email TEXT,
     role TEXT NOT NULL DEFAULT 'COMMERCIAL',
+    permissions TEXT DEFAULT '{}',
     est_actif INTEGER DEFAULT 1,
     derniere_connexion DATETIME,
     date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -1232,42 +1383,5 @@ INSERT OR IGNORE INTO config_statuts (entite_type, code_statut, libelle, couleur
 ('FACTURE', 'REGLEE', 'Réglée', '#27ae60', 2, 0, 1),
 ('FACTURE', 'ANNULEE', 'Annulée', '#e74c3c', 3, 0, 1);
 
-INSERT OR IGNORE INTO configuration_atelier (id, nom_atelier) VALUES (1, 'MON ATELIER');
-
-INSERT OR IGNORE INTO utilisateurs (nom, login, mot_de_passe_hash, role, est_actif) 
-VALUES ('Administrateur', 'admin', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'ADMIN', 1);
-
-INSERT OR IGNORE INTO unites (code_unite, nom_unite, symbole, est_unite_base) VALUES
-('PC', 'Pièce', 'pc', 1),
-('KG', 'Kilogramme', 'kg', 1),
-('M', 'Mètre', 'm', 1),
-('L', 'Litre', 'l', 1);
-
-INSERT OR IGNORE INTO config_commerce (id, id_type_commerce, modules_actifs, parametres) 
-VALUES (1, 1, '[]', '{"tva_default":18,"devise":"FCFA"}');
-
-INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
-('EAU', 'Eau'),
-('ELECTRICITE', 'Électricité'),
-('LOYER', 'Loyer'),
-('SALAIRE', 'Salaire'),
-('TRANSPORT', 'Transport'),
-('COMMUNICATION', 'Communication'),
-('AUTRE', 'Autres charges');
-
--- =====================================================
--- 17. INDEX
--- =====================================================
-
-CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
-CREATE INDEX IF NOT EXISTS idx_journal_caisse_type ON journal_caisse(type_mouvement);
-CREATE INDEX IF NOT EXISTS idx_journal_caisse_categorie ON journal_caisse(categorie);
-CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charge);
-CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
+INSERT OR IGNORE INTO configuration_atelier (id, nom_atelier) VALUES (1, 'Mon Commerce');
 `;
-
-export default {
-  runSchemaMigration,
-  runMigrations,
-  initDatabaseWithMigrations
-};
