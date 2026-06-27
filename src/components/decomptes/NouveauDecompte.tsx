@@ -126,8 +126,6 @@ export default function NouveauDecompte({
 
   const loadProduitsForClient = useCallback(async (clientIdValue: number) => {
     try {
-      console.log(`🔄 Chargement des produits pour le revendeur ${clientIdValue}...`);
-
       const db = await getDb();
 
       const revendeurCheck = await db.select<any[]>(
@@ -136,14 +134,12 @@ export default function NouveauDecompte({
       );
 
       if (revendeurCheck.length === 0) {
-        console.warn(`⚠️ Le client ${clientIdValue} n'est pas un revendeur`);
         setProduitsDisponibles([]);
         return [];
       }
 
       const produits = await db.select<any[]>(
-        `
-        SELECT 
+        `SELECT
           sr.idStockRevendeur,
           sr.idProduit,
           p.designation,
@@ -158,36 +154,29 @@ export default function NouveauDecompte({
         INNER JOIN products p ON p.idProduit = sr.idProduit
         WHERE sr.idRevendeur = ?
           AND sr.qte_stock > 0
-        ORDER BY p.designation
-        `,
+        ORDER BY p.designation`,
         [clientIdValue]
       );
-
-      console.log(`📦 ${produits.length} produits trouvés pour le revendeur`);
 
       const produitsFormatted = produits.map((p: any) => ({
         idStockRevendeur: p.idStockRevendeur,
         idProduit: p.idProduit,
         designation: p.designation || 'Produit',
         code_produit: p.code_produit || '',
-        categorie: p.categorie || 'Non catégorisé',
+        categorie: p.categorie || 'Non categorise',
         prix_achat: p.prix_achat || 0,
         prix_vente: p.prix_vente || 0,
         commission_pourcentage: p.commission_pourcentage || 0,
         qte_stock: p.qte_stock || 0,
-        unite_base: p.unite_base || 'pièce'
+        unite_base: p.unite_base || 'piece'
       }));
 
       setProduitsDisponibles(produitsFormatted);
       return produitsFormatted;
 
-    } catch (error) {
-      console.error('❌ Erreur chargement produits:', error);
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger les produits du revendeur',
-        color: 'red'
-      });
+    } catch (err) {
+      console.error('Erreur chargement produits:', err);
+      notifications.show({ title: 'Erreur', message: 'Impossible de charger les produits du revendeur', color: 'red' });
       setProduitsDisponibles([]);
       return [];
     }
@@ -196,8 +185,8 @@ export default function NouveauDecompte({
   useEffect(() => {
     if (produitsPreSelectionnes && produitsPreSelectionnes.length > 0) {
       notifications.show({
-        title: '📦 Stock disponible',
-        message: `${produitsPreSelectionnes.length} produit(s) disponibles en stock. Ajoutez-les au panier.`,
+        title: 'Stock disponible',
+        message: `${produitsPreSelectionnes.length} produit(s) disponibles en stock.`,
         color: 'blue'
       });
 
@@ -206,12 +195,12 @@ export default function NouveauDecompte({
         idStockRevendeur: p.idStockRevendeur || 0,
         designation: p.designation || 'Produit',
         code_produit: p.code_produit || '',
-        categorie: p.categorie || 'Non catégorisé',
+        categorie: p.categorie || 'Non categorise',
         prix_achat: p.prix_achat || 0,
         prix_vente: p.prix_vente || 0,
         commission_pourcentage: p.commission_pourcentage || 60,
         qte_stock: p.qte_stock || 0,
-        unite_base: p.unite_base || 'pièce'
+        unite_base: p.unite_base || 'piece'
       })));
 
       const clientIdAUtiliser = clientIdFromState || clientIdProp;
@@ -225,13 +214,9 @@ export default function NouveauDecompte({
     const initialize = async () => {
       try {
         setLoading(true);
-
-        console.log('Début initialisation');
-
         await loadRevendeurs();
 
-        const clientIdAUtiliser =
-          clientIdFromState || clientIdProp;
+        const clientIdAUtiliser = clientIdFromState || clientIdProp;
 
         if (clientIdAUtiliser) {
           setSelectedClientId(clientIdAUtiliser);
@@ -239,18 +224,10 @@ export default function NouveauDecompte({
         } else if (decompteId) {
           await loadDecompteToEdit(decompteId);
         }
-
-        console.log('Fin initialisation');
-      } catch (error) {
-        console.error('Erreur initialize:', error);
-
-        setError(
-          error instanceof Error
-            ? error.message
-            : 'Erreur lors du chargement'
-        );
+      } catch (err) {
+        console.error('Erreur initialize:', err);
+        setError(err instanceof Error ? err.message : 'Erreur lors du chargement');
       } finally {
-        console.log('setLoading(false)');
         setLoading(false);
       }
     };
@@ -276,13 +253,9 @@ export default function NouveauDecompte({
         label: c.NomComplet || c.Societe || 'Revendeur sans nom'
       }));
       setRevendeurs(revendeursList);
-    } catch (error) {
-      console.error('Erreur chargement revendeurs:', error);
-      notifications.show({
-        title: 'Erreur',
-        message: 'Impossible de charger les revendeurs',
-        color: 'red'
-      });
+    } catch (err) {
+      console.error('Erreur chargement revendeurs:', err);
+      notifications.show({ title: 'Erreur', message: 'Impossible de charger les revendeurs', color: 'red' });
     }
   };
 
@@ -294,7 +267,7 @@ export default function NouveauDecompte({
       const db = await getDb();
 
       const decompteData = await db.select<any[]>(
-        `SELECT d.*, c.NomComplet 
+        `SELECT d.*, c.NomComplet
          FROM decomptes d
          INNER JOIN clients c ON c.idClient = d.idClient
          WHERE d.idDecompte = ?`,
@@ -302,7 +275,7 @@ export default function NouveauDecompte({
       );
 
       if (decompteData.length === 0) {
-        setError('Décompte non trouvé');
+        setError('Decompte non trouve');
         setLoading(false);
         return;
       }
@@ -314,8 +287,7 @@ export default function NouveauDecompte({
       await loadProduitsForClient(decompte.idClient);
 
       const detailsData = await db.select<any[]>(
-        `
-        SELECT 
+        `SELECT
           dd.*,
           p.designation,
           p.code_produit,
@@ -326,8 +298,7 @@ export default function NouveauDecompte({
         FROM decompte_details dd
         INNER JOIN products p ON p.idProduit = dd.idProduit
         LEFT JOIN stock_revendeur sr ON sr.idProduit = dd.idProduit AND sr.idRevendeur = dd.idRevendeur
-        WHERE dd.idDecompte = ?
-        `,
+        WHERE dd.idDecompte = ?`,
         [id]
       );
 
@@ -336,22 +307,22 @@ export default function NouveauDecompte({
         idStockRevendeur: d.idStockRevendeur || 0,
         designation: d.designation || 'Produit',
         code_produit: d.code_produit || '',
-        categorie: d.categorie || 'Non catégorisé',
+        categorie: d.categorie || 'Non categorise',
         prix_achat: d.prix_achat || 0,
         prix_vente: d.prix_vente || 0,
         commission_pourcentage: d.commission_pourcentage || 0,
         qte_stock: d.qte_stock || 0,
-        qte_decompte: d.QteDecompte || 0,
-        total: (d.prix_vente || 0) * (d.QteDecompte || 0),
-        unite_base: d.unite_base || 'pièce'
+        qte_decompte: d.qte_decompte || 0,
+        total: (d.prix_vente || 0) * (d.qte_decompte || 0),
+        unite_base: d.unite_base || 'piece'
       }));
 
       setDetails(detailsFormatted);
       setLoading(false);
 
-    } catch (error) {
-      console.error('Erreur chargement décompte:', error);
-      setError('Impossible de charger le décompte à modifier');
+    } catch (err) {
+      console.error('Erreur chargement decompte:', err);
+      setError('Impossible de charger le decompte a modifier');
       setLoading(false);
     } finally {
       setLoadingDecompte(false);
@@ -359,9 +330,7 @@ export default function NouveauDecompte({
   };
 
   const handleClientChange = async (value: string | null) => {
-    if (clientIdFromState || clientIdProp) {
-      return;
-    }
+    if (clientIdFromState || clientIdProp) return;
 
     if (!value) {
       setSelectedClientId(null);
@@ -381,20 +350,11 @@ export default function NouveauDecompte({
 
   const ajouterProduitAuPanier = (produit: Produit, quantite: number) => {
     if (quantite <= 0) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'La quantité doit être supérieure à 0',
-        color: 'red'
-      });
+      notifications.show({ title: 'Erreur', message: 'La quantite doit etre superieure a 0', color: 'red' });
       return;
     }
-
     if (quantite > produit.qte_stock) {
-      notifications.show({
-        title: 'Stock insuffisant',
-        message: `Stock disponible: ${produit.qte_stock}`,
-        color: 'red'
-      });
+      notifications.show({ title: 'Stock insuffisant', message: `Stock disponible: ${produit.qte_stock}`, color: 'red' });
       return;
     }
 
@@ -402,41 +362,20 @@ export default function NouveauDecompte({
     if (existing) {
       const nouvelleQuantite = existing.qte_decompte + quantite;
       if (nouvelleQuantite > existing.qte_stock) {
-        notifications.show({
-          title: 'Stock insuffisant',
-          message: `Stock disponible: ${existing.qte_stock}`,
-          color: 'red'
-        });
+        notifications.show({ title: 'Stock insuffisant', message: `Stock disponible: ${existing.qte_stock}`, color: 'red' });
         return;
       }
-
       setDetails(details.map((d: DecompteDetail) =>
         d.idProduit === produit.idProduit
-          ? {
-            ...d,
-            qte_decompte: nouvelleQuantite,
-            total: d.prix_vente * nouvelleQuantite
-          }
+          ? { ...d, qte_decompte: nouvelleQuantite, total: d.prix_vente * nouvelleQuantite }
           : d
       ));
     } else {
-      setDetails([...details, {
-        ...produit,
-        qte_decompte: quantite,
-        total: produit.prix_vente * quantite
-      }]);
+      setDetails([...details, { ...produit, qte_decompte: quantite, total: produit.prix_vente * quantite }]);
     }
 
-    setQuantites(prev => ({
-      ...prev,
-      [produit.idProduit]: 1
-    }));
-
-    notifications.show({
-      title: '✅ Ajouté',
-      message: `${quantite} x ${produit.designation} ajouté au panier`,
-      color: 'green'
-    });
+    setQuantites(prev => ({ ...prev, [produit.idProduit]: 1 }));
+    notifications.show({ title: 'Ajoute', message: `${quantite} x ${produit.designation} ajoute au panier`, color: 'green' });
   };
 
   const removeProduit = (idProduit: number) => {
@@ -444,20 +383,13 @@ export default function NouveauDecompte({
   };
 
   const updateQteDecompte = (idProduit: number, qte: number) => {
-    if (qte <= 0) {
-      removeProduit(idProduit);
-      return;
-    }
+    if (qte <= 0) { removeProduit(idProduit); return; }
 
     const produit = details.find((d: DecompteDetail) => d.idProduit === idProduit);
     if (!produit) return;
 
     if (qte > produit.qte_stock) {
-      notifications.show({
-        title: 'Stock insuffisant',
-        message: `Stock disponible: ${produit.qte_stock}`,
-        color: 'red'
-      });
+      notifications.show({ title: 'Stock insuffisant', message: `Stock disponible: ${produit.qte_stock}`, color: 'red' });
       return;
     }
 
@@ -491,20 +423,11 @@ export default function NouveauDecompte({
 
   const handleSubmit = async () => {
     if (!selectedClientId) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Sélectionnez un revendeur',
-        color: 'red'
-      });
+      notifications.show({ title: 'Erreur', message: 'Selectionnez un revendeur', color: 'red' });
       return;
     }
-
     if (details.length === 0) {
-      notifications.show({
-        title: 'Erreur',
-        message: 'Ajoutez au moins un produit',
-        color: 'red'
-      });
+      notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
       return;
     }
 
@@ -517,176 +440,126 @@ export default function NouveauDecompte({
     try {
       db = await getDb();
 
-      console.log('1 - BEGIN TRANSACTION');
-      //await db.execute('BEGIN TRANSACTION');
-
       const codeRecu = `DCP-${Date.now()}`;
-      console.log('2 - Insertion décompte');
 
       const result = await db.execute(`
-      INSERT INTO decomptes (
-        idClient,
-        date_decompte,
-        code_decompte,
-        montant_vente,
-        montant_net,
-        statut,
-        observation
-      )
-      VALUES (?, datetime('now'), ?, ?, ?, 'EN_ATTENTE', ?)
-    `, [
-        selectedClientId,
-        codeRecu,
-        totalVente,
-        montantNet,
-        observation || null
-      ]);
+        INSERT INTO decomptes (
+          idClient, date_decompte, code_decompte,
+          montant_vente, montant_net, statut, observation
+        ) VALUES (?, datetime('now'), ?, ?, ?, 'EN_ATTENTE', ?)
+      `, [selectedClientId, codeRecu, totalVente, montantNet, observation || null]);
 
       const idDecompte = Number(result.lastInsertId);
 
       const produitsNonReappro: string[] = [];
       const detailsReapprovisionnes: any[] = [];
-      console.log('3 - Boucle détails');
 
       // ==========================
       // DETAILS DU DECOMPTE
       // ==========================
       for (const detail of details) {
-console.log('4 - Insertion détail', detail.designation);
-        // Détail décompte
-        await db.execute(`
-        INSERT INTO decompte_details (
-          idDecompte,
-          idProduit,
-          qte_decompte,
-          prix_achat,
-          prix_vente,
-          commission_pourcentage,
-          designation,
-          total
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-          idDecompte,
-          detail.idProduit,
-          detail.qte_decompte,
-          detail.prix_achat,
-          detail.prix_vente,
-          detail.commission_pourcentage || 60,
-          detail.designation,
-          detail.total
-        ]);
-console.log('5 - Déstockage revendeur', detail.designation);
-        // Déstockage revendeur
-        await db.execute(`
-        UPDATE stock_revendeur
-        SET qte_stock = qte_stock - ?
-        WHERE idProduit = ? AND idRevendeur = ?
-      `, [
-          detail.qte_decompte,
-          detail.idProduit,
-          selectedClientId
-        ]);
-
-        // Vérification stock principal
+        // Verification stock principal (avant insert pour connaître qte_reappro)
         const stockPrincipal = await db.select(`
-        SELECT qte_stock
-        FROM products
-        WHERE idProduit = ?
-      `, [detail.idProduit]);
+          SELECT qte_stock FROM products WHERE idProduit = ?
+        `, [detail.idProduit]);
 
-        const stockDisponible =
-          stockPrincipal.length > 0
-            ? stockPrincipal[0].qte_stock
-            : 0;
+        const stockDisponible = stockPrincipal.length > 0 ? stockPrincipal[0].qte_stock : 0;
+        const quantiteAReapprovisionner = Math.min(detail.qte_decompte, stockDisponible);
 
-        const quantiteAReapprovisionner =
-          Math.min(detail.qte_decompte, stockDisponible);
+        await db.execute(`
+          INSERT INTO decompte_details (
+            idDecompte, idProduit, qte_decompte, qte_avant_decompte,
+            prix_achat, prix_vente, commission_pourcentage,
+            designation, total, qte_reappro
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          idDecompte, detail.idProduit, detail.qte_decompte,
+          detail.qte_stock,
+          detail.prix_achat, detail.prix_vente,
+          detail.commission_pourcentage || 60,
+          detail.designation, detail.total,
+          quantiteAReapprovisionner
+        ]);
 
-        console.log(`📦 Réapprovisionnement ${detail.designation}`);
-        console.log(`Demande: ${detail.qte_decompte}`);
-        console.log(`Disponible: ${stockDisponible}`);
-        console.log(`Réappro: ${quantiteAReapprovisionner}`);
+        // Destockage revendeur
+        await db.execute(`
+          UPDATE stock_revendeur
+          SET qte_stock = qte_stock - ?
+          WHERE idProduit = ? AND idRevendeur = ?
+        `, [detail.qte_decompte, detail.idProduit, selectedClientId]);
 
         if (quantiteAReapprovisionner > 0) {
+          detailsReapprovisionnes.push({ ...detail, quantiteReapprovisionnee: quantiteAReapprovisionner });
 
-          detailsReapprovisionnes.push({
-            ...detail,
-            quantiteReapprovisionnee:
-              quantiteAReapprovisionner
-          });
-console.log('6 - Réapprovisionnement', detail.designation);
-          // Réapprovisionnement revendeur
+          // Reapprovisionnement revendeur
           await db.execute(`
-          UPDATE stock_revendeur
-          SET qte_stock = qte_stock + ?
-          WHERE idProduit = ?
-          AND idRevendeur = ?
-        `, [
-            quantiteAReapprovisionner,
-            detail.idProduit,
-            selectedClientId
-          ]);
+            UPDATE stock_revendeur
+            SET qte_stock = qte_stock + ?
+            WHERE idProduit = ? AND idRevendeur = ?
+          `, [quantiteAReapprovisionner, detail.idProduit, selectedClientId]);
 
-          // Déstockage principal
+          // Destockage principal
           await db.execute(`
-          UPDATE products
-          SET qte_stock = qte_stock - ?
-          WHERE idProduit = ?
-        `, [
-            quantiteAReapprovisionner,
-            detail.idProduit
-          ]);
-console.log('7 - Mouvement stock', detail.designation);
+            UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
+          `, [quantiteAReapprovisionner, detail.idProduit]);
+
           // Mouvement stock principal
           await db.execute(`
-          INSERT INTO mouvements_stock (
-            idProduit,
-            type_mouvement,
-            quantite,
-            stock_avant,
-            stock_apres,
-            reference,
-            notes
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [
-            detail.idProduit,
-            'SORTIE_REAPPRO',
-            quantiteAReapprovisionner,
-            stockDisponible,
-            stockDisponible -
-            quantiteAReapprovisionner,
+            INSERT INTO mouvements_stock (
+              idProduit, type_mouvement, quantite,
+              stock_avant, stock_apres, reference, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [
+            detail.idProduit, 'SORTIE_REAPPRO', quantiteAReapprovisionner,
+            stockDisponible, stockDisponible - quantiteAReapprovisionner,
             `REAPPRO-${codeRecu}`,
-            `Réapprovisionnement revendeur ${selectedClientId}`
+            `Reapprovisionnement revendeur ${selectedClientId}`
           ]);
 
         } else {
-
-          produitsNonReappro.push(
-            detail.designation
-          );
+          produitsNonReappro.push(detail.designation);
         }
-console.log('8 - Mouvement revendeur', detail.designation);
+
         // Mouvement revendeur
         await db.execute(`
-        INSERT INTO mouvements_revendeur (
-          idProduit,
-          idRevendeur,
-          idDecompte,
-          type_mouvement,
-          qte_mouvement
-        )
-        VALUES (?, ?, ?, ?, ?)
-      `, [
-          detail.idProduit,
-          selectedClientId,
-          idDecompte,
-          'DECOMPTE_REAPPRO',
-          detail.qte_decompte
-        ]);
+          INSERT INTO mouvements_revendeur (
+            idProduit, idRevendeur, idDecompte,
+            type_mouvement, qte_mouvement
+          ) VALUES (?, ?, ?, ?, ?)
+        `, [detail.idProduit, selectedClientId, idDecompte, 'DECOMPTE_REAPPRO', detail.qte_decompte]);
       }
-console.log('9 - Facture approvisionnement');
+
+      // ==========================
+      // COMMANDE REVENDEUR AUTOMATIQUE
+      // ==========================
+      const codeCommande = `CMD-REV-${codeRecu}`;
+      const tousCompletes = produitsNonReappro.length === 0;
+      const aucunComplete = detailsReapprovisionnes.length === 0;
+      const statutCommande = tousCompletes ? 'LIVREE' : aucunComplete ? 'EN_ATTENTE' : 'PARTIELLE';
+
+      const commandeResult = await db.execute(`
+        INSERT INTO commandes (
+          code_commande, idClient, type_commande,
+          montant_ht, montant_ttc,
+          statut
+        ) VALUES (?, ?, 'REVENDEUR', ?, ?, ?)
+      `, [
+        codeCommande, selectedClientId,
+        totalAchat, totalVente,
+        statutCommande
+      ]);
+
+      const idCommandeRevendeur = Number(commandeResult.lastInsertId);
+
+      for (const detail of details) {
+        await db.execute(`
+          INSERT INTO commande_details (
+            idCommande, idProduit, qte_commande,
+            prix_unitaire_vente, remise
+          ) VALUES (?, ?, ?, ?, 0)
+        `, [idCommandeRevendeur, detail.idProduit, detail.qte_decompte, detail.prix_vente]);
+      }
+
       // ==========================
       // FACTURE D'APPROVISIONNEMENT
       // ==========================
@@ -695,139 +568,74 @@ console.log('9 - Facture approvisionnement');
         const year = new Date().getFullYear();
 
         const lastFacture: any[] = await db.select(`
-        SELECT code_facture
-        FROM factures_approvisionnement
-        WHERE code_facture LIKE 'APP-${year}-%'
-        ORDER BY idFactureAppro DESC
-        LIMIT 1
-      `);
+          SELECT code_facture FROM factures_approvisionnement
+          WHERE code_facture LIKE 'APP-${year}-%'
+          ORDER BY idFactureAppro DESC LIMIT 1
+        `);
 
         let nextNumber = 1;
-
         if (lastFacture.length > 0) {
-          const match =
-            lastFacture[0].code_facture.match(
-              /APP-\d+-(\d+)/
-            );
-
-          if (match) {
-            nextNumber = parseInt(match[1]) + 1;
-          }
+          const match = lastFacture[0].code_facture.match(/APP-\d+-(\d+)/);
+          if (match) nextNumber = parseInt(match[1]) + 1;
         }
 
-        const codeFacture =
-          `APP-${year}-${nextNumber
-            .toString()
-            .padStart(6, '0')}`;
+        const codeFactureAppro = `APP-${year}-${nextNumber.toString().padStart(6, '0')}`;
 
         let montantHT = 0;
-
         for (const detail of detailsReapprovisionnes) {
-          montantHT +=
-            detail.prix_achat *
-            detail.quantiteReapprovisionnee;
+          montantHT += detail.prix_achat * detail.quantiteReapprovisionnee;
         }
-
         const montantTTC = montantHT * 1.18;
 
         const factureResult = await db.execute(`
-        INSERT INTO factures_approvisionnement (
-          code_facture,
-          idRevendeur,
-          idDecompte,
-          date_facture,
-          montant_ht,
-          montant_ttc,
-          statut,
-          reference_decompte
-        )
-        VALUES (
-          ?, ?, ?, datetime('now'),
-          ?, ?, 'EN_ATTENTE', ?
-        )
-      `, [
-          codeFacture,
-          selectedClientId,
-          idDecompte,
-          montantHT,
-          montantTTC,
-          codeRecu
-        ]);
+          INSERT INTO factures_approvisionnement (
+            code_facture, idRevendeur, idDecompte, date_facture,
+            montant_ht, montant_ttc, statut, reference_decompte
+          ) VALUES (?, ?, ?, datetime('now'), ?, ?, 'EN_ATTENTE', ?)
+        `, [codeFactureAppro, selectedClientId, idDecompte, montantHT, montantTTC, codeRecu]);
 
-        const idFactureAppro =
-          Number(factureResult.lastInsertId);
+        const idFactureAppro = Number(factureResult.lastInsertId);
 
         for (const detail of detailsReapprovisionnes) {
-
           await db.execute(`
-          INSERT INTO
-          factures_approvisionnement_details (
-            idFactureAppro,
-            idProduit,
-            quantite,
-            prix_achat,
-            prix_vente,
-            total_ht,
-            total_ttc
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [
-            idFactureAppro,
-            detail.idProduit,
-            detail.quantiteReapprovisionnee,
-            detail.prix_achat,
-            detail.prix_vente,
-            detail.prix_achat *
-            detail.quantiteReapprovisionnee,
-            detail.prix_achat *
-            detail.quantiteReapprovisionnee * 1.18
+            INSERT INTO factures_approvisionnement_details (
+              idFactureAppro, idProduit, quantite,
+              prix_achat, prix_vente, total_ht, total_ttc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `, [
+            idFactureAppro, detail.idProduit, detail.quantiteReapprovisionnee,
+            detail.prix_achat, detail.prix_vente,
+            detail.prix_achat * detail.quantiteReapprovisionnee,
+            detail.prix_achat * detail.quantiteReapprovisionnee * 1.18
           ]);
         }
 
         await db.execute(`
-        UPDATE decomptes
-        SET id_facture_approvisionnement = ?
-        WHERE idDecompte = ?
-      `, [
-          idFactureAppro,
-          idDecompte
+          UPDATE decomptes SET id_facture_approvisionnement = ? WHERE idDecompte = ?
+        `, [idFactureAppro, idDecompte]);
+
+        // Facture revendeur liee a la commande (produits completes uniquement)
+        const codeFactureRev = `FACT-REV-${codeRecu}`;
+        await db.execute(`
+          INSERT INTO factures_revendeur (
+            idCommande, idRevendeur, code_facture,
+            montant_ht, montant_ttc, commission, statut
+          ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
+        `, [
+          idCommandeRevendeur, selectedClientId, codeFactureRev,
+          montantHT, montantTTC, totalCommission
         ]);
       }
 
-      // // Journal caisse
-      // try {
-      //   await journalCaisseService
-      //     .ajouterDecompteRevendeur({
-      //       montant: montantNet,
-      //       idDecompte,
-      //       codeDecompte: codeRecu,
-      //       revendeurNom:
-      //         revendeurs.find(
-      //           r =>
-      //             parseInt(r.value) ===
-      //             selectedClientId
-      //         )?.label || ''
-      //     });
-      // } catch (err) {
-      //   console.error(
-      //     'Erreur journal caisse:',
-      //     err
-      //   );
-      // }
-
-      // await db.execute('COMMIT');
-
-      // if (produitsNonReappro.length > 0) {
-      //   setProduitsNonReapprovisionnes(
-      //     produitsNonReappro
-      //   );
-      // }
+      if (produitsNonReappro.length > 0) {
+        setProduitsNonReapprovisionnes(produitsNonReappro);
+      }
 
       notifications.show({
-        title: '✅ Succès',
+        title: 'Succes',
         message: isEditMode
-          ? 'Décompte modifié avec succès'
-          : 'Décompte créé avec succès',
+          ? `Decompte modifie | Commande ${codeCommande} [${statutCommande}]`
+          : `Decompte cree | Commande ${codeCommande} [${statutCommande}]`,
         color: 'green'
       });
 
@@ -837,37 +645,14 @@ console.log('9 - Facture approvisionnement');
         navigate('/decomptes');
       }
 
-    } catch (error: any) {
-
-      if (db) {
-        try {
-          //await db.execute('ROLLBACK');
-        } catch (rollbackError) {
-          console.error(
-            'Erreur rollback:',
-            rollbackError
-          );
-        }
-      }
-
-      console.error(
-        'Erreur création décompte:',
-        error
-      );
-
-      setError(
-        error?.message ||
-        'Erreur lors de la création du décompte'
-      );
-
+    } catch (err: any) {
+      console.error('Erreur creation decompte:', err);
+      setError(err?.message || 'Erreur lors de la creation du decompte');
       notifications.show({
-        title: '❌ Erreur',
-        message:
-          error?.message ||
-          'Erreur lors de la création du décompte',
+        title: 'Erreur',
+        message: err?.message || 'Erreur lors de la creation du decompte',
         color: 'red'
       });
-
     } finally {
       setSaving(false);
     }
@@ -900,23 +685,18 @@ console.log('9 - Facture approvisionnement');
             </ThemeIcon>
             <div>
               <Title order={2} c="white">
-                {isEditMode ? 'Modifier le décompte' : 'Nouveau décompte'}
+                {isEditMode ? 'Modifier le decompte' : 'Nouveau decompte'}
               </Title>
               <Text c="gray.3" size="sm">
                 {isEditMode
-                  ? 'Modifier un décompte existant'
+                  ? 'Modifier un decompte existant'
                   : clientIdFromState || clientIdProp
-                    ? `Créer un décompte pour ${revendeurs.find((r: any) => parseInt(r.value) === (clientIdFromState || clientIdProp))?.label || 'le revendeur sélectionné'}`
-                    : 'Créer un nouveau décompte pour un revendeur'}
+                    ? `Creer un decompte pour ${revendeurs.find((r: any) => parseInt(r.value) === (clientIdFromState || clientIdProp))?.label || 'le revendeur selectionne'}`
+                    : 'Creer un nouveau decompte pour un revendeur'}
               </Text>
             </div>
           </Group>
-          <Button
-            variant="light"
-            color="gray"
-            leftSection={<IconArrowLeft size={16} />}
-            onClick={handleCancel}
-          >
+          <Button variant="light" color="gray" leftSection={<IconArrowLeft size={16} />} onClick={handleCancel}>
             Retour
           </Button>
         </Group>
@@ -929,15 +709,18 @@ console.log('9 - Facture approvisionnement');
       )}
 
       {produitsNonReapprovisionnes.length > 0 && (
-        <Alert icon={<IconAlertCircle size={16} />} title="⚠️ Produits non réapprovisionnés" color="orange">
+        <Alert icon={<IconAlertCircle size={16} />} title="Produits non reapprovisionnes" color="orange">
           <Text size="sm">
-            Les produits suivants n'ont pas pu être réapprovisionnés car le stock principal est insuffisant :
+            Les produits suivants n'ont pas pu etre reapprovisionnes (stock principal insuffisant) :
           </Text>
           <Group gap="xs" mt="xs" wrap="wrap">
             {produitsNonReapprovisionnes.map((nom, idx) => (
               <Badge key={idx} color="orange" variant="light">{nom}</Badge>
             ))}
           </Group>
+          <Text size="xs" mt="xs" c="dimmed">
+            Ces produits figurent dans la commande revendeur avec le statut EN_ATTENTE.
+          </Text>
         </Alert>
       )}
 
@@ -959,16 +742,16 @@ console.log('9 - Facture approvisionnement');
             {selectedClientId && (
               <Paper p="xs" withBorder radius="md" bg="gray.0" mt="auto">
                 <Group gap="xs">
-                  <IconBuildingStore size={14} color="#1b365d" />
+                  <IconBuildingStore size={14} color="#4a6cf7" />
                   <Text size="sm" fw={500}>
                     {revendeurs.find((r: any) => parseInt(r.value) === selectedClientId)?.label}
                   </Text>
                   <Badge color="green" variant="light" size="xs">
-                    {(clientIdFromState || clientIdProp) ? 'Pré-sélectionné' : 'Sélectionné'}
+                    {(clientIdFromState || clientIdProp) ? 'Pre-selectionne' : 'Selectionne'}
                   </Badge>
                   {produitsPreSelectionnes && produitsPreSelectionnes.length > 0 && (
                     <Badge color="blue" variant="light" size="xs">
-                      📦 {produitsPreSelectionnes.length} produits pré-sélectionnés
+                      {produitsPreSelectionnes.length} produits pre-selectionnes
                     </Badge>
                   )}
                 </Group>
@@ -985,7 +768,7 @@ console.log('9 - Facture approvisionnement');
               <ThemeIcon color="grape" variant="light" radius="md" size="sm">
                 <IconPackage size={14} />
               </ThemeIcon>
-              <Text fw={600} size="sm" c="#1b365d">Produits disponibles</Text>
+              <Text fw={600} size="sm" c="blue.4">Produits disponibles</Text>
               <Badge color="green" variant="light" size="xs">{produitsDisponibles.length} en stock</Badge>
             </Group>
             <Tooltip label="Actualiser">
@@ -998,25 +781,19 @@ console.log('9 - Facture approvisionnement');
           <Grid>
             <Grid.Col span={5}>
               <TextInput
-                placeholder="Rechercher par code, désignation..."
+                placeholder="Rechercher par code, designation..."
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 leftSection={<IconSearch size={14} />}
                 size="xs"
               />
             </Grid.Col>
             <Grid.Col span={4}>
               <Select
-                placeholder="Catégorie"
+                placeholder="Categorie"
                 data={categories.map((c: string) => ({ value: c, label: c }))}
                 value={selectedCategory}
-                onChange={(value) => {
-                  setSelectedCategory(value);
-                  setCurrentPage(1);
-                }}
+                onChange={(value) => { setSelectedCategory(value); setCurrentPage(1); }}
                 clearable
                 size="xs"
               />
@@ -1039,15 +816,15 @@ console.log('9 - Facture approvisionnement');
             ) : (
               <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                 <Table.Thead>
-                  <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                    <Table.Th c="white" style={{ width: '10%', minWidth: '80px' }}>Code</Table.Th>
-                    <Table.Th c="white" style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
-                    <Table.Th c="white" style={{ width: '12%', minWidth: '90px' }}>Catégorie</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Unité</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Stock</Table.Th>
-                    <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }} ta="right">Prix</Table.Th>
-                    <Table.Th c="white" style={{ width: '10%', minWidth: '70px' }} ta="center">Qté</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%', minWidth: '50px' }} ta="center">Action</Table.Th>
+                  <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
+                    <Table.Th c="white" style={{ width: '10%' }}>Code</Table.Th>
+                    <Table.Th c="white" style={{ width: '25%' }}>Designation</Table.Th>
+                    <Table.Th c="white" style={{ width: '12%' }}>Categorie</Table.Th>
+                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Unite</Table.Th>
+                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Stock</Table.Th>
+                    <Table.Th c="white" style={{ width: '12%' }} ta="right">Prix</Table.Th>
+                    <Table.Th c="white" style={{ width: '10%' }} ta="center">Qte</Table.Th>
+                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Action</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -1056,20 +833,12 @@ console.log('9 - Facture approvisionnement');
                     const quantite = getQuantite(product.idProduit);
                     return (
                       <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
+                        <Table.Td><Text fw={500} size="xs" lineClamp={1}>{product.code_produit}</Text></Table.Td>
+                        <Table.Td><Text fw={500} size="xs" lineClamp={2}>{product.designation}</Text></Table.Td>
                         <Table.Td>
-                          <Text fw={500} size="xs" lineClamp={1}>{product.code_produit}</Text>
+                          <Badge variant="light" size="xs" fullWidth>{product.categorie || '-'}</Badge>
                         </Table.Td>
-                        <Table.Td>
-                          <Text fw={500} size="xs" lineClamp={2}>{product.designation}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge variant="light" size="xs" fullWidth>
-                            {product.categorie || '-'}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          <Text size="xs">{product.unite_base || 'pc'}</Text>
-                        </Table.Td>
+                        <Table.Td ta="center"><Text size="xs">{product.unite_base || 'pc'}</Text></Table.Td>
                         <Table.Td ta="center">
                           <Badge
                             color={isRupture ? 'red' : (product.qte_stock || 0) < 5 ? 'orange' : 'green'}
@@ -1080,9 +849,7 @@ console.log('9 - Facture approvisionnement');
                           </Badge>
                         </Table.Td>
                         <Table.Td ta="right">
-                          <Text fw={600} c="blue" size="xs">
-                            {product.prix_vente.toLocaleString()} F
-                          </Text>
+                          <Text fw={600} c="blue" size="xs">{product.prix_vente.toLocaleString()} F</Text>
                         </Table.Td>
                         <Table.Td ta="center">
                           {isRupture ? (
@@ -1095,7 +862,6 @@ console.log('9 - Facture approvisionnement');
                               value={quantite}
                               onChange={(val) => updateQuantite(product.idProduit, Number(val) || 1)}
                               style={{ width: 60 }}
-                              placeholder="0"
                               hideControls
                             />
                           )}
@@ -1111,11 +877,7 @@ console.log('9 - Facture approvisionnement');
                                 if (qte > 0) {
                                   ajouterProduitAuPanier(product, qte);
                                 } else {
-                                  notifications.show({
-                                    title: 'Erreur',
-                                    message: 'Veuillez saisir une quantité valide',
-                                    color: 'red'
-                                  });
+                                  notifications.show({ title: 'Erreur', message: 'Veuillez saisir une quantite valide', color: 'red' });
                                 }
                               }}
                             >
@@ -1146,27 +908,25 @@ console.log('9 - Facture approvisionnement');
               <ThemeIcon color="orange" variant="light" radius="md" size="sm">
                 <IconShoppingCart size={14} />
               </ThemeIcon>
-              <Text fw={600} size="sm" c="#1b365d">Panier</Text>
+              <Text fw={600} size="sm" c="blue.4">Panier</Text>
               <Badge color="orange" variant="light" size="xs">{details.length} produits</Badge>
             </Group>
-            <Group gap="xs">
-              <Text size="xs" c="dimmed">Total: {totalVente.toLocaleString()} FCFA</Text>
-            </Group>
+            <Text size="xs" c="dimmed">Total: {totalVente.toLocaleString()} FCFA</Text>
           </Group>
 
           <ScrollArea h={200}>
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
               <Table.Thead>
-                <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                  <Table.Th c="white" style={{ width: '10%', minWidth: '80px' }}>Code</Table.Th>
-                  <Table.Th c="white" style={{ width: '20%', minWidth: '120px' }}>Désignation</Table.Th>
-                  <Table.Th c="white" style={{ width: '10%', minWidth: '80px' }}>Catégorie</Table.Th>
-                  <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Unité</Table.Th>
-                  <Table.Th c="white" style={{ width: '10%', minWidth: '60px' }} ta="center">Qté</Table.Th>
-                  <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }} ta="right">PA</Table.Th>
-                  <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }} ta="right">PV</Table.Th>
-                  <Table.Th c="white" style={{ width: '13%', minWidth: '90px' }} ta="right">Total</Table.Th>
-                  <Table.Th c="white" style={{ width: '5%', minWidth: '40px' }} ta="center">Action</Table.Th>
+                <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
+                  <Table.Th c="white" style={{ width: '10%' }}>Code</Table.Th>
+                  <Table.Th c="white" style={{ width: '20%' }}>Designation</Table.Th>
+                  <Table.Th c="white" style={{ width: '10%' }}>Categorie</Table.Th>
+                  <Table.Th c="white" style={{ width: '8%' }} ta="center">Unite</Table.Th>
+                  <Table.Th c="white" style={{ width: '10%' }} ta="center">Qte</Table.Th>
+                  <Table.Th c="white" style={{ width: '12%' }} ta="right">PA</Table.Th>
+                  <Table.Th c="white" style={{ width: '12%' }} ta="right">PV</Table.Th>
+                  <Table.Th c="white" style={{ width: '13%' }} ta="right">Total</Table.Th>
+                  <Table.Th c="white" style={{ width: '5%' }} ta="center">Sup</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1206,7 +966,7 @@ console.log('9 - Facture approvisionnement');
           <Group justify="space-between" gap="xs">
             <Group gap="xs">
               <Badge size="sm" variant="light" color="blue">Total Vente: {totalVente.toLocaleString()} F</Badge>
-              <Badge size="sm" variant="light" color="green">Bénéfice: {totalBenefice.toLocaleString()} F</Badge>
+              <Badge size="sm" variant="light" color="green">Benefice: {totalBenefice.toLocaleString()} F</Badge>
               <Badge size="sm" variant="light" color="orange">Commission: {totalCommission.toLocaleString()} F</Badge>
               <Badge size="sm" variant="filled" color="green">Net: {montantNet.toLocaleString()} F</Badge>
             </Group>
@@ -1214,21 +974,19 @@ console.log('9 - Facture approvisionnement');
         </Card>
       ) : (
         <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
-          <Group gap="xs" mb="xs" justify="space-between">
-            <Group gap="xs">
-              <ThemeIcon color="orange" variant="light" radius="md" size="sm">
-                <IconShoppingCart size={14} />
-              </ThemeIcon>
-              <Text fw={600} size="sm" c="#1b365d">Panier</Text>
-              <Badge color="orange" variant="light" size="xs">0 produits</Badge>
-            </Group>
+          <Group gap="xs" mb="xs">
+            <ThemeIcon color="orange" variant="light" radius="md" size="sm">
+              <IconShoppingCart size={14} />
+            </ThemeIcon>
+            <Text fw={600} size="sm" c="blue.4">Panier</Text>
+            <Badge color="orange" variant="light" size="xs">0 produits</Badge>
           </Group>
 
           <Center py={40}>
             <Stack align="center" gap="xs">
               <IconShoppingCart size={48} color="#adb5bd" stroke={1.5} />
               <Text c="dimmed" size="sm">Votre panier est vide</Text>
-              <Text c="dimmed" size="xs">Ajoutez des produits depuis la liste ci-dessous</Text>
+              <Text c="dimmed" size="xs">Ajoutez des produits depuis la liste ci-dessus</Text>
               {produitsPreSelectionnes && produitsPreSelectionnes.length > 0 && (
                 <Button
                   size="sm"
@@ -1237,40 +995,29 @@ console.log('9 - Facture approvisionnement');
                   leftSection={<IconPackage size={14} />}
                   onClick={() => {
                     const produitsAvecStock = (produitsPreSelectionnes as any[]).filter((p: any) => p.qte_stock > 0);
-
                     if (produitsAvecStock.length === 0) {
-                      notifications.show({
-                        title: '⚠️ Attention',
-                        message: 'Aucun produit en stock disponible',
-                        color: 'orange'
-                      });
+                      notifications.show({ title: 'Attention', message: 'Aucun produit en stock disponible', color: 'orange' });
                       return;
                     }
-
                     const produitsAAjouter: DecompteDetail[] = produitsAvecStock.map((p: any) => ({
                       idProduit: p.idProduit,
                       idStockRevendeur: p.idStockRevendeur || 0,
                       designation: p.designation || 'Produit',
                       code_produit: p.code_produit || '',
-                      categorie: p.categorie || 'Non catégorisé',
+                      categorie: p.categorie || 'Non categorise',
                       prix_achat: p.prix_achat || 0,
                       prix_vente: p.prix_vente || 0,
                       commission_pourcentage: p.commission_pourcentage || 60,
                       qte_stock: p.qte_stock || 0,
                       qte_decompte: 1,
                       total: (p.prix_vente || 0) * 1,
-                      unite_base: p.unite_base || 'pièce'
+                      unite_base: p.unite_base || 'piece'
                     }));
-
                     setDetails(produitsAAjouter);
-                    notifications.show({
-                      title: '✅ Succès',
-                      message: `${produitsAAjouter.length} produit(s) ajoutés au panier`,
-                      color: 'green'
-                    });
+                    notifications.show({ title: 'Succes', message: `${produitsAAjouter.length} produit(s) ajoutes au panier`, color: 'green' });
                   }}
                 >
-                  📦 Ajouter {(produitsPreSelectionnes as any[]).filter((p: any) => p.qte_stock > 0).length} produits en stock
+                  Ajouter {(produitsPreSelectionnes as any[]).filter((p: any) => p.qte_stock > 0).length} produits en stock
                 </Button>
               )}
             </Stack>
@@ -1288,12 +1035,7 @@ console.log('9 - Facture approvisionnement');
       </Card>
 
       <Group justify="flex-end" gap="sm">
-        <Button
-          variant="outline"
-          onClick={handleCancel}
-          disabled={saving}
-          leftSection={<IconTrash size={14} />}
-        >
+        <Button variant="outline" onClick={handleCancel} disabled={saving} leftSection={<IconTrash size={14} />}>
           Annuler
         </Button>
         <Button
@@ -1303,7 +1045,8 @@ console.log('9 - Facture approvisionnement');
           loading={saving}
           disabled={details.length === 0 || !selectedClientId}
         >
-          {isEditMode ? 'Modifier' : 'Créer'} le décompte
+          {isEditMode ? 'Modifier' : 'Creer'} le decompte
+
         </Button>
       </Group>
     </Stack>

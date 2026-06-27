@@ -473,6 +473,83 @@ export const runMigrations = async (db: any): Promise<void> => {
       console.warn('⚠️ [runMigrations] Erreur sur utilisateurs:', error);
     }
 
+    // 4e. Vérifier commande_details — remise + idConditionnement
+    try {
+      const cmdDetailsInfo = await db.select(`PRAGMA table_info(commande_details)`);
+      const cmdDetailsCols = cmdDetailsInfo.map((c: any) => c.name);
+      if (!cmdDetailsCols.includes('remise')) {
+        await db.execute(`ALTER TABLE commande_details ADD COLUMN remise REAL DEFAULT 0`);
+        migrationCount++;
+      }
+      if (!cmdDetailsCols.includes('idConditionnement')) {
+        await db.execute(`ALTER TABLE commande_details ADD COLUMN idConditionnement INTEGER`);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur commande_details:', error);
+    }
+
+    // 4f. Vérifier decompte_details — qte_reappro
+    try {
+      const ddInfo = await db.select(`PRAGMA table_info(decompte_details)`);
+      const ddCols = ddInfo.map((c: any) => c.name);
+      if (!ddCols.includes('qte_reappro')) {
+        await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_reappro REAL DEFAULT 0`);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur decompte_details qte_reappro:', error);
+    }
+
+    // 4g. Créer factures_approvisionnement si manquant
+    try {
+      const factAppInfo = await db.select(`PRAGMA table_info(factures_approvisionnement)`);
+      if (factAppInfo.length === 0) {
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS factures_approvisionnement (
+            idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+            code_facture TEXT UNIQUE NOT NULL,
+            idRevendeur INTEGER NOT NULL,
+            idDecompte INTEGER NOT NULL,
+            date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+            montant_ht REAL DEFAULT 0,
+            montant_ttc REAL DEFAULT 0,
+            statut TEXT DEFAULT 'EN_ATTENTE',
+            reference_decompte TEXT,
+            notes TEXT,
+            FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+            FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+          )
+        `);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur factures_approvisionnement:', error);
+    }
+
+    try {
+      const factAppDetInfo = await db.select(`PRAGMA table_info(factures_approvisionnement_details)`);
+      if (factAppDetInfo.length === 0) {
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
+            idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+            idFactureAppro INTEGER NOT NULL,
+            idProduit INTEGER NOT NULL,
+            quantite REAL NOT NULL,
+            prix_achat REAL NOT NULL,
+            prix_vente REAL NOT NULL,
+            total_ht REAL NOT NULL,
+            total_ttc REAL NOT NULL,
+            FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
+            FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+          )
+        `);
+        migrationCount++;
+      }
+    } catch (error) {
+      console.warn('⚠️ [runMigrations] Erreur sur factures_approvisionnement_details:', error);
+    }
+
     // 5. Vérifier factures_revendeur_details
     console.log('📋 [runMigrations] Vérification de la table factures_revendeur_details...');
     try {
@@ -1032,6 +1109,7 @@ CREATE TABLE IF NOT EXISTS decompte_details (
     idProduit INTEGER NOT NULL,
     qte_decompte REAL NOT NULL DEFAULT 0,
     qte_avant_decompte REAL DEFAULT 0,
+    qte_reappro REAL DEFAULT 0,
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
     benefice REAL DEFAULT 0,
@@ -1191,6 +1269,38 @@ CREATE TABLE IF NOT EXISTS reglements_revendeur (
     observation TEXT,
     FOREIGN KEY(idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur),
     FOREIGN KEY(idClient) REFERENCES clients(idClient)
+);
+
+-- =====================================================
+-- 10b. FACTURES APPROVISIONNEMENT
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS factures_approvisionnement (
+    idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_facture TEXT UNIQUE NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    idDecompte INTEGER NOT NULL,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    reference_decompte TEXT,
+    notes TEXT,
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+);
+
+CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
+    idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFactureAppro INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_achat REAL NOT NULL,
+    prix_vente REAL NOT NULL,
+    total_ht REAL NOT NULL,
+    total_ttc REAL NOT NULL,
+    FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
 -- =====================================================

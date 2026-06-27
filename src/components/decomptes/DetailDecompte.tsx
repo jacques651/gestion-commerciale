@@ -170,16 +170,25 @@ export default function DetailDecompte() {
   const statutInfo = getStatutColor(decompte.statut);
 
   // Préparer les données pour le reçu
-  const recuDetails = (decompte.details || []).map((d: any) => ({
-    designation: d.designation || 'Produit',
-    categorie: d.categorie || '-',
-    unite: d.unite_base || 'pièce',
-    qte: d.qte_decompte || 0,
-    prix_achat: d.prix_achat || 0,
-    prix_vente: d.prix_vente || 0,
-    benefice: ((d.prix_vente || 0) - (d.prix_achat || 0)) * (d.qte_decompte || 0),
-    total_vente: (d.qte_decompte || 0) * (d.prix_vente || 0)
-  }));
+  const recuDetails = (decompte.details || []).map((d: any) => {
+    const qteDecompte = d.qte_decompte || 0;
+    const qteAvantDecompte = d.qte_avant_decompte || 0;
+    const qteReappro = d.qte_reappro || 0;
+    return {
+      designation: d.designation || 'Produit',
+      categorie: d.categorie || '-',
+      unite: d.unite_base || 'pièce',
+      qte_decompte: qteDecompte,
+      qte: qteDecompte,
+      qte_initiale: qteAvantDecompte + qteReappro,
+      qte_reappro: qteReappro,
+      reliquat: qteAvantDecompte - qteDecompte + qteReappro,
+      prix_achat: d.prix_achat || 0,
+      prix_vente: d.prix_vente || 0,
+      benefice: ((d.prix_vente || 0) - (d.prix_achat || 0)) * qteDecompte,
+      total_vente: qteDecompte * (d.prix_vente || 0)
+    };
+  });
 
   return (
     <>
@@ -189,7 +198,8 @@ export default function DetailDecompte() {
           p="md"
           radius="lg"
           style={{
-            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+            borderBottom: '3px solid #e94560',
           }}
         >
           <Flex justify="space-between" align="center" wrap="wrap">
@@ -246,32 +256,32 @@ export default function DetailDecompte() {
           <Card withBorder radius="md" shadow="sm" p="sm">
             <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="xs">
               <Group gap="xs">
-                <IconFileInvoice size={14} color="#1b365d" />
+                <IconFileInvoice size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Code:</Text>
                 <Text size="xs" fw={600}>{decompte.code_decompte || `DC-${decompte.idDecompte}`}</Text>
               </Group>
               <Group gap="xs">
-                <IconCalendar size={14} color="#1b365d" />
+                <IconCalendar size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Date:</Text>
                 <Text size="xs">{new Date(decompte.date_decompte).toLocaleDateString('fr-FR')}</Text>
               </Group>
               <Group gap="xs">
-                <IconUser size={14} color="#1b365d" />
+                <IconUser size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Revendeur:</Text>
                 <Text size="xs" fw={500}>{decompte.NomComplet || 'Inconnu'}</Text>
               </Group>
               <Group gap="xs">
-                <IconBuildingStore size={14} color="#1b365d" />
+                <IconBuildingStore size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Société:</Text>
                 <Text size="xs">{decompte.Societe || "-"}</Text>
               </Group>
               <Group gap="xs">
-                <IconPercentage size={14} color="#1b365d" />
+                <IconPercentage size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Taux commission:</Text>
                 <Badge color="orange" variant="light" size="xs">{tauxCommission}%</Badge>
               </Group>
               <Group gap="xs">
-                <IconCash size={14} color="#1b365d" />
+                <IconCash size={14} color="#4a6cf7" />
                 <Text size="xs" c="dimmed">Statut:</Text>
                 <Badge color={statutInfo.color} size="xs" style={{ backgroundColor: statutInfo.bg }}>
                   {statutInfo.label}
@@ -294,7 +304,7 @@ export default function DetailDecompte() {
           <Card withBorder radius="md" shadow="sm" p="sm" mt="xs">
             <Flex justify="space-between" align="center" mb="xs">
               <Group gap="xs">
-                <IconPackage size={14} color="#1b365d" />
+                <IconPackage size={14} color="#4a6cf7" />
                 <Text fw={600} size="sm">Produits</Text>
               </Group>
               <Badge color="blue" variant="light" size="xs">
@@ -304,7 +314,7 @@ export default function DetailDecompte() {
             <ScrollArea h={300}>
               <Table striped highlightOnHover withColumnBorders verticalSpacing="xs" horizontalSpacing="xs" style={{ fontSize: '12px' }}>
                 <Table.Thead>
-                  <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                  <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
                     <Table.Th c="white" w={30}>#</Table.Th>
                     <Table.Th c="white">Produit</Table.Th>
                     <Table.Th c="white" ta="center" w={50}>Qté</Table.Th>

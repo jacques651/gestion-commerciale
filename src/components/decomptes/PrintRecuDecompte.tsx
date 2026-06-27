@@ -100,6 +100,8 @@ export default function PrintRecuDecompte() {
             dd.idDetailRevendeur,
             dd.idProduit,
             dd.qte_decompte,
+            dd.qte_avant_decompte,
+            dd.qte_reappro,
             dd.prix_achat,
             dd.prix_vente,
             dd.commission_pourcentage,
@@ -110,11 +112,11 @@ export default function PrintRecuDecompte() {
             p.categorie,
             COALESCE(
               (
-                SELECT sr.qte_stock 
-                FROM stock_revendeur sr 
-                WHERE sr.idRevendeur = ? 
+                SELECT sr.qte_stock
+                FROM stock_revendeur sr
+                WHERE sr.idRevendeur = ?
                   AND sr.idProduit = dd.idProduit
-              ), 
+              ),
               0
             ) as stock_actuel
           FROM decompte_details dd
@@ -126,12 +128,14 @@ export default function PrintRecuDecompte() {
         // Transformer les détails avec les bonnes quantités
         const recuDetails: DecompteDetail[] = (detailsData || []).map((detail: any) => {
           const qteDecompte = detail.qte_decompte || 0;
+          const qteAvantDecompte = detail.qte_avant_decompte || 0;
+          const qteReappro = detail.qte_reappro || 0;
           const stockActuel = detail.stock_actuel || 0;
-          
-          // Quantité initiale = stock actuel + quantité décomptée
-          const qteInitiale = stockActuel + qteDecompte;
-          
-          // Reliquat = stock actuel (après le décompte)
+
+          // Quantité initiale = stock avant décompte + réappro du stock principal
+          const qteInitiale = qteAvantDecompte + qteReappro;
+
+          // Reliquat = stock actuel (après le décompte et réappro)
           const reliquat = stockActuel;
           
           return {
