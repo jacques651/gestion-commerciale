@@ -28,7 +28,7 @@ const FicheVente: React.FC<FicheVenteProps> = ({ venteId, onBack }) => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        <Card withBorder radius="md" p="lg" bg="#1b365d">
+        <Card withBorder radius="md" p="lg" bg="#1a1a2e">
           <Group justify="space-between"><Group gap="xs"><IconBuildingStore size={24} color="white" /><Title order={2} c="white">Vente {vente.code_vente}</Title></Group>
           <Button variant="light" color="white" leftSection={<IconArrowLeft size={16} />} onClick={onBack}>Retour</Button></Group>
         </Card>

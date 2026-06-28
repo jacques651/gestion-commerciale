@@ -133,12 +133,13 @@ export const GestionDecomptes: React.FC = () => {
         p="xl"
         radius="lg"
         style={{
-          background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+            borderBottom: '3px solid #e94560',
         }}
       >
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
+            <ThemeIcon size={45} radius="md" color="red" variant="filled">
               <IconReceipt size={30} />
             </ThemeIcon>
             <div>

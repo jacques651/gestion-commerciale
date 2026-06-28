@@ -13,9 +13,9 @@ import {
   Loader,
   Center,
   Badge,
-  Grid
-} from '@mantine/core';
-import { IconPrinter, IconDownload } from '@tabler/icons-react';
+  Grid,
+  Alert} from '@mantine/core';
+import { IconPrinter, IconDownload, IconAlertCircle } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import html2pdf from 'html2pdf.js';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
@@ -98,7 +98,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 
   const getStatutInfo = (statut?: string) => {
     const s = (statut || '').toLowerCase();
-    if (['payée', 'paye'].includes(s)) return { color: 'green', label: 'PAYÉE' };
+    if (['payée', 'paye', 'reglee'].includes(s)) return { color: 'green', label: 'PAYÉE' };
     if (['en_attente', 'en attente'].includes(s)) return { color: 'orange', label: 'EN ATTENTE' };
     if (['en cours'].includes(s)) return { color: 'orange', label: 'EN COURS' };
     if (['annulee', 'annulée'].includes(s)) return { color: 'red', label: 'ANNULÉE' };
@@ -107,19 +107,35 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
     return { color: 'gray', label: 'EN ATTENTE' };
   };
 
+  // ✅ Vérifier si la facture existe
+  if (!facture) {
+    return (
+      <Alert icon={<IconAlertCircle size={16} />} title="Facture non trouvée" color="red">
+        <Text>Les données de cette facture sont introuvables.</Text>
+      </Alert>
+    );
+  }
+
   const statutInfo = getStatutInfo(facture?.statut);
   const tauxCommission = facture?.taux_commission || 60;
+  
+  // ✅ Calcul du total TTC
   const totalTTC = facture?.montant_ttc || facture?.total_ttc || 0;
 
+  // ✅ Calcul des détails
   const detailsWithCalculs = useMemo<DetailsWithCalculs[]>(() => {
-    return (facture?.details || []).map((detail: any, idx: number) => {
+    if (!facture?.details || facture.details.length === 0) {
+      return [];
+    }
+    
+    return facture.details.map((detail: any, idx: number) => {
       const qte = detail.qte_commande || detail.quantite || detail.qte || 0;
       const prixAchat = detail.prix_achat_base || detail.prix_achat || 0;
       const prixVente = detail.prix_unitaire_vente || detail.prix_vente || detail.prix_unitaire || 0;
 
       return {
         numero: idx + 1,
-        designation: detail.designation || detail.nom_produit || detail.produit_nom || '-',
+        designation: detail.designation || detail.nom_produit || detail.produit_nom || 'Produit',
         categorie: detail.categorie || detail.categorie_produit || '-',
         unite: detail.unite_base || detail.unite_mesure || 'pièce',
         qte,
@@ -138,10 +154,11 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
   const commission = totalBenefice > 0 ? (totalBenefice * tauxCommission) / 100 : 0;
   const netAReverser = totalTTC - commission;
 
-  const revendeurNom = facture?.NomComplet || facture?.nom_revendeur || 'N/A';
+  // ✅ Récupération des infos du revendeur
+  const revendeurNom = facture?.NomComplet || facture?.nom_revendeur || facture?.client_nom || 'N/A';
   const revendeurSociete = facture?.Societe || facture?.societe_revendeur || '';
-  const revendeurTel = facture?.Tel || facture?.telephone_revendeur || '';
-  const revendeurAdresse = facture?.Adresse || facture?.adresse_revendeur || '';
+  const revendeurTel = facture?.Tel || facture?.telephone_revendeur || facture?.client_tel || '';
+  const revendeurAdresse = facture?.Adresse || facture?.adresse_revendeur || facture?.client_adresse || '';
 
   const atelier = atelierConfig || {
     nom_atelier: 'MON ATELIER',
@@ -156,21 +173,24 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
     documentTitle: `Facture_${codeFacture || 'facture'}`
   });
 
-
   const handleOpenPdfNewTab = async () => {
     if (!printRef.current) return;
 
-    const worker = html2pdf().set({
-      margin: 0.2,
-      filename: `Facture_${codeFacture || 'facture'}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'in', format: formatPapier, orientation: 'portrait' }
-    }).from(printRef.current);
+    try {
+      const worker = html2pdf().set({
+        margin: 0.2,
+        filename: `Facture_${codeFacture || 'facture'}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: formatPapier, orientation: 'portrait' }
+      }).from(printRef.current);
 
-    const pdfBlob = await worker.outputPdf('blob');
-    const url = URL.createObjectURL(pdfBlob);
-    window.open(url, '_blank', 'noopener,noreferrer');
+      const pdfBlob = await worker.outputPdf('blob');
+      const url = URL.createObjectURL(pdfBlob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Erreur PDF:', error);
+    }
   };
 
   if (atelierLoading || generating) {
@@ -179,14 +199,6 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
         <Loader size="xl" />
         <Text ml="md">Génération de la facture...</Text>
       </Center>
-    );
-  }
-
-  if (!facture) {
-    return (
-      <Paper p="xl" ta="center">
-        <Text>Aucune facture à afficher</Text>
-      </Paper>
     );
   }
 
@@ -221,6 +233,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
           mx="auto"
           style={{ backgroundColor: 'white' }}
         >
+          {/* En-tête */}
           <Flex
             justify="space-between"
             align="center"
@@ -257,6 +270,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
             FACTURE REVENDEUR
           </Text>
 
+          {/* Infos revendeur */}
           <Grid mb="xs">
             <Grid.Col span={7}>
               <Text size="xs">
@@ -277,9 +291,10 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 
           <Divider my="xs" />
 
+          {/* Tableau des produits */}
           <Table withColumnBorders striped highlightOnHover style={{ fontSize: '12px', marginBottom: 12 }}>
             <Table.Thead>
-              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+              <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
                 <Table.Th c="white" ta="center" w={28}>#</Table.Th>
                 <Table.Th c="white">Désignation</Table.Th>
                 <Table.Th c="white">Catégorie</Table.Th>
@@ -319,7 +334,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
               ) : (
                 <Table.Tr>
                   <Table.Td colSpan={9}>
-                    <Text ta="center" c="dimmed" size="sm">
+                    <Text ta="center" c="dimmed" size="sm" py="md">
                       Aucun article dans cette facture
                     </Text>
                   </Table.Td>
@@ -330,6 +345,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 
           <Divider my="xs" />
 
+          {/* Récapitulatif */}
           <SimpleGrid cols={4} spacing="xs" mb="xs">
             <Paper p="xs" withBorder bg="gray.0">
               <Text size="xs" c="dimmed">Total TTC</Text>
@@ -342,7 +358,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
               </Text>
             </Paper>
             <Paper p="xs" withBorder bg={commission > 0 ? 'orange.0' : 'gray.0'}>
-              <Text size="xs" c="orange">Commission</Text>
+              <Text size="xs" c="orange">Commission ({tauxCommission}%)</Text>
               <Text size="sm" fw={700} c="orange">{formatMontant(commission)} FCFA</Text>
             </Paper>
             <Paper p="xs" withBorder bg={netAReverser >= 0 ? 'teal.0' : 'red.0'}>
@@ -353,6 +369,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
             </Paper>
           </SimpleGrid>
 
+          {/* Net à reverser en grand */}
           <Paper
             p="xs"
             withBorder
@@ -373,9 +390,10 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 
           <Divider my="xs" />
 
+          {/* Footer */}
           <Box style={{ textAlign: 'center' }}>
             <Text size="xs" c="dimmed" fw={500}>
-              Merci de votre confiance - Gestion Pro
+              Merci de votre confiance - {atelier.nom_atelier}
             </Text>
             <Text size="xs" c="dimmed" mt={2}>
               Généré le {new Date().toLocaleDateString('fr-FR', {

@@ -59,13 +59,13 @@ interface RecapJournalier {
 }
 
 const categoriesCharges = [
-  { value: 'EAU', label: '💧 Eau' },
-  { value: 'ELECTRICITE', label: '⚡ Électricité' },
-  { value: 'LOYER', label: '🏠 Loyer' },
-  { value: 'SALAIRE', label: '👤 Salaire' },
-  { value: 'TRANSPORT', label: '🚗 Transport' },
-  { value: 'COMMUNICATION', label: '📱 Communication' },
-  { value: 'AUTRE', label: '📌 Autres charges' }
+  { value: 'EAU', label: 'Eau' },
+  { value: 'ELECTRICITE', label: 'Électricité' },
+  { value: 'LOYER', label: 'Loyer' },
+  { value: 'SALAIRE', label: 'Salaire' },
+  { value: 'TRANSPORT', label: 'Transport' },
+  { value: 'COMMUNICATION', label: 'Communication' },
+  { value: 'AUTRE', label: 'Autres charges' }
 ];
 
 const categorieLabels: Record<string, string> = {
@@ -811,10 +811,11 @@ export const JournalCaisse: React.FC = () => {
     return String(nombre);
   };
 
-  const getTypeIcon = (type: string) => {
+  // ✅ NOUVELLE FONCTION : Affiche le libellé ENTRÉE ou SORTIE
+  const getTypeLabel = (type: string) => {
     return type === 'ENTREE' ? 
-      <IconArrowUpRight size={16} color="#2e7d32" /> : 
-      <IconArrowDownRight size={16} color="#c62828" />;
+      <Badge color="green" size="sm">ENTRÉE</Badge> : 
+      <Badge color="red" size="sm">SORTIE</Badge>;
   };
 
   const getCategorieBadge = (categorie: string) => {
@@ -861,10 +862,10 @@ export const JournalCaisse: React.FC = () => {
   return (
     <Stack gap="lg" p="md">
       {/* EN-TÊTE */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
+            <ThemeIcon size={45} radius="md" color="yellow" variant="filled">
               <IconCash size={30} />
             </ThemeIcon>
             <div>
@@ -1017,7 +1018,7 @@ export const JournalCaisse: React.FC = () => {
               <ScrollArea h={450}>
                 <Table striped highlightOnHover verticalSpacing="sm">
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                       <Table.Th c="white" w={50}>N°</Table.Th>
                       <Table.Th c="white">Date</Table.Th>
                       <Table.Th c="white">Désignation</Table.Th>
@@ -1053,7 +1054,8 @@ export const JournalCaisse: React.FC = () => {
                               )}
                             </Table.Td>
                             <Table.Td ta="center">
-                              {getTypeIcon(entry.type_mouvement)}
+                              {/* ✅ NOUVEAU : Affichage du badge ENTRÉE / SORTIE */}
+                              {getTypeLabel(entry.type_mouvement)}
                             </Table.Td>
                             <Table.Td ta="center">
                               {getCategorieBadge(entry.categorie)}
@@ -1088,7 +1090,7 @@ export const JournalCaisse: React.FC = () => {
               <ScrollArea h={450}>
                 <Table striped highlightOnHover verticalSpacing="sm">
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                       <Table.Th c="white" w={50}>N°</Table.Th>
                       <Table.Th c="white">Date</Table.Th>
                       <Table.Th c="white">Désignation</Table.Th>
@@ -1146,7 +1148,7 @@ export const JournalCaisse: React.FC = () => {
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}

@@ -1,6 +1,7 @@
 // src/components/MigrationManager.tsx
 
 import React, { useState, useEffect } from 'react';
+import { confirm } from '../utils/confirm';
 import {
   Modal,
   Stack,
@@ -114,7 +115,7 @@ export const MigrationManagerComponent: React.FC<MigrationManagerComponentProps>
     if (backups.length === 0) return;
 
     const latest = backups[backups.length - 1];
-    if (!confirm(`Restaurer la sauvegarde ${latest.id} ?`)) return;
+    if (!await confirm(`Restaurer la sauvegarde ${latest.id} ?`, 'Restauration')) return;
 
     setMigrating(true);
     try {
@@ -291,9 +292,12 @@ export const MigrationManagerComponent: React.FC<MigrationManagerComponentProps>
                 💾 {BackupManager.getBackupList().length} sauvegarde(s) disponible(s)
               </Text>
             </Group>
+   
           </Alert>
         )}
       </Stack>
     </Modal>
   );
 };
+
+export default MigrationManagerComponent;

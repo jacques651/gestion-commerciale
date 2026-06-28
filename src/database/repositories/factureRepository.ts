@@ -65,8 +65,7 @@ export const factureRepository = {
         p.categorie,
         p.unite_base,
         p.prix_achat_base,
-        p.prix_vente_gros,
-        p.commission_pourcentage
+        p.prix_vente_gros
       FROM facture_details fd
       INNER JOIN products p ON p.idProduit = fd.idProduit
       WHERE fd.idFacture = ?
@@ -160,35 +159,28 @@ export const factureRepository = {
     const tva = montantHT * 0.18;
     const montantTTC = montantHT + tva;
 
-    // 6. Insérer la facture
+    // 6. Insérer la facture (colonnes réelles de la table)
     const result = await db.execute(`
       INSERT INTO factures (
         code_facture,
         idClient,
         idCommande,
         date_facture,
-        date_echeance,
         montant_ht,
         montant_tva,
         montant_ttc,
         montant_regle,
-        statut,
-        type_facture,
-        notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        statut
+      ) VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
     `, [
       codeFacture,
       cmd.idClient,
       idCommande,
-      new Date().toISOString(),
-      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       montantHT,
       tva,
       montantTTC,
       0,
-      "EN_ATTENTE",
-      cmd.type_commande === 'REVENDEUR' ? 'REVENDEUR' : 'STANDARD',
-      `Facture issue de la commande ${cmd.code_commande}`
+      'EN_ATTENTE',
     ]);
 
     const idFacture = Number(result.lastInsertId);
@@ -212,11 +204,8 @@ export const factureRepository = {
 
     // 8. Mettre à jour la commande avec le code facture
     await db.execute(`
-      UPDATE commandes
-      SET code_facture = ?,
-          idFacture = ?
-      WHERE idCommande = ?
-    `, [codeFacture, idFacture, idCommande]);
+      UPDATE commandes SET code_facture = ? WHERE idCommande = ?
+    `, [codeFacture, idCommande]);
 
     return idFacture;
   },

@@ -29,8 +29,8 @@ export const factureRevendeurRepository = {
         return null;
       }
 
-      // ✅ Récupérer les détails
-      const details = await db.select<any[]>(`
+      // ✅ Récupérer les détails depuis factures_revendeur_details
+      let details = await db.select<any[]>(`
         SELECT 
           frd.*,
           p.designation,
@@ -42,9 +42,26 @@ export const factureRevendeurRepository = {
         WHERE frd.idFactureRevendeur = ?
       `, [id]);
 
-      console.log('📄 Détails bruts:', details);
-
       const factureData = facture[0];
+
+      // Fallback : si vide, lire depuis commande_details (factures créées via décompte)
+      if (details.length === 0 && factureData.idCommande) {
+        const cmdDetails = await db.select<any[]>(`
+          SELECT
+            cd.idProduit,
+            cd.qte_commande,
+            cd.prix_unitaire_vente,
+            p.designation,
+            p.code_produit,
+            p.unite_base,
+            p.categorie,
+            p.prix_achat_base
+          FROM commande_details cd
+          LEFT JOIN products p ON p.idProduit = cd.idProduit
+          WHERE cd.idCommande = ?
+        `, [factureData.idCommande]);
+        details = cmdDetails;
+      }
       
       // ✅ CALCULER LES MONTANTS À PARTIR DES DÉTAILS
       let montantHT = 0;
@@ -322,8 +339,8 @@ export const factureRevendeurRepository = {
 
       // 7. Mettre à jour la commande
       await db.execute(`
-        UPDATE commandes 
-        SET code_facture = ?, date_facture = datetime('now')
+        UPDATE commandes
+        SET code_facture = ?
         WHERE idCommande = ?
       `, [codeFacture, idCommande]);
 

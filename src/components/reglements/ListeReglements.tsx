@@ -381,7 +381,8 @@ const ListeReglements: React.FC = () => {
           p="xl"
           radius="lg"
           style={{
-            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+            borderBottom: '3px solid #e94560',
             position: 'relative',
             overflow: 'hidden'
           }}
@@ -389,7 +390,7 @@ const ListeReglements: React.FC = () => {
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <ThemeIcon size={45} radius="md" color="green" variant="filled">
                   <IconCash size={30} />
                 </ThemeIcon>
                 <div>
@@ -419,7 +420,7 @@ const ListeReglements: React.FC = () => {
           </Flex>
 
           {/* Cartes statistiques */}
-          <SimpleGrid cols={6} spacing="md" mt="xl">
+          <SimpleGrid cols={{ base: 2, sm: 3, md: 6 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Text c="white" size="xs">Total</Text>
               <Text c="white" fw={700} size="xl">{filteredStats.total}</Text>
@@ -429,15 +430,15 @@ const ListeReglements: React.FC = () => {
               <Text c="white" fw={700} size="xl">{formatMontant(filteredStats.montant)} F</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(46,125,50,0.2)' }}>
-              <Text c="white" size="xs">✅ Payées</Text>
+              <Text c="white" size="xs">Payées</Text>
               <Text c="white" fw={700} size="xl">{filteredStats.payees}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(237,108,2,0.2)' }}>
-              <Text c="white" size="xs">🟠 Partielles</Text>
+              <Text c="white" size="xs">Partielles</Text>
               <Text c="white" fw={700} size="xl">{filteredStats.partielles}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(211,47,47,0.2)' }}>
-              <Text c="white" size="xs">🔴 Non payées</Text>
+              <Text c="white" size="xs">Non payées</Text>
               <Text c="white" fw={700} size="xl">{filteredStats.nonPayees}</Text>
             </Card>
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
@@ -483,9 +484,9 @@ const ListeReglements: React.FC = () => {
                 value={statutFiltre}
                 onChange={(value) => { setStatutFiltre(value); setCurrentPage(1); }}
                 data={[
-                  { value: 'payee', label: '✅ Payée' },
-                  { value: 'partielle', label: '🟠 Partielle' },
-                  { value: 'non_payee', label: '🔴 Non payée' }
+                  { value: 'payee', label: 'Payée' },
+                  { value: 'partielle', label: 'Partielle' },
+                  { value: 'non_payee', label: 'Non payée' }
                 ]}
                 size="xs"
                 clearable
@@ -562,7 +563,7 @@ const ListeReglements: React.FC = () => {
             <Box style={{ overflowX: "auto" }}>
               <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                     <Table.Th c="white" w={50}>N°</Table.Th>
                     <Table.Th c="white">Date</Table.Th>
                     <Table.Th c="white">Client</Table.Th>
@@ -699,7 +700,7 @@ const ListeReglements: React.FC = () => {
           size="md"
           centered
           styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: 'white', fontWeight: 600 },
             body: { padding: '20px' }
           }}
@@ -780,7 +781,7 @@ const ListeReglements: React.FC = () => {
           size="lg"
           centered
           styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: 'white', fontWeight: 600 },
             body: { padding: 0 }
           }}

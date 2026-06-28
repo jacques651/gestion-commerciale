@@ -8,6 +8,19 @@
     "sql:allow-load",
     "sql:allow-select",
     "sql:allow-execute",
-    "sql:allow-close"
+    "sql:allow-close",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-app-read-recursive",
+    "fs:allow-app-write-recursive",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-confirm",
+    "dialog:allow-ask",
+    "dialog:allow-message"
   ]
 }

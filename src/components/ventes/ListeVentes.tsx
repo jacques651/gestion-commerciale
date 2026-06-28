@@ -16,9 +16,10 @@ import {
   IconDeviceFloppy, IconX, IconPhone
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
-import FormulaireVente from "./FormulaireVente";
 import ReçuVente from "./ReçuVente";
 import { notifications } from "@mantine/notifications";
+import { useNavigate } from "react-router-dom";
+import { PageHeader } from "../common/PageHeader";
 
 interface Vente {
   idVente: number;
@@ -49,12 +50,12 @@ interface ProduitVente {
 }
 
 const ListeVentes: React.FC = () => {
+  const navigate = useNavigate();
   const [ventes, setVentes] = useState<Vente[]>([]);
   const [loading, setLoading] = useState(true);
   const [recherche, setRecherche] = useState("");
   const [typeFiltre, setTypeFiltre] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [vueForm, setVueForm] = useState(false);
   const [showReçu, setShowReçu] = useState(false);
   const [selectedVente, setSelectedVente] = useState<Vente | null>(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -289,64 +290,124 @@ const ListeVentes: React.FC = () => {
     }
   };
 
-  const supprimerVente = async () => {
-    if (!venteToDelete) return;
+ // ✅ Fonction supprimerVente corrigée
+const supprimerVente = async () => {
+  if (!venteToDelete) return;
 
-    const { peut, raison } = await peutSupprimerVente(venteToDelete.idVente);
-    
-    if (!peut) {
-      notifications.show({
-        title: '❌ Suppression impossible',
-        message: raison,
-        color: 'red',
-        autoClose: 8000
-      });
-      setDeleteModalOpen(false);
-      setVenteToDelete(null);
-      return;
-    }
+  // Vérifier si la vente a des règlements
+  const { peut, raison } = await peutSupprimerVente(venteToDelete.idVente);
+  
+  if (!peut) {
+    notifications.show({
+      title: '❌ Suppression impossible',
+      message: raison,
+      color: 'red',
+      autoClose: 8000
+    });
+    setDeleteModalOpen(false);
+    setVenteToDelete(null);
+    return;
+  }
 
-    setDeleteLoading(true);
-    
-    try {
-      const db = await getDb();
+  setDeleteLoading(true);
+  
+  try {
+    const db = await getDb();
 
-      const details = await db.select<any[]>(`
-        SELECT idProduit, quantite FROM vente_details WHERE idVente = ?
-      `, [venteToDelete.idVente]);
+    // 1. Récupérer les détails de la vente
+    const details = await db.select<any[]>(`
+      SELECT idProduit, quantite 
+      FROM vente_details 
+      WHERE idVente = ?
+    `, [venteToDelete.idVente]);
 
-      for (const detail of details) {
+    console.log(`📦 Restauration des stocks pour ${details.length} produit(s)`);
+
+    // 2. Restaurer les stocks pour chaque produit
+    for (const detail of details) {
+      // Vérifier le stock actuel
+      const product = await db.select<any[]>(`
+        SELECT qte_stock, designation 
+        FROM products 
+        WHERE idProduit = ?
+      `, [detail.idProduit]);
+
+      if (product.length > 0) {
+        const stockAvant = product[0].qte_stock || 0;
+        const stockApres = stockAvant + detail.quantite;
+        
+        console.log(`  - ${product[0].designation}: ${stockAvant} → ${stockApres} (+${detail.quantite})`);
+
         await db.execute(`
           UPDATE products 
           SET qte_stock = qte_stock + ? 
           WHERE idProduit = ?
         `, [detail.quantite, detail.idProduit]);
+
+        // Enregistrer le mouvement de stock
+        await db.execute(`
+          INSERT INTO mouvements_stock (
+            idProduit,
+            type_mouvement,
+            quantite,
+            stock_avant,
+            stock_apres,
+            reference,
+            notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+          detail.idProduit,
+          'ANNULATION_VENTE',
+          detail.quantite,
+          stockAvant,
+          stockApres,
+          venteToDelete.code_vente,
+          `Annulation de la vente ${venteToDelete.code_vente}`
+        ]);
       }
-
-      await db.execute("DELETE FROM vente_details WHERE idVente = ?", [venteToDelete.idVente]);
-      await db.execute("DELETE FROM ventes WHERE idVente = ?", [venteToDelete.idVente]);
-
-      notifications.show({
-        title: '✅ Succès',
-        message: `Vente ${venteToDelete.code_vente} supprimée avec succès - Stock restauré (${details.length} produit(s))`,
-        color: 'green',
-      });
-      
-      setDeleteModalOpen(false);
-      setVenteToDelete(null);
-      chargerVentes();
-      
-    } catch (error) {
-      console.error("Erreur suppression:", error);
-      notifications.show({
-        title: '❌ Erreur',
-        message: 'Erreur lors de la suppression de la vente',
-        color: 'red',
-      });
-    } finally {
-      setDeleteLoading(false);
     }
-  };
+
+    // 3. Supprimer les détails de la vente
+    await db.execute(`
+      DELETE FROM vente_details 
+      WHERE idVente = ?
+    `, [venteToDelete.idVente]);
+
+    // 4. Supprimer la vente
+    await db.execute(`
+      DELETE FROM ventes 
+      WHERE idVente = ?
+    `, [venteToDelete.idVente]);
+
+    // 5. Supprimer les règlements associés (s'il y en a)
+    await db.execute(`
+      DELETE FROM reglements 
+      WHERE idVente = ?
+    `, [venteToDelete.idVente]);
+
+    notifications.show({
+      title: '✅ Succès',
+      message: `Vente ${venteToDelete.code_vente} supprimée avec succès - Stock restauré (${details.length} produit(s))`,
+      color: 'green',
+      autoClose: 5000
+    });
+    
+    setDeleteModalOpen(false);
+    setVenteToDelete(null);
+    chargerVentes();
+    
+  } catch (error: any) {
+    console.error("Erreur suppression:", error);
+    notifications.show({
+      title: '❌ Erreur',
+      message: error?.message || 'Erreur lors de la suppression de la vente',
+      color: 'red',
+      autoClose: 5000
+    });
+  } finally {
+    setDeleteLoading(false);
+  }
+};
 
   const handlePrintReçu = (vente: Vente) => {
     setSelectedVente(vente);
@@ -407,16 +468,6 @@ const ListeVentes: React.FC = () => {
     return num.toLocaleString();
   };
 
-  if (vueForm) {
-    return <FormulaireVente
-      onSuccess={() => {
-        setVueForm(false);
-        chargerVentes();
-      }}
-      onCancel={() => setVueForm(false)}
-    />;
-  }
-
   if (showReçu && selectedVente) {
     return <ReçuVente
       vente={{
@@ -443,87 +494,19 @@ const ListeVentes: React.FC = () => {
   return (
     <Box p="md">
       <Stack gap="lg">
-        {/* EN-TÊTE */}
-        <Paper
-          p="xl"
-          radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          <Flex justify="space-between" align="center" wrap="wrap">
-            <Stack gap={4}>
-              <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
-                  <IconShoppingCart size={30} />
-                </ThemeIcon>
-                <div>
-                  <Title order={1} c="white" style={{ fontSize: '2rem' }}>Ventes au détail</Title>
-                  <Text c="gray.3" size="sm">Gérez et suivez toutes vos ventes directes</Text>
-                </div>
-              </Group>
-            </Stack>
-            <Group>
-              <Button
-                variant="light"
-                color="white"
-                leftSection={<IconInfoCircle size={18} />}
-                onClick={() => setInfoModalOpen(true)}
-              >
-                Instructions
-              </Button>
-            </Group>
-          </Flex>
-
-          <SimpleGrid cols={4} spacing="md" mt="xl">
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconShoppingCart size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Total ventes</Text>
-                  <Text c="white" fw={700} size="xl">{ventes.length}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="blue" variant="light" size="lg">
-                  <IconCash size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Chiffre d'affaires</Text>
-                  <Text c="white" fw={700} size="xl">{formatMontant(totalMontant)} FCFA</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconTruck size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Ventes comptoir</Text>
-                  <Text c="white" fw={700} size="xl">{ventes.filter(v => v && v.type_vente === 'COMPTOIR').length}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="orange" variant="light" size="lg">
-                  <IconCalendar size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Ventes du jour</Text>
-                  <Text c="white" fw={700} size="xl">{ventesAujourdhui}</Text>
-                </div>
-              </Group>
-            </Card>
-          </SimpleGrid>
-        </Paper>
+        <PageHeader
+          title="Ventes au détail"
+          subtitle="Historique et gestion de toutes les ventes directes"
+          icon={<IconShoppingCart size={20} />}
+          color="teal"
+          action={{ label: 'Nouvelle vente', onClick: () => navigate('/ventes/nouvelle'), color: 'teal' }}
+          stats={[
+            { label: 'Total ventes', value: ventes.length, icon: <IconShoppingCart size={13} /> },
+            { label: "Chiffre d'affaires", value: `${formatMontant(totalMontant)} FCFA`, icon: <IconCash size={13} />, color: '#40c057' },
+            { label: 'Ventes comptoir', value: ventes.filter(v => v && v.type_vente === 'COMPTOIR').length, icon: <IconBuildingStore size={13} /> },
+            { label: "Aujourd'hui", value: ventesAujourdhui, icon: <IconCalendar size={13} />, color: '#f59f00' },
+          ]}
+        />
 
         {/* Barre d'outils */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
@@ -557,22 +540,13 @@ const ListeVentes: React.FC = () => {
                   <IconRefresh size={18} />
                 </ActionIcon>
               </Tooltip>
-              <Button
-                leftSection={<IconPlus size={16} />}
-                onClick={() => setVueForm(true)}
-                variant="gradient"
-                gradient={{ from: "blue", to: "cyan" }}
-                size="md"
-              >
-                Nouvelle vente
-              </Button>
             </Group>
           </Flex>
         </Card>
 
         {/* Tableau des ventes */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
-          <Paper bg="gray.0" p="md" style={{ borderBottom: '1px solid #e5e7eb' }}>
+          <Paper bg="rgba(255,255,255,0.08)" p="md" radius="md">
             <Flex justify="space-between" align="center">
               <Group>
                 <IconReceipt size={20} color="#1b365d" />
@@ -585,7 +559,7 @@ const ListeVentes: React.FC = () => {
           <Box style={{ overflowX: "auto" }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)'}}>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                   <Table.Th w={60}>N°</Table.Th>
                   <Table.Th>Code</Table.Th>
                   <Table.Th>Client</Table.Th>
@@ -695,7 +669,7 @@ const ListeVentes: React.FC = () => {
             <Flex justify="center" align="center" direction="column" py={60}>
               <IconShoppingCart size={60} color="#ccc" />
               <Text ta="center" c="dimmed" mt="md">Aucune vente trouvée</Text>
-              <Button mt="md" variant="light" onClick={() => setVueForm(true)} leftSection={<IconPlus size={16} />}>
+              <Button mt="md" variant="light" onClick={() => navigate('/ventes/nouvelle')} leftSection={<IconPlus size={16} />}>
                 Nouvelle vente
               </Button>
             </Flex>
@@ -727,7 +701,7 @@ const ListeVentes: React.FC = () => {
           padding="md"
           centered
           styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: 'white', fontWeight: 600 },
             body: { padding: '20px' }
           }}
@@ -829,7 +803,7 @@ const ListeVentes: React.FC = () => {
           padding="md"
           centered
           styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: 'white', fontWeight: 600 },
             body: { padding: '20px' }
           }}
@@ -905,7 +879,7 @@ const ListeVentes: React.FC = () => {
           title="Supprimer la vente"
           centered
           styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: 'white', fontWeight: 600 },
             body: { padding: '20px' }
           }}
@@ -955,7 +929,7 @@ const ListeVentes: React.FC = () => {
           size="md"
           centered
           styles={{
-            header: { backgroundColor: "#1b365d", padding: "16px 20px", borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+            header: { backgroundColor: "#1a1a2e", padding: "16px 20px", borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
             title: { color: "white", fontWeight: 600 },
             body: { padding: "20px" }
           }}

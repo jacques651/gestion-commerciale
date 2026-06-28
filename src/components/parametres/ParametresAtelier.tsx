@@ -1,6 +1,7 @@
 // src/components/parametres/ParametresAtelier.tsx
 
 import React, { useEffect, useState, useRef } from "react";
+import { confirm } from '../../utils/confirm';
 import {
   Stack,
   Card,
@@ -173,7 +174,7 @@ const ParametresAtelier: React.FC = () => {
   };
 
   const handleReset = async () => {
-    if (!confirm("Voulez-vous vraiment réinitialiser la configuration ?")) return;
+    if (!await confirm("Voulez-vous vraiment réinitialiser la configuration ?", "Réinitialisation")) return;
     
     try {
       const db = await getDb();
@@ -215,7 +216,8 @@ const ParametresAtelier: React.FC = () => {
           p="md"
           radius="lg"
           style={{
-            background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #1b365d 100%)",
+            background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+            borderBottom: "3px solid #e94560",
             position: "relative",
             overflow: "hidden",
           }}
@@ -457,7 +459,7 @@ const ParametresAtelier: React.FC = () => {
           centered
           styles={{
             header: {
-              backgroundColor: "#1b365d",
+              backgroundColor: "#1a1a2e",
               padding: "12px 16px",
               borderTopLeftRadius: "12px",
               borderTopRightRadius: "12px",
@@ -512,7 +514,7 @@ const ParametresAtelier: React.FC = () => {
           centered
           styles={{
             header: {
-              backgroundColor: "#1b365d",
+              backgroundColor: "#1a1a2e",
               padding: "12px 16px",
               borderTopLeftRadius: "12px",
               borderTopRightRadius: "12px",

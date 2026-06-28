@@ -12,6 +12,7 @@ import { useClients } from '../../hooks/useClients';
 import { Client } from '../../database/repositories/clientRepository';
 
 interface FormulaireClientProps {
+  onSuccess?: () => void;
   opened: boolean;
   onClose: () => void;
   editClient?: Client | null;
@@ -96,7 +97,7 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
       radius="lg"
       centered
       styles={{
-        header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+        header: { backgroundColor: '#1a1a2e', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
         title: { color: 'white', fontWeight: 700, fontSize: '1.2rem' },
         body: { padding: 0 }
       }}
@@ -121,8 +122,8 @@ export const FormulaireClient: React.FC<FormulaireClientProps> = ({ opened, onCl
           {/* Type de client - Carte en haut */}
           <Paper p="md" withBorder radius="md" style={{ backgroundColor: '#f8f9fa' }}>
             <Group gap="xs" mb="sm">
-              <IconBuildingStore size={16} color="#1b365d" />
-              <Text fw={600} size="sm" c="#1b365d">Type de client</Text>
+              <IconBuildingStore size={16} color="#4a6cf7" />
+              <Text fw={600} size="sm" c="blue.5">Type de client</Text>
             </Group>
             <Select
               data={typeOptions}

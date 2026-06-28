@@ -41,6 +41,7 @@ import { notifications } from '@mantine/notifications';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getDb } from '../../database/db';
 import { clientRepository } from '../../database/repositories/clientRepository';
+import { journalCaisseService } from '../../services/journalCaisseService';
 
 
 interface NouveauDecompteProps {
@@ -631,6 +632,21 @@ export default function NouveauDecompte({
         setProduitsNonReapprovisionnes(produitsNonReappro);
       }
 
+      // Enregistrer l'entrée dans le journal de caisse (montant net reçu du revendeur)
+      if (!isEditMode && montantNet > 0) {
+        try {
+          const revendeurNom = revendeurs.find((r: any) => parseInt(r.value) === selectedClientId)?.label;
+          await journalCaisseService.ajouterDecompteRevendeur({
+            montant: montantNet,
+            idDecompte,
+            codeDecompte: codeRecu,
+            revendeurNom,
+          });
+        } catch (journalErr) {
+          console.warn('Avertissement: impossible d\'enregistrer dans le journal de caisse:', journalErr);
+        }
+      }
+
       notifications.show({
         title: 'Succes',
         message: isEditMode
@@ -1025,30 +1041,33 @@ export default function NouveauDecompte({
         </Card>
       )}
 
+
       <Card withBorder radius="lg" shadow="sm" p="lg">
         <TextInput
           label="Observation"
-          placeholder="Ajouter une observation (optionnel)"
+          placeholder="Ajouter une remarque (optionnel)"
           value={observation}
-          onChange={(e) => setObservation(e.currentTarget.value)}
+          onChange={(e) => setObservation(e.target.value)}
+          size="sm"
         />
       </Card>
 
-      <Group justify="flex-end" gap="sm">
-        <Button variant="outline" onClick={handleCancel} disabled={saving} leftSection={<IconTrash size={14} />}>
+      {/* Boutons d'action */}
+      <Group justify="flex-end" mt="md">
+        <Button variant="outline" onClick={onCancel} size="sm">
           Annuler
         </Button>
         <Button
-          color="green"
-          leftSection={<IconReceipt size={16} />}
           onClick={handleSubmit}
           loading={saving}
-          disabled={details.length === 0 || !selectedClientId}
+          color="blue"
+          size="sm"
+          disabled={details.length === 0}
         >
-          {isEditMode ? 'Modifier' : 'Creer'} le decompte
-
+          {decompteId ? 'Modifier le décompte' : 'Créer le décompte'}
         </Button>
       </Group>
     </Stack>
   );
-}
+};
+

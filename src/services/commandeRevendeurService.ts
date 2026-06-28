@@ -1,6 +1,7 @@
 // src/services/commandeRevendeurService.ts
 import { getDb } from '../database/db';
 import { generateCommandeCode, generateFactureCode } from '../utils/codeGenerator';
+import { confirm } from '../utils/confirm';
 
 export interface PanierItem {
   idProduit: number;
@@ -124,7 +125,7 @@ export const enregistrerCommandeRevendeur = async (
 
     // 4. Proposition de génération de facture
     let codeFacture: string | null = null;
-    const reponse = confirm("Voulez-vous générer une facture pour cette commande ?");
+    const reponse = await confirm("Voulez-vous générer une facture pour cette commande ?", "Génération facture");
     
     if (reponse) {
       codeFacture = await generateFactureCode();
@@ -155,7 +156,7 @@ export const enregistrerCommandeRevendeur = async (
     
   } catch (error) {
     if (transactionStarted) {
-      await db.execute('ROLLBACK');
+      try { await db.execute('ROLLBACK'); } catch (_) {}
     }
     throw error;
   }

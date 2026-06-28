@@ -351,11 +351,11 @@ export const ListeFacturesRevendeur: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <ThemeIcon size={45} radius="md" color="grape" variant="filled">
                   <IconFileInvoice size={30} />
                 </ThemeIcon>
                 <div>
@@ -388,7 +388,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
           </Flex>
 
           {factures.length > 0 && (
-            <SimpleGrid cols={4} spacing="md" mt="xl">
+            <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
               <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
                 <Group><ThemeIcon color="white" variant="light" size="lg"><IconFileInvoice size={20} /></ThemeIcon>
                   <div><Text c="white" size="xs">Total factures</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div>
@@ -466,7 +466,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                   <Table.Th c="white" style={{ width: 150 }}>Code facture</Table.Th>
                   <Table.Th c="white">Revendeur</Table.Th>
                   <Table.Th c="white" style={{ width: 120 }}>Date</Table.Th>

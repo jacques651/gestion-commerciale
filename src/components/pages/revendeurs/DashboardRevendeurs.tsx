@@ -284,7 +284,7 @@ export default function DashboardRevendeurs() {
 
         <Table striped highlightOnHover horizontalSpacing="md" verticalSpacing="sm">
           <Table.Thead>
-            <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+            <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
               <Table.Th c="white">Revendeur</Table.Th>
               <Table.Th c="white" ta="center">Commandes</Table.Th>
               <Table.Th c="white" ta="center">Décomptes</Table.Th>

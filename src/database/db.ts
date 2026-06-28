@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS decompte_details (
     idDecompte INTEGER NOT NULL,
     idProduit INTEGER NOT NULL,
     qte_decompte REAL NOT NULL DEFAULT 0,
+    qte_avant_decompte REAL DEFAULT 0,
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
     commission_pourcentage REAL DEFAULT 0,
@@ -848,7 +849,13 @@ export const initDatabase = async (): Promise<void> => {
 
             console.log('✅ Colonne id_facture_approvisionnement ajoutée');
         } catch (error) {
-            console.log('ℹ️ Colonne déjà existante');
+            console.log('ℹ️ Colonne id_facture_approvisionnement déjà existante');
+        }
+        try {
+            await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_avant_decompte REAL DEFAULT 0`);
+            console.log('✅ Colonne qte_avant_decompte ajoutée');
+        } catch (error) {
+            console.log('ℹ️ Colonne qte_avant_decompte déjà existante');
         }
         console.log('✅ Schéma SQL exécuté avec succès');
 

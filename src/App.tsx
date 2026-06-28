@@ -1,12 +1,14 @@
 // src/App.tsx
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, BrowserRouter, useNavigate, useLocation } from 'react-router-dom';
-import { AppShell, Loader, Center, Button, Notification, MantineProvider, Stack, Text } from '@mantine/core';
+import { AppShell, Loader, Center, Button, Notification, MantineProvider, Stack, Text, Burger, Group } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
 import Navbar from './components/common/Navbar';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { initDatabaseWithMigrations } from './database/runMigration';
+import { confirm } from './utils/confirm';
 import { DatabaseVersionManager } from './database/versionManager';
 import { MigrationManagerComponent } from './components/MigrationManager';
 import '@mantine/core/styles.css';
@@ -29,6 +31,7 @@ const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const ListeClients = lazy(() => import('./components/clients/ListeClients'));
 const ListeFactures = lazy(() => import('./components/factures/ListeFactures'));
 const ListeVentes = lazy(() => import('./components/ventes/ListeVentes'));
+const FormulaireVente = lazy(() => import('./components/ventes/FormulaireVente'));
 
 const ListeCommandeStandard = lazy(() => import('./components/commandes/ListeCommandeStandard'));
 const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
@@ -94,8 +97,6 @@ const LoadingFallback = () => (
     <Loader size="xl" variant="dots" />
   </Center>
 );
-
-// Vérification de la base de données (sans réinitialisation)
 
 // ✅ RouteGuard basé sur les permissions
 function RouteGuard({
@@ -174,11 +175,27 @@ function NouveauDecompteWrapper() {
   const match = location.pathname.match(/\/decomptes\/(\d+)\/modifier/);
   const decompteId = match ? parseInt(match[1]) : undefined;
 
+  // ✅ Récupérer les paramètres depuis l'état de navigation
+  const { clientId, produitsPreSelectionnes } = location.state || {};
+
   return (
     <NouveauDecompte
       decompteId={decompteId}
+      clientId={clientId}
+      produitsPreSelectionnes={produitsPreSelectionnes}
       onSuccess={() => navigate('/decomptes')}
       onCancel={() => navigate('/decomptes')}
+    />
+  );
+}
+
+// ✅ Wrapper pour NouvelleVente
+function NouvelleVenteWrapper() {
+  const navigate = useNavigate();
+  return (
+    <FormulaireVente
+      onSuccess={() => navigate('/ventes')}
+      onCancel={() => navigate('/ventes')}
     />
   );
 }
@@ -225,9 +242,10 @@ function FicheCommandeWrapper() {
 function AuthenticatedApp() {
   const { user, logout, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
+  const [navbarOpened, { toggle: toggleNavbar, close: closeNavbar }] = useDisclosure();
 
-  const handleLogout = () => {
-    if (window.confirm("Voulez-vous vous déconnecter ?")) {
+  const handleLogout = async () => {
+    if (await confirm("Voulez-vous vous déconnecter ?", "Déconnexion")) {
       logout();
       navigate('/login');
     }
@@ -263,17 +281,38 @@ function AuthenticatedApp() {
   return (
     <AppShell
       padding="md"
-      navbar={{ width: 260, breakpoint: 'sm' }}
+      header={{ height: { base: 50, sm: 0 } }}
+      navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !navbarOpened } }}
       styles={{
         main: {
           minHeight: '100vh',
           overflow: 'visible',
           backgroundColor: '#f5f7fa'
+        },
+        header: {
+          display: 'flex',
+          alignItems: 'center',
+          backgroundColor: '#0a1628',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
         }
       }}
     >
+      <AppShell.Header hiddenFrom="sm">
+        <Group h="100%" px="md" justify="space-between">
+          <Burger
+            opened={navbarOpened}
+            onClick={toggleNavbar}
+            size="sm"
+            color="white"
+          />
+          <Text fw={900} style={{ color: '#f4b400', letterSpacing: 2, fontSize: 15, fontFamily: 'Georgia, serif', textTransform: 'uppercase' }}>
+            GESTION PRO
+          </Text>
+          <div style={{ width: 28 }} />
+        </Group>
+      </AppShell.Header>
       <AppShell.Navbar>
-        <Navbar userRole={user?.role} userName={user?.nom} onLogout={handleLogout} />
+        <Navbar userRole={user?.role} userName={user?.nom} onLogout={handleLogout} onNavClose={closeNavbar} />
       </AppShell.Navbar>
       <AppShell.Main>
         <Suspense fallback={<LoadingFallback />}>
@@ -354,6 +393,11 @@ function AuthenticatedApp() {
             <Route path="/ventes" element={
               <RouteGuard requiredPermissions={['ventes.view']}>
                 <ListeVentes />
+              </RouteGuard>
+            } />
+            <Route path="/ventes/nouvelle" element={
+              <RouteGuard requiredPermissions={['ventes.create']}>
+                <NouvelleVenteWrapper />
               </RouteGuard>
             } />
 
@@ -563,60 +607,50 @@ function App() {
   if (showMigration) {
     return (
       <MantineProvider>
-        <Notifications position="top-right" />
-        <MigrationManagerComponent
-          onComplete={() => {
-            setShowMigration(false);
-            setAppReady(true);
-            setTimeout(() => {
-              window.location.reload();
-            }, 500);
-          }}
-        />
+        <MigrationManagerComponent onComplete={() => { setShowMigration(false); setAppReady(true); }} />
       </MantineProvider>
     );
   }
 
-  if (!dbReady || dbError) {
+  if (dbError) {
     return (
       <MantineProvider>
         <Center style={{ height: '100vh' }}>
           <Stack align="center" gap="md">
-            <Notification title="Erreur Base de données" color="red">
-              {dbError || 'Impossible d\'initialiser la base de données.'}
-              <Button onClick={() => window.location.reload()} size="xs" mt="md">
-                Réessayer
-              </Button>
+            <Notification color="red" title="Erreur de base de données">
+              {dbError}
             </Notification>
+            <Button onClick={() => window.location.reload()}>Réessayer</Button>
           </Stack>
         </Center>
       </MantineProvider>
     );
   }
 
-  if (!appReady) {
+  if (!dbReady || !appReady) {
     return (
       <MantineProvider>
         <Center style={{ height: '100vh' }}>
-          <Loader size="xl" />
-          <Text mt="md" c="dimmed">Préparation de l'application...</Text>
+          <Stack align="center" gap="md">
+            <Loader size="xl" variant="dots" />
+            <Text size="sm" c="dimmed">Chargement...</Text>
+          </Stack>
         </Center>
       </MantineProvider>
     );
   }
 
   return (
-    <MantineProvider>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <MantineProvider>
+        <Notifications />
         <BrowserRouter>
           <AuthProvider>
-            <Notifications position="top-right" />
-            {/* <DatabaseStatus /> */}
             <AuthenticatedApp />
           </AuthProvider>
         </BrowserRouter>
-      </QueryClientProvider>
-    </MantineProvider>
+      </MantineProvider>
+    </QueryClientProvider>
   );
 }
 

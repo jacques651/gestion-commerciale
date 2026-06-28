@@ -1,7 +1,7 @@
 // src/components/ventes/ReçuVente.tsx
 import React, { useEffect, useState, useRef } from "react";
-import { Modal, Stack, Text, Group, Button, Divider, Paper, Table, SimpleGrid, Title, Badge, Center, Loader, Flex, Box } from "@mantine/core";
-import { IconPrinter, IconReceipt, IconUser, IconCurrencyFrank } from "@tabler/icons-react";
+import { Modal, Text, Group, Button, Divider, Paper, Table, SimpleGrid, Badge, Center, Loader, Flex, Box } from "@mantine/core";
+import { IconPrinter, IconReceipt, IconCurrencyFrank } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { useReactToPrint } from "react-to-print";
 
@@ -28,12 +28,11 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
   useEffect(() => {
     const chargerDonnees = async () => {
       const db = await getDb();
-      
-      // Charger les détails de la vente avec HT et TTC
+
       const details = await db.select<ProduitVente[]>(`
-        SELECT 
-          p.designation, 
-          vd.quantite, 
+        SELECT
+          p.designation,
+          vd.quantite,
           vd.prix_unitaire_ht as prix_unitaire_ht,
           (vd.quantite * vd.prix_unitaire_ht) as total_ht,
           (vd.quantite * vd.prix_unitaire_ttc) as total_ttc
@@ -41,17 +40,15 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
         JOIN products p ON vd.idProduit = p.idProduit
         WHERE vd.idVente = ?
       `, [vente.idVente]);
-      
-      // Charger la configuration de l'atelier
+
       const configData = await db.select<any[]>(`
         SELECT * FROM configuration_atelier WHERE id = 1
       `);
-      
-      // Générer un numéro de reçu
+
       const today = new Date();
       const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
       setNumReçu(`RCP-${dateStr}-${vente.idVente}`);
-      
+
       setProduits(details);
       setConfig(configData[0] || {
         nom_atelier: 'MON ATELIER',
@@ -70,22 +67,17 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Reçu_Vente_${vente.idVente}_${new Date().toLocaleDateString()}`,
-    onAfterPrint: () => {
-      console.log("Impression lancée");
-    }
   });
 
-  // Calcul des totaux
   const totalHT = produits.reduce((sum, p) => sum + p.total_ht, 0);
   const totalTTC = produits.reduce((sum, p) => sum + p.total_ttc, 0);
   const tva = totalTTC - totalHT;
 
-  // Formatage du nombre en lettres (simplifié)
   const nombreEnLettres = (nombre: number): string => {
     if (nombre === 0) return 'zéro';
     const unites = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
     const dizaines = ['', 'dix', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante-dix', 'quatre-vingt', 'quatre-vingt-dix'];
-    
+
     const convertir = (n: number): string => {
       if (n < 20) return unites[n];
       if (n < 100) {
@@ -96,9 +88,23 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
         if (d === 7 || d === 9) return `${dizaine}-${unites[u + 10]}`;
         return `${dizaine}-${unites[u]}`;
       }
-      return `${totalTTC.toLocaleString()}`;
+      if (n < 1000) {
+        const c = Math.floor(n / 100);
+        const r = n % 100;
+        let result = c === 1 ? 'cent' : unites[c] + ' cents';
+        if (r > 0) result += ' ' + convertir(r);
+        return result;
+      }
+      if (n < 1000000) {
+        const m = Math.floor(n / 1000);
+        const r = n % 1000;
+        let result = m === 1 ? 'mille' : convertir(m) + ' mille';
+        if (r > 0) result += ' ' + convertir(r);
+        return result;
+      }
+      return n.toLocaleString();
     };
-    return convertir(totalTTC);
+    return convertir(nombre);
   };
 
   if (loading) {
@@ -111,6 +117,71 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
     );
   }
 
+  const montantEnLettres = nombreEnLettres(totalTTC);
+  const montantEnLettresMaj = montantEnLettres.charAt(0).toUpperCase() + montantEnLettres.slice(1);
+
+  const printStyles = `
+    @media print {
+      .no-print { display: none !important; }
+
+      @page {
+        size: A4 portrait;
+        margin: 12mm 14mm;
+      }
+
+      body, html {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      .recu-body {
+        padding: 10px !important;
+        font-size: 11px !important;
+        line-height: 1.4 !important;
+      }
+
+      .recu-body * {
+        font-size: 11px !important;
+        line-height: 1.4 !important;
+      }
+
+      .recu-body table {
+        font-size: 10px !important;
+        border-collapse: collapse !important;
+      }
+
+      .recu-body table th,
+      .recu-body table td {
+        padding: 5px 6px !important;
+        font-size: 10px !important;
+      }
+
+      .recu-body [class*="mantine-Paper"] {
+        padding: 5px 8px !important;
+        margin-bottom: 4px !important;
+      }
+
+      .recu-body [class*="mantine-SimpleGrid"] {
+        gap: 6px !important;
+        margin-bottom: 6px !important;
+      }
+
+      .recu-body [class*="mantine-Divider"] {
+        margin: 5px 0 !important;
+      }
+
+      .recu-body [class*="mantine-Badge"] {
+        font-size: 10px !important;
+        padding: 1px 5px !important;
+        height: auto !important;
+      }
+
+      .recu-body [class*="mantine-Text"] {
+        line-height: 1.4 !important;
+      }
+    }
+  `;
+
   return (
     <Modal
       opened={true}
@@ -118,186 +189,159 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
       size="lg"
       centered
       styles={{
-        header: { backgroundColor: "#1b365d", padding: "16px 20px", borderTopLeftRadius: "12px", borderTopRightRadius: "12px" },
-        title: { color: "white", fontWeight: 700, fontSize: "1.2rem" },
+        header: { backgroundColor: "#1a1a2e", padding: "10px 16px", borderTopLeftRadius: "12px", borderTopRightRadius: "12px" },
+        title: { color: "white", fontWeight: 700, fontSize: "1rem" },
         body: { padding: 0 }
       }}
       title={
         <Group gap="xs">
-          <IconReceipt size={24} color="white" />
+          <IconReceipt size={20} color="white" />
           <Text>Reçu de vente</Text>
         </Group>
       }
     >
       <div ref={printRef}>
-        <Box style={{ padding: '20px', backgroundColor: 'white' }}>
-          {/* En-tête avec logo et infos atelier */}
-          <Box style={{ textAlign: 'center', marginBottom: 20, borderBottom: '2px solid #1b365d', paddingBottom: 15 }}>
-            {config?.logo_base64 && (
-              <img 
-                src={config.logo_base64} 
-                alt="Logo" 
-                style={{ height: '60px', marginBottom: '10px', objectFit: 'contain' }}
-              />
-            )}
-            <Title order={2} style={{ color: '#1b365d', margin: 0, fontSize: '20px' }}>
-              {config?.nom_atelier || 'MON ATELIER'}
-            </Title>
-            <Text size="xs" c="dimmed" mt={4}>
-              {config?.adresse || ''}
-            </Text>
-            <Text size="xs" c="dimmed">
-              Tel: {config?.telephone || ''}
-            </Text>
-            {config?.email && (
-              <Text size="xs" c="dimmed">
-                Email: {config?.email}
-              </Text>
-            )}
-            {config?.nif && (
-              <Text size="xs" c="dimmed">
-                NIF: {config?.nif}
-              </Text>
-            )}
-          </Box>
+        <Box className="recu-body" style={{ padding: '12px', backgroundColor: 'white', fontSize: '11px' }}>
 
-          {/* Titre du document */}
-          <Box style={{ textAlign: 'center', marginBottom: 20 }}>
-            <Title order={3} style={{ backgroundColor: '#f2d2bc', display: 'inline-block', padding: '8px 20px', borderRadius: '8px' }}>
-              REÇU DE VENTE
-            </Title>
-          </Box>
+          {/* En-tête */}
+          <Flex justify="space-between" align="center" wrap="wrap" gap={4} style={{ borderBottom: '2px solid #1b365d', paddingBottom: 6, marginBottom: 8 }}>
+            <Flex align="center" gap={6}>
+              {config?.logo_base64 && (
+                <img src={config.logo_base64} alt="Logo" style={{ height: '32px', objectFit: 'contain' }} />
+              )}
+              <Box>
+                <Text fw={700} size="sm" c="#1b365d">{config?.nom_atelier || 'MON ATELIER'}</Text>
+                <Text size="xs" c="dimmed" lh={1.2}>{config?.telephone}</Text>
+              </Box>
+            </Flex>
+            <Box style={{ textAlign: 'right' }}>
+              <Text size="xs" fw={600}>N° {numReçu}</Text>
+              <Text size="xs" c="dimmed">{new Date(vente.date_vente).toLocaleDateString("fr-FR")}</Text>
+            </Box>
+          </Flex>
 
-          {/* Numéro de reçu et date */}
-          <SimpleGrid cols={2} spacing="md" mb="md">
-            <Paper p="xs" withBorder>
-              <Text size="xs" c="dimmed">N° Reçu</Text>
-              <Text fw={700}>{numReçu}</Text>
+          {/* Titre */}
+          <Text ta="center" fw={700} size="sm" style={{ backgroundColor: '#f2d2bc', padding: '3px', borderRadius: '3px', marginBottom: 6 }}>
+            REÇU DE VENTE
+          </Text>
+
+          {/* Infos client */}
+          <SimpleGrid cols={3} spacing="xs" mb={4}>
+            <Paper p={4} withBorder>
+              <Text size="xs" c="dimmed" lh={1}>Client</Text>
+              <Text size="xs" fw={500}>{vente.nom_prenom || "Client anonyme"}</Text>
             </Paper>
-            <Paper p="xs" withBorder>
-              <Text size="xs" c="dimmed">Date</Text>
-              <Text fw={500}>{new Date(vente.date_vente).toLocaleDateString("fr-FR")}</Text>
-              <Text size="xs" c="dimmed">{new Date(vente.date_vente).toLocaleTimeString("fr-FR")}</Text>
+            <Paper p={4} withBorder>
+              <Text size="xs" c="dimmed" lh={1}>Contact</Text>
+              <Text size="xs">{vente.contact || "-"}</Text>
+            </Paper>
+            <Paper p={4} withBorder>
+              <Text size="xs" c="dimmed" lh={1}>Heure</Text>
+              <Text size="xs">{new Date(vente.date_vente).toLocaleTimeString("fr-FR")}</Text>
             </Paper>
           </SimpleGrid>
 
-          {/* Informations client */}
-          <Paper p="md" withBorder mb="md" style={{ backgroundColor: '#f8f9fa' }}>
-            <Group gap="xs" mb="xs">
-              <IconUser size={16} color="#1b365d" />
-              <Text fw={600}>Informations client</Text>
-            </Group>
-            <SimpleGrid cols={2} spacing="md">
-              <div>
-                <Text size="xs" c="dimmed">Nom / Prénom</Text>
-                <Text fw={500}>{vente.nom_prenom || "Client anonyme"}</Text>
-              </div>
-              <div>
-                <Text size="xs" c="dimmed">Contact</Text>
-                <Text>{vente.contact || "-"}</Text>
-              </div>
-            </SimpleGrid>
-          </Paper>
+          <Divider my={4} />
 
-          {/* Tableau des produits */}
-          <Box mb="md">
-            <Text fw={600} mb="xs">Articles commandés</Text>
-            <Table striped highlightOnHover withColumnBorders>
-              <Table.Thead>
-                <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                  <Table.Th c="white">Désignation</Table.Th>
-                  <Table.Th c="white" ta="center">Qté</Table.Th>
-                  <Table.Th c="white" ta="right">Prix HT</Table.Th>
-                  <Table.Th c="white" ta="right">Total HT</Table.Th>
+          {/* Tableau */}
+          <Table withColumnBorders style={{ fontSize: '9px', marginBottom: 6 }}>
+            <Table.Thead>
+              <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
+                <Table.Th c="white" w="40%">Désignation</Table.Th>
+                <Table.Th c="white" ta="center" w="15%">Qté</Table.Th>
+                <Table.Th c="white" ta="right" w="22%">Prix HT</Table.Th>
+                <Table.Th c="white" ta="right" w="23%">Total HT</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {produits.map((p, i) => (
+                <Table.Tr key={i}>
+                  <Table.Td>
+                    <Text size="xs" fw={500}>{p.designation}</Text>
+                  </Table.Td>
+                  <Table.Td ta="center">
+                    <Badge variant="light" size="xs">{p.quantite}</Badge>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="xs">{p.prix_unitaire_ht.toLocaleString()}</Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="xs" fw={600}>{p.total_ht.toLocaleString()}</Text>
+                  </Table.Td>
                 </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {produits.map((p, i) => (
-                  <Table.Tr key={i}>
-                    <Table.Td fw={500}>{p.designation}</Table.Td>
-                    <Table.Td ta="center">
-                      <Badge variant="light" size="sm">{p.quantite}</Badge>
-                    </Table.Td>
-                    <Table.Td ta="right">{p.prix_unitaire_ht.toLocaleString()} FCFA</Table.Td>
-                    <Table.Td ta="right" fw={600}>{p.total_ht.toLocaleString()} FCFA</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Box>
+              ))}
+            </Table.Tbody>
+          </Table>
 
-          {/* Récapitulatif des totaux */}
-          <Paper p="md" withBorder mb="md">
-            <Stack gap="sm">
+          {/* Totaux */}
+          <SimpleGrid cols={3} spacing={4} mb={4}>
+            <Paper p={4} withBorder>
               <Flex justify="space-between" align="center">
-                <Text fw={600}>Total HT :</Text>
-                <Text fw={700} size="lg">{totalHT.toLocaleString()} FCFA</Text>
+                <Text size="xs" fw={600}>Total HT</Text>
+                <Text size="xs" fw={600}>{totalHT.toLocaleString()} F</Text>
               </Flex>
+            </Paper>
+            <Paper p={4} withBorder style={{ backgroundColor: '#fff3e0' }}>
               <Flex justify="space-between" align="center">
-                <Text fw={600} c="orange">TVA (18%) :</Text>
-                <Text fw={600} c="orange">{tva.toLocaleString()} FCFA</Text>
+                <Text size="xs" fw={600} c="orange">TVA (18%)</Text>
+                <Text size="xs" fw={600} c="orange">{tva.toLocaleString()} F</Text>
               </Flex>
-              <Divider />
-              <Flex justify="space-between" align="center" style={{ backgroundColor: '#e8f5e9', padding: '10px', borderRadius: '8px' }}>
-                <Group gap="xs">
-                  <IconCurrencyFrank size={24} color="#2e7d32" />
-                  <Text fw={700} size="lg" c="green.8">Total TTC :</Text>
+            </Paper>
+            <Paper p={4} withBorder style={{ backgroundColor: '#e8f5e9', borderColor: '#4caf50' }}>
+              <Flex justify="space-between" align="center">
+                <Group gap={4}>
+                  <IconCurrencyFrank size={14} color="#2e7d32" />
+                  <Text size="xs" fw={700} c="green.8">Total TTC</Text>
                 </Group>
-                <Text fw={800} size="xl" c="green.8">
-                  {totalTTC.toLocaleString()} FCFA
-                </Text>
+                <Text size="sm" fw={800} c="green.8">{totalTTC.toLocaleString()} F</Text>
               </Flex>
-            </Stack>
-          </Paper>
+            </Paper>
+          </SimpleGrid>
 
           {/* Montant en lettres */}
-          <Paper p="md" withBorder mb="md" style={{ backgroundColor: '#f8f9fa' }}>
-            <Text size="sm" fw={500}>
-              Arrêté le présent reçu à la somme de : {nombreEnLettres(totalTTC)} ({totalTTC.toLocaleString()}) Francs CFA
+          <Paper p={4} withBorder style={{ backgroundColor: '#f8f9fa', marginBottom: 4 }}>
+            <Text size="xs" fw={500} ta="center" lh={1.3}>
+              Arrêté le présent reçu à la somme de : <strong>{montantEnLettresMaj}</strong> ({totalTTC.toLocaleString()}) FCFA
             </Text>
           </Paper>
 
-          {/* Message de remerciement */}
-          <Box style={{ textAlign: 'center', marginTop: 20, paddingTop: 15, borderTop: '1px solid #e9ecef' }}>
-            <Text size="sm" fw={500} c="dimmed">
-              {config?.message_facture || 'Merci de votre visite !'}
-            </Text>
-            <Text size="xs" c="dimmed" mt={8}>
-              {config?.nom_atelier} - Tel: {config?.telephone}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {config?.adresse}
-            </Text>
-          </Box>
+          {/* Signature */}
+          <Flex justify="space-between" mt={6}>
+            <Box>
+              <Text size="xs" fw={600}>Fait à <u>....................</u> le {new Date().toLocaleDateString('fr-FR')}</Text>
+            </Box>
+            <Box>
+              <Text fw={600} size="xs" ta="center">Signature &amp; cachet</Text>
+              <div style={{ borderTop: '1px solid #000', width: '100px', margin: '2px auto 0' }}></div>
+            </Box>
+          </Flex>
+
+          {/* Pied de page */}
+          <Flex justify="space-between" mt={6} pt={4} style={{ borderTop: '1px solid #e8ecf1' }}>
+            <Text size="xs" fs="italic" c="dimmed">{config?.message_facture || 'Merci de votre confiance'}</Text>
+            <Text size="xs" c="dimmed">Page 1/1</Text>
+          </Flex>
+
+          {/* Infos atelier */}
+          <Flex justify="space-between" mt={2} style={{ fontSize: '8px', color: '#aaa' }}>
+            <Text>{config?.adresse}</Text>
+            <Text>{config?.nif && `NIF: ${config.nif}`}</Text>
+            {config?.email && <Text>{config.email}</Text>}
+          </Flex>
         </Box>
       </div>
 
       <Divider />
-      
+
       {/* Boutons */}
-      <Group justify="flex-end" p="md" className="no-print">
-        <Button variant="light" onClick={onClose}>
-          Fermer
-        </Button>
-        <Button onClick={handlePrint} leftSection={<IconPrinter size={16} />} color="blue">
+      <Group justify="flex-end" p="xs" className="no-print" gap="xs">
+        <Button size="compact-xs" variant="subtle" onClick={onClose}>Fermer</Button>
+        <Button size="compact-xs" onClick={handlePrint} leftSection={<IconPrinter size={14} />} color="blue">
           Imprimer
         </Button>
       </Group>
 
-      <style>{`
-        @media print {
-          .no-print {
-            display: none !important;
-          }
-          body {
-            padding: 0;
-            margin: 0;
-          }
-          .mantine-Modal-root {
-            display: none !important;
-          }
-        }
-      `}</style>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
     </Modal>
   );
 };

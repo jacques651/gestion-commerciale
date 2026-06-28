@@ -1,60 +1,22 @@
 // src/components/common/Navbar.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  ScrollArea,
-  Group,
-  Text,
-  Box,
-  NavLink as MantineNavLink,
-  Divider,
-  Avatar,
-  UnstyledButton,
-  Badge,
-  Stack,
-  Modal,
-  Paper,
-  SimpleGrid,
-  ThemeIcon,
-  ActionIcon,
-  Tooltip,
-  Button,
-  Grid,
+  ScrollArea, Group, Text, Box, Tooltip,
+  Avatar, UnstyledButton, Badge, Stack,
+  Modal, Paper, ThemeIcon, ActionIcon, Divider, Button,
 } from '@mantine/core';
 import {
-  IconDashboard,
-  IconPackage,
-  IconUsers,
-  IconShoppingCart,
-  IconFileInvoice,
-  IconTruckDelivery,
-  IconCash,
-  IconReceipt,
-  IconMoneybag,
-  IconChartBar,
-  IconSettings,
-  IconUserCog,
-  IconLogout,
-  IconHistory,
-  IconBuildingWarehouse,
-  IconCoin,
-  IconPercentage,
-  IconReportAnalytics,
-  IconChevronDown,
-  IconChevronRight,
-  IconCreditCard,
-  IconReceipt2,
-  IconUser,
-  IconMail,
-  IconPhone,
-  IconBuilding,
-  IconEdit,
-  IconLock,
-  IconShield,
-  IconDatabase,
-  IconBug,
-  IconDashboard as IconDashboardRevendeur,
+  IconDashboard, IconPackage, IconUsers,
+  IconShoppingCart, IconFileInvoice, IconTruckDelivery,
+  IconCash, IconReceipt, IconMoneybag, IconChartBar,
+  IconSettings, IconUserCog, IconLogout, IconHistory,
+  IconBuildingWarehouse, IconCoin, IconCreditCard,
+  IconReceipt2, IconUser, IconMail, IconPhone,
+  IconBuilding, IconDatabase, IconBug, IconMenu2,
+  IconChevronLeft, IconPercentage, IconAlertCircle,
 } from '@tabler/icons-react';
 import { Link, useLocation } from 'react-router-dom';
+import { getDb } from '../../database/db';
 
 interface NavbarProps {
   userRole?: string;
@@ -64,604 +26,382 @@ interface NavbarProps {
   userCompany?: string;
   onLogout: () => void;
   onProfileUpdate?: () => void;
+  onNavClose?: () => void;
 }
 
-interface NavItemProps {
+interface NavItemConfig {
   to: string;
   label: string;
   icon: React.ReactNode;
-  active?: boolean;
-  badge?: string;
+  badge?: number | string;
   badgeColor?: string;
-  disabled?: boolean;
-  onClick?: () => void;
 }
 
-interface NavSectionProps {
+interface NavSectionConfig {
   title: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
+  icon: React.ReactNode;
+  items: NavItemConfig[];
+  adminOnly?: boolean;
   defaultOpen?: boolean;
 }
 
-// Composant pour un élément de navigation
-const NavItem: React.FC<NavItemProps> = ({
-  to,
-  label,
-  icon,
-  active,
-  badge,
-  badgeColor = 'blue',
-  disabled = false,
-  onClick,
-}) => {
-  const [isHovered, setIsHovered] = useState(false);
+// ─── Item de navigation ──────────────────────────────────────────────────────
+function NavItem({
+  to, label, icon, badge, badgeColor = 'blue', collapsed, active, onNavClose,
+}: NavItemConfig & { collapsed: boolean; active: boolean; onNavClose?: () => void }) {
+  const inner = (
+    <UnstyledButton
+      component={Link}
+      to={to}
+      onClick={onNavClose}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: collapsed ? 0 : 10,
+        padding: collapsed ? '10px 0' : '8px 12px',
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        borderRadius: 8,
+        width: '100%',
+        transition: 'all 0.2s ease',
+        backgroundColor: active ? 'rgba(244,180,0,0.12)' : 'transparent',
+        borderLeft: collapsed ? 'none' : active ? '3px solid #f4b400' : '3px solid transparent',
+        position: 'relative',
+      }}
+      onMouseEnter={e => !active && (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)')}
+      onMouseLeave={e => !active && (e.currentTarget.style.backgroundColor = 'transparent')}
+    >
+      <Box style={{ color: active ? '#f4b400' : 'rgba(255,255,255,0.5)', flexShrink: 0, display: 'flex' }}>
+        {icon}
+      </Box>
+      {!collapsed && (
+        <>
+          <Text size="sm" fw={active ? 600 : 400}
+            style={{ flex: 1, color: active ? '#fff' : 'rgba(255,255,255,0.75)' }}>
+            {label}
+          </Text>
+          {badge !== undefined && badge !== 0 && (
+            <Badge size="xs" color={badgeColor} variant="filled" radius="sm"
+              styles={{ root: { fontSize: 9, padding: '2px 6px', minWidth: 18 } }}>
+              {badge}
+            </Badge>
+          )}
+        </>
+      )}
+      {collapsed && badge !== undefined && badge !== 0 && (
+        <Box style={{
+          position: 'absolute', top: 4, right: 4,
+          width: 8, height: 8, borderRadius: '50%',
+          backgroundColor: badgeColor === 'orange' ? '#f97316' : badgeColor === 'red' ? '#ef4444' : '#3b82f6',
+        }} />
+      )}
+    </UnstyledButton>
+  );
 
-  if (disabled) {
+  if (collapsed) {
     return (
-      <MantineNavLink
-        label={label}
-        leftSection={icon}
-        disabled
-        opacity={0.4}
-        styles={{
-          root: {
-            borderRadius: 8,
-            marginBottom: 2,
-          },
-          label: {
-            color: 'rgba(255,255,255,0.4)',
-          },
-        }}
-      />
+      <Tooltip label={label} position="right" withArrow
+        styles={{ tooltip: { backgroundColor: '#1e3a5f', color: '#fff', fontSize: 12 } }}>
+        {inner}
+      </Tooltip>
+    );
+  }
+  return inner;
+}
+
+// ─── Section de navigation ────────────────────────────────────────────────────
+function NavSection({
+  title, icon, items, collapsed, activePathname, onNavClose,
+}: NavSectionConfig & { collapsed: boolean; activePathname: string; onNavClose?: () => void }) {
+  const hasActive = items.some(i => activePathname === i.to || activePathname.startsWith(i.to + '/'));
+  const [open, setOpen] = useState<boolean>(hasActive);
+
+  if (collapsed) {
+    return (
+      <Box mb={4}>
+        <Divider style={{ borderColor: 'rgba(255,255,255,0.06)' }} my={6} />
+        {items.map(item => (
+          <NavItem key={item.to} {...item} collapsed={true} onNavClose={onNavClose}
+            active={activePathname === item.to || activePathname.startsWith(item.to + '/')} />
+        ))}
+      </Box>
     );
   }
 
   return (
-    <MantineNavLink
-      component={Link}
-      to={to}
-      label={
-        <Group justify="space-between" style={{ flex: 1 }}>
-          <Text
-            size="sm"
-            fw={active ? 600 : 400}
-            style={{
-              color: active ? '#ffffff' : (isHovered ? '#ffffff' : 'rgba(255,255,255,0.7)'),
-              transition: 'color 0.2s ease',
-            }}
-          >
-            {label}
-          </Text>
-          {badge && (
-            <Badge
-              size="xs"
-              color={badgeColor}
-              variant="filled"
-              radius="sm"
-              styles={{
-                root: {
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.3px',
-                  fontWeight: 600,
-                  fontSize: 9,
-                  padding: '2px 8px',
-                }
-              }}
-            >
-              {badge}
-            </Badge>
-          )}
-        </Group>
-      }
-      leftSection={
-        <Box style={{
-          color: active ? '#4a6cf7' : (isHovered ? '#4a6cf7' : 'rgba(255,255,255,0.45)'),
-          transition: 'color 0.2s ease',
-        }}>
-          {icon}
-        </Box>
-      }
-      active={active}
-      onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      styles={{
-        root: {
-          borderRadius: 8,
-          marginBottom: 2,
-          padding: '8px 12px',
-          transition: 'all 0.2s ease',
-          backgroundColor: active
-            ? 'rgba(255,255,255,0.12)'
-            : (isHovered ? 'rgba(255,255,255,0.06)' : 'transparent'),
-          boxShadow: active
-            ? '0 4px 12px rgba(0,0,0,0.15)'
-            : 'none',
-          borderLeft: active
-            ? '4px solid #f4b400'
-            : '4px solid transparent',
-          '&:hover': {
-            backgroundColor: active
-              ? 'rgba(74, 108, 247, 0.20)'
-              : 'rgba(255, 255, 255, 0.08)',
-          },
-        },
-        label: {
-          fontSize: 14,
-          fontWeight: active ? 600 : 400,
-        },
-      }}
-    />
-  );
-};
-
-// Composant pour une section de navigation
-const NavSection: React.FC<NavSectionProps> = ({
-  title,
-  icon,
-  children,
-  defaultOpen = false,
-}) => {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-
-  return (
-    <Box mb={4}>
+    <Box mb={2}>
       <UnstyledButton
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setOpen(o => !o)}
         style={{
-          width: '100%',
-          padding: '8px 12px',
-          borderRadius: 8,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          transition: 'all 0.2s ease',
-          '&:hover': {
-            backgroundColor: 'rgba(255, 255, 255, 0.04)',
-          },
+          width: '100%', padding: '6px 12px', borderRadius: 6,
+          display: 'flex', alignItems: 'center', gap: 8,
+          marginBottom: 2,
         }}
+        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.03)')}
+        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
-        {icon && (
-          <Box style={{ color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center' }}>
-            {icon}
-          </Box>
-        )}
-        <Text
-          size="xs"
-          fw={700}
-          tt="uppercase"
-          style={{
-            flex: 1,
-            letterSpacing: '0.8px',
-            fontSize: 12,
-            color: '#B8C7E0',
-            fontWeight: 700,
-          }}
-        >
+        <Box style={{ color: 'rgba(255,255,255,0.25)', display: 'flex' }}>{icon}</Box>
+        <Text size="xs" fw={700} tt="uppercase"
+          style={{ flex: 1, letterSpacing: '0.8px', color: '#7a9cc4', fontSize: 11 }}>
           {title}
         </Text>
-        <Box style={{ color: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center' }}>
-          {isOpen ? (
-            <IconChevronDown size={14} />
-          ) : (
-            <IconChevronRight size={14} />
-          )}
+        <Box style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>
+          ›
         </Box>
       </UnstyledButton>
-      {isOpen && (
-        <Box pl={8} mt={2}>
-          {children}
+      {open && (
+        <Box pl={4}>
+          {items.map(item => (
+            <NavItem key={item.to} {...item} collapsed={false} onNavClose={onNavClose}
+              active={activePathname === item.to || activePathname.startsWith(item.to + '/')} />
+          ))}
         </Box>
       )}
     </Box>
   );
-};
+}
 
-export default function Navbar({
-  userRole,
-  userName,
-  userEmail,
-  userPhone,
-  userCompany,
-  onLogout,
-  onProfileUpdate,
-}: NavbarProps) {
+// ─── Navbar principale ────────────────────────────────────────────────────────
+export default function Navbar({ userRole, userName, userEmail, userPhone, userCompany, onLogout, onNavClose }: NavbarProps) {
   const location = useLocation();
   const isAdmin = userRole === 'admin';
+  const [collapsed, setCollapsed] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [stats, setStats] = useState({ commandesEnAttente: 0, facturesImpayees: 0 });
 
-  const getRoleColor = () => {
-    switch (userRole) {
-      case 'admin':
-        return 'red';
-      case 'gestionnaire':
-        return 'blue';
-      default:
-        return 'gray';
-    }
-  };
+  // Charger les indicateurs dynamiques
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const db = await getDb();
+        const [cmdResult, factResult] = await Promise.all([
+          db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM commandes WHERE statut NOT IN ('LIVREE','ANNULEE')`),
+          db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM factures WHERE statut = 'EN_ATTENTE'`),
+        ]);
+        setStats({
+          commandesEnAttente: cmdResult[0]?.count || 0,
+          facturesImpayees: factResult[0]?.count || 0,
+        });
+      } catch (_) {
+        // silencieux si tables pas encore créées
+      }
+    };
+    loadStats();
+    const interval = setInterval(loadStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const getRoleLabel = () => {
-    switch (userRole) {
-      case 'admin':
-        return 'Administrateur';
-      case 'gestionnaire':
-        return 'Gestionnaire';
-      default:
-        return 'Utilisateur';
-    }
-  };
+  const getRoleColor = () => userRole === 'admin' ? 'red' : userRole === 'gestionnaire' ? 'blue' : 'gray';
+  const getRoleLabel = () => userRole === 'admin' ? 'Administrateur' : userRole === 'gestionnaire' ? 'Gestionnaire' : 'Utilisateur';
 
-  // Vérifie si la section revendeurs est active
-  const isRevendeursSectionActive = () => {
-    const revendeursPaths = [
-      '/commandes-revendeur',
-      '/factures-revendeur',
-      '/stock-revendeurs',
-      '/decomptes',
-      '/revendeurs/historique',
-      '/dashboard-revendeurs'
-    ];
-    return revendeursPaths.some(path => location.pathname === path);
-  };
+  const sections: NavSectionConfig[] = [
+    {
+      title: 'Catalogue',
+      icon: <IconPackage size={14} />,
+      items: [
+        { to: '/products', label: 'Produits', icon: <IconPackage size={17} /> },
+        { to: '/clients', label: 'Clients', icon: <IconUsers size={17} /> },
+      ],
+    },
+    {
+      title: 'Ventes',
+      icon: <IconShoppingCart size={14} />,
+      items: [
+        {
+          to: '/commandes', label: 'Commandes', icon: <IconShoppingCart size={17} />,
+          badge: stats.commandesEnAttente || undefined, badgeColor: 'orange',
+        },
+        {
+          to: '/factures', label: 'Factures', icon: <IconFileInvoice size={17} />,
+          badge: stats.facturesImpayees || undefined, badgeColor: 'red',
+        },
+        { to: '/ventes', label: 'Ventes comptoir', icon: <IconChartBar size={17} /> },
+      ],
+    },
+    ...(isAdmin ? [{
+      title: 'Revendeurs',
+      icon: <IconTruckDelivery size={14} />,
+      adminOnly: true,
+      items: [
+        { to: '/commandes-revendeur', label: 'Commandes', icon: <IconShoppingCart size={17} /> },
+        { to: '/factures-revendeur', label: 'Factures', icon: <IconFileInvoice size={17} /> },
+        { to: '/decomptes', label: 'Décomptes', icon: <IconReceipt size={17} /> },
+        { to: '/stock-revendeurs', label: 'Stock', icon: <IconBuildingWarehouse size={17} /> },
+      ],
+    }] : []),
+    {
+      title: 'Finances',
+      icon: <IconCoin size={14} />,
+      items: [
+        { to: '/caisse', label: 'Caisse', icon: <IconCash size={17} />, badge: 'Live', badgeColor: 'green' },
+        { to: '/charges', label: 'Charges', icon: <IconMoneybag size={17} /> },
+        { to: '/reglements', label: 'Règlements', icon: <IconReceipt2 size={17} /> },
+        { to: '/credits', label: 'Crédits', icon: <IconCreditCard size={17} /> },
+        { to: '/remboursements', label: 'Remboursements', icon: <IconPercentage size={17} /> },
+      ],
+    },
+    ...(isAdmin ? [{
+      title: 'Administration',
+      icon: <IconSettings size={14} />,
+      adminOnly: true,
+      items: [
+        { to: '/utilisateurs', label: 'Utilisateurs', icon: <IconUserCog size={17} /> },
+        { to: '/parametres', label: 'Paramètres', icon: <IconSettings size={17} /> },
+        { to: '/diagnostic', label: 'Diagnostic DB', icon: <IconDatabase size={17} />, badge: 'Admin', badgeColor: 'red' },
+        { to: '/debug', label: 'Débogage', icon: <IconBug size={17} />, badge: 'Dev', badgeColor: 'violet' },
+      ],
+    }] : []),
+  ];
+
+  const width = collapsed ? 64 : 280;
 
   return (
     <>
       <Box
         style={{
-          width: 280,
-          background: 'linear-gradient(180deg, #0d1520 0%, #162a44 40%, #1a3355 100%)',
-          borderRight: '1px solid rgba(255,255,255,0.05)',
+          width,
+          minWidth: width,
+          background: 'linear-gradient(180deg, #0a1628 0%, #122040 50%, #162a4a 100%)',
+          borderRight: '1px solid rgba(255,255,255,0.06)',
           display: 'flex',
           flexDirection: 'column',
           height: '100vh',
+          transition: 'width 0.25s ease, min-width 0.25s ease',
+          overflow: 'hidden',
           position: 'relative',
         }}
       >
         {/* HEADER */}
-        <Box
-          p="md"
-          style={{
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
-            textAlign: 'center',
-            paddingTop: 25,
-            paddingBottom: 20,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: '20px',
-              fontWeight: 900,
-              letterSpacing: '4px',
-              color: '#f4b400',
-              fontFamily: 'Georgia, Times New Roman, serif',
-              textTransform: 'uppercase',
-              textShadow: `
-                1px 1px 0 #000,
-                -1px 1px 0 #000,
-                1px -1px 0 #000,
-                -1px -1px 0 #000,
-                0 3px 6px rgba(0,0,0,0.5)
-              `,
-            }}
-          >
-            GESTION PRO
-          </Text>
+        <Box style={{
+          padding: '16px 12px',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'space-between',
+          gap: 8,
+          minHeight: 64,
+        }}>
+          {!collapsed && (
+            <Text style={{
+              fontSize: 17, fontWeight: 900, letterSpacing: 3,
+              color: '#f4b400', fontFamily: 'Georgia, serif',
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+            }}>
+              GESTION PRO
+            </Text>
+          )}
+          <Tooltip label={collapsed ? 'Développer' : 'Réduire'} position="right">
+            <ActionIcon
+              variant="subtle"
+              onClick={() => setCollapsed(c => !c)}
+              style={{ color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+            >
+              {collapsed ? <IconMenu2 size={18} /> : <IconChevronLeft size={18} />}
+            </ActionIcon>
+          </Tooltip>
+        </Box>
 
-          <Divider
-            my="md"
-            style={{
-              borderColor: 'rgba(255,255,255,0.15)',
-            }}
+        {/* LIEN DASHBOARD */}
+        <Box px={collapsed ? 8 : 12} pt={10} pb={4}>
+          <NavItem
+            to="/"
+            label="Tableau de bord"
+            icon={<IconDashboard size={18} />}
+            collapsed={collapsed}
+            active={location.pathname === '/'}
+            onNavClose={onNavClose}
           />
         </Box>
 
         {/* MENU */}
-        <ScrollArea
-          flex={1}
-          px="sm"
-          py="sm"
-          style={{ flex: 1 }}
-          styles={{
-            scrollbar: {
-              width: 3,
-            },
-            thumb: {
-              backgroundColor: 'rgba(255,255,255,0.08)',
-            },
-          }}
-        >
-          <Stack gap={1}>
-            {/* DASHBOARD */}
-            <NavItem
-              to="/"
-              label="Tableau de bord"
-              icon={<IconDashboard size={18} />}
-              active={location.pathname === '/'}
-            />
-
-            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
-
-            {/* CATALOGUE */}
-            <NavSection
-              title="Catalogue"
-              icon={<IconPackage size={18} />}
-              defaultOpen
-            >
-              <NavItem
-                to="/products"
-                label="Produits"
-                icon={<IconPackage size={17} />}
-                active={location.pathname === '/products'}
+        <ScrollArea flex={1} px={collapsed ? 8 : 10} styles={{
+          scrollbar: { width: 3 },
+          thumb: { backgroundColor: 'rgba(255,255,255,0.06)' },
+        }}>
+          <Stack gap={0} pb={8}>
+            {sections.map(section => (
+              <NavSection
+                key={section.title}
+                {...section}
+                collapsed={collapsed}
+                activePathname={location.pathname}
+                onNavClose={onNavClose}
               />
-              <NavItem
-                to="/clients"
-                label="Clients"
-                icon={<IconUsers size={17} />}
-                active={location.pathname === '/clients'}
-              />
-            </NavSection>
-
-            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
-
-            {/* VENTES */}
-            <NavSection title="Ventes" icon={<IconShoppingCart size={18} />} defaultOpen>
-              <NavItem
-                to="/commandes"
-                label="Commandes"
-                icon={<IconShoppingCart size={18} />}
-                active={location.pathname === '/commandes'}
-                badge="En cours"
-                badgeColor="orange"
-              />
-              <NavItem
-                to="/factures"
-                label="Factures"
-                icon={<IconFileInvoice size={17} />}
-                active={location.pathname === '/factures'}
-              />
-              <NavItem
-                to="/ventes"
-                label="Ventes"
-                icon={<IconChartBar size={18} />}
-                active={location.pathname === '/ventes'}
-              />
-            </NavSection>
-
-            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
-
-            {/* REVENDEURS */}
-            {isAdmin && (
-              <>
-                <NavSection 
-                  title="Revendeurs" 
-                  icon={<IconTruckDelivery size={18} />} 
-                  defaultOpen={isRevendeursSectionActive()}
-                >
-                  <NavItem
-                    to="/commandes-revendeur"
-                    label="Commandes"
-                    icon={<IconShoppingCart size={18} />}
-                    active={location.pathname === '/commandes-revendeur'}
-                  />
-                  <NavItem
-                    to="/factures-revendeur"
-                    label="Factures"
-                    icon={<IconFileInvoice size={18} />}
-                    active={location.pathname === '/factures-revendeur'}
-                  />
-                  <NavItem
-                    to="/stock-revendeurs"
-                    label="Stock"
-                    icon={<IconBuildingWarehouse size={18} />}
-                    active={location.pathname === '/stock-revendeurs'}
-                  />
-                  <NavItem
-                    to="/decomptes"
-                    label="Décomptes"
-                    icon={<IconReceipt size={18} />}
-                    active={location.pathname === '/decomptes'}
-                  />
-                  <NavItem
-                    to="/revendeurs/historique"
-                    label="Historique"
-                    icon={<IconHistory size={18} />}
-                    active={location.pathname === '/revendeurs/historique'}
-                  />
-                  <NavItem
-                    to="/dashboard-revendeurs"
-                    label="Dashboard Revendeurs"
-                    icon={<IconDashboardRevendeur size={18} />}
-                    active={location.pathname === '/dashboard-revendeurs'}
-                  />
-                </NavSection>
-
-                <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
-              </>
-            )}
-
-            {/* FINANCES */}
-            <NavSection title="Finances" icon={<IconCoin size={18} />} defaultOpen>
-              <NavItem
-                to="/caisse"
-                label="Journal de caisse"
-                icon={<IconCash size={18} />}
-                active={location.pathname === '/caisse'}
-                badge="Live"
-                badgeColor="green"
-              />
-              <NavItem
-                to="/charges"
-                label="Charges"
-                icon={<IconMoneybag size={18} />}
-                active={location.pathname === '/charges'}
-              />
-              <NavItem
-                to="/reglements"
-                label="Règlements"
-                icon={<IconReceipt size={18} />}
-                active={location.pathname === '/reglements'}
-              />
-              <NavItem
-                to="/credits"
-                label="Crédits"
-                icon={<IconCreditCard size={18} />}
-                active={location.pathname === '/credits'}
-                badge="Suivi"
-                badgeColor="blue"
-              />
-              <NavItem
-                to="/remboursements"
-                label="Remboursements"
-                icon={<IconReceipt2 size={18} />}
-                active={location.pathname === '/remboursements'}
-                badge="Historique"
-                badgeColor="teal"
-              />
-              {isAdmin && (
-                <>
-                  <NavItem
-                    to="/commissions"
-                    label="Commissions"
-                    icon={<IconPercentage size={18} />}
-                    active={location.pathname === '/commissions'}
-                    disabled
-                    badge="Soon"
-                    badgeColor="gray"
-                  />
-                  <NavItem
-                    to="/rapports"
-                    label="Rapports"
-                    icon={<IconReportAnalytics size={18} />}
-                    active={location.pathname === '/rapports'}
-                    disabled
-                    badge="Soon"
-                    badgeColor="gray"
-                  />
-                </>
-              )}
-            </NavSection>
-
-            <Divider style={{ borderColor: 'rgba(255,255,255,0.05)' }} my="sm" />
-
-            {/* ADMINISTRATION */}
-            {isAdmin && (
-              <NavSection title="Administration" icon={<IconSettings size={18} />}>
-                <NavItem
-                  to="/utilisateurs"
-                  label="Utilisateurs"
-                  icon={<IconUserCog size={18} />}
-                  active={location.pathname === '/utilisateurs'}
-                />
-                <NavItem
-                  to="/parametres"
-                  label="Paramètres"
-                  icon={<IconSettings size={18} />}
-                  active={location.pathname === '/parametres'}
-                />
-                <NavItem
-                  to="/diagnostic"
-                  label="Diagnostic DB"
-                  icon={<IconDatabase size={18} />}
-                  active={location.pathname === '/diagnostic'}
-                  badge="Admin"
-                  badgeColor="red"
-                />
-                <NavItem
-                  to="/debug"
-                  label="Débogage"
-                  icon={<IconBug size={18} />}
-                  active={location.pathname === '/debug'}
-                  badge="Dev"
-                  badgeColor="violet"
-                />
-              </NavSection>
-            )}
+            ))}
           </Stack>
         </ScrollArea>
 
         {/* FOOTER */}
-        <Box
-          p="md"
-          style={{
-            borderTop: '1px solid rgba(255,255,255,0.05)',
-            background: 'rgba(0,0,0,0.15)',
-          }}
-        >
-          <UnstyledButton
-            onClick={() => setProfileModalOpen(true)}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              borderRadius: 8,
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-          >
-            <Avatar
-              radius="xl"
-              size={40}
+        <Box style={{
+          padding: '10px 10px',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(0,0,0,0.2)',
+        }}>
+          {/* Indicateurs si collapsed */}
+          {collapsed && (stats.commandesEnAttente > 0 || stats.facturesImpayees > 0) && (
+            <Tooltip label={`${stats.commandesEnAttente} commandes · ${stats.facturesImpayees} factures impayées`} position="right">
+              <Box style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                <IconAlertCircle size={18} style={{ color: '#f97316' }} />
+              </Box>
+            </Tooltip>
+          )}
+
+          {/* Profil */}
+          <Tooltip label={collapsed ? (userName || 'Profil') : ''} position="right" disabled={!collapsed}>
+            <UnstyledButton
+              onClick={() => setProfileModalOpen(true)}
               style={{
-                backgroundColor: 'rgba(74, 108, 247, 0.2)',
+                width: '100%', padding: collapsed ? '8px 0' : '8px 10px',
+                borderRadius: 8, display: 'flex', alignItems: 'center',
+                gap: collapsed ? 0 : 10, justifyContent: collapsed ? 'center' : 'flex-start',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <Avatar radius="xl" size={34} style={{
+                backgroundColor: 'rgba(74,108,247,0.2)',
                 color: '#4a6cf7',
-                border: '2px solid rgba(74, 108, 247, 0.3)',
-                flexShrink: 0,
+                border: '2px solid rgba(74,108,247,0.3)',
+                flexShrink: 0, fontSize: 14,
+              }}>
+                {userName?.charAt(0).toUpperCase() || 'U'}
+              </Avatar>
+              {!collapsed && (
+                <Box style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="sm" fw={600} style={{ color: 'rgba(255,255,255,0.85)' }} lineClamp={1}>
+                    {userName || 'Utilisateur'}
+                  </Text>
+                  <Badge size="xs" color={getRoleColor()} variant="dot"
+                    styles={{ root: { textTransform: 'none', color: 'rgba(255,255,255,0.5)' } }}>
+                    {getRoleLabel()}
+                  </Badge>
+                </Box>
+              )}
+            </UnstyledButton>
+          </Tooltip>
+
+          {/* Déconnexion */}
+          <Tooltip label={collapsed ? 'Déconnexion' : ''} position="right" disabled={!collapsed}>
+            <UnstyledButton
+              onClick={onLogout}
+              style={{
+                width: '100%', padding: collapsed ? '8px 0' : '7px 10px',
+                borderRadius: 8, display: 'flex', alignItems: 'center',
+                gap: collapsed ? 0 : 8, justifyContent: collapsed ? 'center' : 'flex-start',
+                color: 'rgba(239,68,68,0.7)', marginTop: 4,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.08)';
+                e.currentTarget.style.color = '#ef4444';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'rgba(239,68,68,0.7)';
               }}
             >
-              {userName?.charAt(0).toUpperCase() || 'U'}
-            </Avatar>
-
-            <Box style={{ flex: 1, minWidth: 0 }}>
-              <Text size="sm" fw={600} style={{ color: 'rgba(255,255,255,0.85)' }} lineClamp={1}>
-                {userName || 'Utilisateur'}
-              </Text>
-              <Group gap="xs">
-                <Badge size="xs" color={getRoleColor()} variant="light" style={{ textTransform: 'none' }}>
-                  {getRoleLabel()}
-                </Badge>
-                <Text size="xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                  <IconChevronRight size={12} />
-                </Text>
-              </Group>
-            </Box>
-          </UnstyledButton>
-
-          <UnstyledButton
-            onClick={onLogout}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: 8,
-              color: 'rgba(239, 68, 68, 0.7)',
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              marginTop: 8,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.08)';
-              e.currentTarget.style.color = '#ef4444';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'rgba(239, 68, 68, 0.7)';
-            }}
-          >
-            <IconLogout size={18} />
-            <Text size="sm" fw={500}>
-              Déconnexion
-            </Text>
-          </UnstyledButton>
+              <IconLogout size={17} />
+              {!collapsed && <Text size="sm" fw={500}>Déconnexion</Text>}
+            </UnstyledButton>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -669,147 +409,90 @@ export default function Navbar({
       <Modal
         opened={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
-        title={
-          <Group gap="xs">
-            <ThemeIcon size={28} radius="xl" color="blue" variant="light">
-              <IconUser size={16} />
-            </ThemeIcon>
-            <Text fw={600}>Mon Profil</Text>
-          </Group>
-        }
-        size="md"
+        size="sm"
         centered
+        padding={0}
         styles={{
-          header: {
-            backgroundColor: '#1b365d',
-            padding: '16px 20px',
-            borderTopLeftRadius: '12px',
-            borderTopRightRadius: '12px',
-          },
-          title: { color: 'white', fontWeight: 600, flex: 1 },
-          body: { padding: '20px' },
+          header: { position: 'absolute', top: 0, right: 0, zIndex: 100, background: 'transparent', padding: '8px' },
+          close: { color: 'rgba(255,255,255,0.6)', '&:hover': { background: 'rgba(255,255,255,0.1)' } },
+          body: { padding: 0 },
+          content: { borderRadius: 14, overflow: 'hidden' },
         }}
       >
-        <Stack gap="md">
-          <Paper withBorder p="lg" radius="md" style={{ textAlign: 'center' }}>
-            <Avatar
-              radius="xl"
-              size={80}
-              style={{
-                backgroundColor: 'rgba(74, 108, 247, 0.15)',
-                color: '#4a6cf7',
-                border: '3px solid #4a6cf7',
-                margin: '0 auto',
-              }}
-            >
-              {userName?.charAt(0).toUpperCase() || 'U'}
-            </Avatar>
-            <Text fw={700} size="lg" mt="sm">
-              {userName || 'Utilisateur'}
-            </Text>
-            <Badge color={getRoleColor()} variant="light" size="sm" mt={4}>
-              {getRoleLabel()}
-            </Badge>
-          </Paper>
+        {/* Bannière */}
+        <Box style={{
+          background: 'linear-gradient(135deg, #0a1628 0%, #122040 60%, #1b365d 100%)',
+          padding: '40px 24px 28px',
+          textAlign: 'center',
+        }}>
+          <Avatar
+            radius="xl"
+            size={76}
+            mx="auto"
+            mb="sm"
+            style={{
+              backgroundColor: 'rgba(74,108,247,0.2)',
+              color: '#4a6cf7',
+              border: '3px solid rgba(74,108,247,0.45)',
+              fontSize: 28,
+              fontWeight: 700,
+            }}
+          >
+            {userName?.charAt(0).toUpperCase() || 'U'}
+          </Avatar>
+          <Text fw={700} size="lg" c="white" mb={6}>{userName || 'Utilisateur'}</Text>
+          <Badge
+            color={getRoleColor()}
+            variant="filled"
+            size="md"
+            radius="sm"
+            style={{ letterSpacing: 0.5 }}
+          >
+            {getRoleLabel()}
+          </Badge>
+        </Box>
 
-          <SimpleGrid cols={2} spacing="sm">
-            <Paper withBorder p="sm" radius="md">
-              <Group gap="xs">
-                <ThemeIcon color="gray" variant="light" size="sm">
-                  <IconUser size={14} />
-                </ThemeIcon>
-                <Box>
-                  <Text size="xs" c="dimmed">Nom</Text>
-                  <Text size="sm" fw={500}>{userName || '-'}</Text>
-                </Box>
-              </Group>
-            </Paper>
-
-            <Paper withBorder p="sm" radius="md">
-              <Group gap="xs">
-                <ThemeIcon color="gray" variant="light" size="sm">
-                  <IconShield size={14} />
-                </ThemeIcon>
-                <Box>
-                  <Text size="xs" c="dimmed">Rôle</Text>
-                  <Text size="sm" fw={500}>{getRoleLabel()}</Text>
-                </Box>
-              </Group>
-            </Paper>
-
-            <Paper withBorder p="sm" radius="md">
-              <Group gap="xs">
-                <ThemeIcon color="gray" variant="light" size="sm">
-                  <IconMail size={14} />
+        {/* Infos */}
+        <Box p="lg">
+          <Stack gap="xs">
+            {userEmail && (
+              <Group gap="sm" p="sm" style={{ borderRadius: 8, background: '#f1f3f5' }}>
+                <ThemeIcon size={32} color="blue" variant="light" radius="md">
+                  <IconMail size={15} />
                 </ThemeIcon>
                 <Box>
                   <Text size="xs" c="dimmed">Email</Text>
-                  <Text size="sm" fw={500}>{userEmail || '-'}</Text>
+                  <Text size="sm" fw={500}>{userEmail}</Text>
                 </Box>
               </Group>
-            </Paper>
-
-            <Paper withBorder p="sm" radius="md">
-              <Group gap="xs">
-                <ThemeIcon color="gray" variant="light" size="sm">
-                  <IconPhone size={14} />
-                </ThemeIcon>
-                <Box>
-                  <Text size="xs" c="dimmed">Téléphone</Text>
-                  <Text size="sm" fw={500}>{userPhone || '-'}</Text>
-                </Box>
-              </Group>
-            </Paper>
-
-            {userCompany && (
-              <Grid.Col span={2}>
-                <Paper withBorder p="sm" radius="md">
-                  <Group gap="xs">
-                    <ThemeIcon color="gray" variant="light" size="sm">
-                      <IconBuilding size={14} />
-                    </ThemeIcon>
-                    <Box>
-                      <Text size="xs" c="dimmed">Entreprise</Text>
-                      <Text size="sm" fw={500}>{userCompany}</Text>
-                    </Box>
-                  </Group>
-                </Paper>
-              </Grid.Col>
             )}
-          </SimpleGrid>
-
-          <Divider />
-
-          <Group justify="space-between">
-            <Group>
-              <Tooltip label="Modifier le profil">
-                <ActionIcon
-                  variant="light"
-                  color="blue"
-                  onClick={() => {
-                    setProfileModalOpen(false);
-                    if (onProfileUpdate) onProfileUpdate();
-                  }}
-                >
-                  <IconEdit size={18} />
-                </ActionIcon>
-              </Tooltip>
-              <Tooltip label="Changer le mot de passe">
-                <ActionIcon variant="light" color="orange">
-                  <IconLock size={18} />
-                </ActionIcon>
-              </Tooltip>
+            <Group gap="sm" p="sm" style={{ borderRadius: 8, background: '#f1f3f5' }}>
+              <ThemeIcon size={32} color={getRoleColor()} variant="light" radius="md">
+                <IconUserCog size={15} />
+              </ThemeIcon>
+              <Box>
+                <Text size="xs" c="dimmed">Rôle</Text>
+                <Text size="sm" fw={500}>{getRoleLabel()}</Text>
+              </Box>
             </Group>
-            <Button variant="light" onClick={() => setProfileModalOpen(false)} size="sm">
-              Fermer
-            </Button>
-          </Group>
+          </Stack>
 
-          <Text size="xs" c="dimmed" ta="center">
-            Dernière connexion: {new Date().toLocaleString()}
-          </Text>
-        </Stack>
+          <Button
+            fullWidth
+            mt="lg"
+            color="red"
+            variant="light"
+            leftSection={<IconLogout size={16} />}
+            onClick={() => {
+              setProfileModalOpen(false);
+              onLogout?.();
+            }}
+          >
+            Se déconnecter
+          </Button>
+        </Box>
       </Modal>
     </>
   );
-}
+};
+

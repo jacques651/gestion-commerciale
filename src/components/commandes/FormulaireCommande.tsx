@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Modal, TextInput, Select, Button, Group, Stack,
   NumberInput, Table, ActionIcon, Text, Card,
-  Divider, LoadingOverlay, Grid, Badge,
+  Divider, Grid, Badge,
   Tooltip, Pagination, ScrollArea, ThemeIcon, Paper, Center,
   Alert, SegmentedControl
 } from '@mantine/core';
@@ -12,13 +12,13 @@ import {
   IconTrash, IconPlus, IconSearch,
   IconRefresh, IconUserPlus, IconShoppingBag, IconPhone, IconUser,
   IconPackage, IconBuildingStore, IconShoppingCart, IconTruck,
-  IconPercentage, IconEdit
+  IconPercentage, IconEdit, IconCheck
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
 import { useCommandes } from '../../hooks/useCommandes';
-import { FormulaireClient } from '../clients/FormulaireClient';
 import FormulaireProduit from '../products/FormulaireProduit';
+import { FormulaireClient } from '../clients/FormulaireClient';
 import { getDb } from '../../database/db';
 import { useDebug } from '../../hooks/useDebug';
 
@@ -52,8 +52,8 @@ type Db = {
 export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, onClose }) => {
   const debug = useDebug('FormulaireCommande');
 
-  const { clients, loading: clientsLoading, refresh: refreshClients } = useClients();
-  const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
+  const { clients, refresh: refreshClients } = useClients();
+  const { products, refresh: refreshProducts } = useProducts();
   const { loading } = useCommandes();
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -64,8 +64,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const [currentPage, setCurrentPage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [clientModalOpened, setClientModalOpened] = useState(false);
-  const [produitModalOpened, setProduitModalOpened] = useState(false);
-  const [produitToEdit, setProduitToEdit] = useState<any>(null);
+  const [produitModalOpen, setProduitModalOpen] = useState(false);
   const [codeCommande, setCodeCommande] = useState('');
   const [typeCommande, setTypeCommande] = useState<string>('STANDARD');
   const [commissionPourcentage, setCommissionPourcentage] = useState<number>(0);
@@ -362,15 +361,13 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     setCart(updatedCart);
   };
 
-  const handleOpenProduitModal = (product?: any) => {
-    if (product) setProduitToEdit(product);
-    else setProduitToEdit(null);
-    setProduitModalOpened(true);
+  const handleOpenProduitModal = (_product?: any) => {
+    setProduitModalOpen(true);
   };
 
   const handleProduitModalClose = () => {
-    setProduitModalOpened(false);
-    setProduitToEdit(null);
+    setProduitModalOpen(false);
+    // setProduitToEdit(null);
     refreshProducts();
   };
 
@@ -489,12 +486,9 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             date_commande,
             montant_ht,
             montant_ttc,
-            statut,
-            montant_tva,
-            montant_net,
-            source
+            statut
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           `,
           [
             finalCode,
@@ -503,10 +497,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             dateCommande,
             montantHT,
             typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-            'CONFIRMEE',
-            montantTotal - montantHT,
-            typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-            'DIRECT'
+            'CONFIRMEE'
           ]
         );
       });
@@ -748,6 +739,20 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         });
       }
 
+      // Auto-génération de la facture
+      try {
+        if (typeCommande === 'STANDARD') {
+          const { factureRepository } = await import('../../database/repositories/factureRepository');
+          await factureRepository.createFromCommande(idCommande);
+        } else {
+          const { factureRevendeurRepository } = await import('../../database/repositories/factureRevendeurRepository');
+          await factureRevendeurRepository.createFromCommande(idCommande);
+        }
+      } catch (factureError) {
+        // Non bloquant — la commande est créée, la facture peut être générée manuellement
+        console.error('Erreur génération facture auto:', factureError);
+      }
+
       await refreshProducts();
       onClose();
 
@@ -797,7 +802,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         padding="xl"
         radius="lg"
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 700, fontSize: '1.5rem' },
           body: { padding: 0 }
         }}
@@ -818,17 +823,31 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Grid align="flex-end">
                 <Grid.Col span={3}>
-                  <Select
-                    label="Client"
-                    placeholder="Rechercher..."
-                    data={clientData}
-                    value={selectedClientId}
-                    onChange={setSelectedClientId}
-                    searchable
-                    required
-                    size="xs"
-                    leftSection={<IconUser size={14} />}
-                  />
+                  <Group gap={4} align="flex-end" wrap="nowrap">
+                    <Select
+                      label="Client"
+                      placeholder="Rechercher..."
+                      data={clientData}
+                      value={selectedClientId}
+                      onChange={setSelectedClientId}
+                      searchable
+                      required
+                      size="xs"
+                      leftSection={<IconUser size={14} />}
+                      style={{ flex: 1 }}
+                    />
+                    <Tooltip label="Nouveau client" position="top">
+                      <ActionIcon
+                        size="sm"
+                        variant="light"
+                        color="blue"
+                        onClick={() => setClientModalOpened(true)}
+                        mb={1}
+                      >
+                        <IconUserPlus size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Group>
                 </Grid.Col>
 
                 <Grid.Col span={1.5}>
@@ -907,7 +926,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                       style={{
                         cursor: 'pointer',
                         backgroundColor: typeCommande === 'STANDARD' ? '#eef3f9' : 'white',
-                        borderColor: typeCommande === 'STANDARD' ? '#1b365d' : '#e5e7eb',
+                        borderColor: typeCommande === 'STANDARD' ? '#4a6cf7' : '#e5e7eb',
                         textAlign: 'center'
                       }}
                       onClick={() => setTypeCommande('STANDARD')}
@@ -916,7 +935,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                         <ThemeIcon color="blue" variant={typeCommande === 'STANDARD' ? 'filled' : 'light'} size="xs" radius="xl">
                           <IconShoppingBag size={12} />
                         </ThemeIcon>
-                        <Text size="xs" fw={600} c={typeCommande === 'STANDARD' ? '#1b365d' : '#333'}>Standard</Text>
+                        <Text size="xs" fw={600} c={typeCommande === 'STANDARD' ? 'blue.5' : '#333'}>Standard</Text>
                       </Group>
                     </Paper>
 
@@ -960,7 +979,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                   {selectedClientDetails && (
                     <Paper p="xs" withBorder radius="md" bg="gray.0">
                       <Group gap="xs" justify="center">
-                        <IconBuildingStore size={14} color="#1b365d" />
+                        <IconBuildingStore size={14} color="#4a6cf7" />
                         <Text size="xs" c="dimmed">
                           {selectedClientDetails.NomComplet || selectedClientDetails.Societe}
                         </Text>
@@ -1094,7 +1113,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 ) : (
                   <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                     <Table.Thead>
-                      <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                      <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
                         <Table.Th c="white" style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
                         <Table.Th c="white" style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
                         <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }}>Catégorie</Table.Th>
@@ -1213,7 +1232,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 <ScrollArea h={150}>
                   <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                     <Table.Thead>
-                      <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                      <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
                         <Table.Th c="white" style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
                         <Table.Th c="white" style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
                         <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }}>Catégorie</Table.Th>
@@ -1319,33 +1338,29 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 loading={submitting || loading}
                 disabled={cart.length === 0 || !selectedClientId}
                 size="xs"
-                color="green"
-                leftSection={<IconShoppingBag size={14} />}
+                color="blue"
+                      leftSection={<IconCheck size={14} />}
               >
-                Enregistrer
+                Enregistrer la commande
               </Button>
             </Group>
           </Stack>
         </ScrollArea>
+        </Modal>
 
-        <LoadingOverlay visible={clientsLoading || productsLoading} />
-      </Modal>
+        {/* Modal Nouveau Client */}
+        <FormulaireClient
+          opened={clientModalOpened}
+          onClose={() => { setClientModalOpened(false); refreshClients(); }}
+        />
 
-      <FormulaireClient
-        opened={clientModalOpened}
-        onClose={() => {
-          setClientModalOpened(false);
-          refreshClients();
-        }}
-      />
-
-      <FormulaireProduit
-        opened={produitModalOpened}
-        onClose={handleProduitModalClose}
-        editProduct={produitToEdit}
-      />
-    </>
-  );
+        {/* Modal Nouveau Produit */}
+        <FormulaireProduit
+          opened={produitModalOpen}
+          onClose={handleProduitModalClose}
+        />
+      </>
+    );
 };
 
 export default FormulaireCommande;

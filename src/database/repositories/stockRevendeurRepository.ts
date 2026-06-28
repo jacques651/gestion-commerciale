@@ -41,9 +41,9 @@ export const stockRevendeurRepository = {
         p.designation,
         p.categorie,
         p.unite_base,
-        p.prix_achat_base,
-        p.prix_vente_gros,
-        p.commission_pourcentage
+        COALESCE(NULLIF(sr.prix_achat, 0), p.prix_achat_base) AS prix_achat_base,
+        COALESCE(NULLIF(sr.prix_vente, 0), p.prix_vente_gros) AS prix_vente_gros,
+        COALESCE(sr.commission_pourcentage, 0) AS commission_pourcentage
       FROM stock_revendeur sr
       INNER JOIN products p ON p.idProduit = sr.idProduit
       WHERE sr.idRevendeur = ?
@@ -211,9 +211,9 @@ export const stockRevendeurRepository = {
         p.designation,
         p.categorie,
         p.unite_base,
-        p.prix_achat_base,
-        p.prix_vente_gros,
-        p.commission_pourcentage
+        COALESCE(NULLIF(sr.prix_achat, 0), p.prix_achat_base) AS prix_achat_base,
+        COALESCE(NULLIF(sr.prix_vente, 0), p.prix_vente_gros) AS prix_vente_gros,
+        COALESCE(sr.commission_pourcentage, 0) AS commission_pourcentage
       FROM stock_revendeur sr
       INNER JOIN products p ON p.idProduit = sr.idProduit
       WHERE sr.idRevendeur = ?

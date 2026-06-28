@@ -87,11 +87,11 @@ export const Register: React.FC = () => {
   };
 
   const roleData = [
-    { value: 'admin', label: '👑 Administrateur' },
-    { value: 'gestionnaire', label: '📊 Gestionnaire' },
-    { value: 'commercial', label: '💼 Commercial' },
-    { value: 'stockiste', label: '📦 Stockiste' },
-    { value: 'comptable', label: '💰 Comptable' },
+    { value: 'admin', label: 'Administrateur' },
+    { value: 'gestionnaire', label: 'Gestionnaire' },
+    { value: 'commercial', label: 'Commercial' },
+    { value: 'stockiste', label: 'Stockiste' },
+    { value: 'comptable', label: 'Comptable' },
   ];
 
   return (

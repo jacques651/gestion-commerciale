@@ -1,5 +1,6 @@
 // src/components/decomptes/ListeDecomptes.tsx
 import { useState, useEffect } from 'react';
+import { confirm } from '../../utils/confirm';
 import {
   Card,
   Stack,
@@ -295,12 +296,14 @@ const loadDecomptes = async () => {
         dd.idDetailRevendeur,
         dd.idProduit,
         dd.qte_decompte,
+        dd.qte_avant_decompte,
         dd.prix_achat,
         dd.prix_vente,
-        dd.commission_pourcentage,
-        dd.designation,
-        dd.total,
+        COALESCE(dd.commission_pourcentage, sr.commission_pourcentage, 0) as commission_pourcentage,
+        COALESCE(dd.designation, p.designation) as designation,
+        COALESCE(dd.total, dd.prix_vente * dd.qte_decompte, 0) as total,
         p.code_produit,
+        p.designation as p_designation,
         p.categorie as produit_categorie,
         p.prix_achat_base,
         p.prix_vente_gros,
@@ -348,7 +351,9 @@ const loadDecomptes = async () => {
         const prixVente = row.prix_vente || row.prix_vente_gros || 0;
         const qteDecompte = row.qte_decompte || 0;
         const stockActuel = row.stock_actuel_revendeur || 0;
-        const qteInitiale = stockActuel + qteDecompte;
+        // qte_avant_decompte = stock du revendeur AVANT le décompte (stocké lors de la création)
+        // Fallback sur stockActuel + qteDecompte pour les anciens enregistrements sans cette colonne
+        const qteInitiale = row.qte_avant_decompte > 0 ? row.qte_avant_decompte : stockActuel + qteDecompte;
         const totalAchat = prixAchat * qteDecompte;
         const totalVente = row.total || (prixVente * qteDecompte);
         const benefice = totalVente - totalAchat;
@@ -522,7 +527,7 @@ const loadDecomptes = async () => {
   };
 
   const handleDelete = async (idDecompte: number) => {
-    if (!window.confirm('⚠️ Êtes-vous sûr de vouloir supprimer ce décompte ?\n\nCette action est irréversible et restaurera les stocks.')) {
+    if (!await confirm('Êtes-vous sûr de vouloir supprimer ce décompte ?\n\nCette action est irréversible et restaurera les stocks.', 'Suppression décompte')) {
       return;
     }
 
@@ -531,27 +536,60 @@ const loadDecomptes = async () => {
     try {
       const db = await getDb();
 
-      // Récupérer les détails pour restaurer les stocks
+      // Récupérer les détails et le code du décompte
+      const decompteRow = await db.select<any[]>(`
+        SELECT idClient, code_decompte FROM decomptes WHERE idDecompte = ?
+      `, [idDecompte]);
+      if (decompteRow.length === 0) throw new Error('Décompte introuvable');
+      const idRevendeur = decompteRow[0].idClient;
+      const codeDecompte = decompteRow[0].code_decompte;
+
       const details = await db.select<any[]>(`
-        SELECT idProduit, QteDecompte
+        SELECT idProduit, qte_decompte
         FROM decompte_details
         WHERE idDecompte = ?
       `, [idDecompte]);
 
-      // Restaurer les stocks
-      for (const detail of details) {
-        await db.execute(`
-          UPDATE stock_revendeur 
-          SET qte_stock = qte_stock + ?
-          WHERE idProduit = ? AND idRevendeur = (
-            SELECT idClient FROM decomptes WHERE idDecompte = ?
-          )
-        `, [detail.QteDecompte, detail.idProduit, idDecompte]);
+      // Récupérer les quantités réapprovisionnées depuis mouvements_stock
+      const reappros = await db.select<any[]>(`
+        SELECT idProduit, quantite as qte_reappro
+        FROM mouvements_stock
+        WHERE reference = ? AND type_mouvement = 'SORTIE_REAPPRO'
+      `, [`REAPPRO-${codeDecompte}`]);
+      const reapproMap: Record<number, number> = {};
+      for (const r of reappros) {
+        reapproMap[r.idProduit] = r.qte_reappro;
       }
 
-      // Supprimer les détails
+      // Restaurer les stocks
+      for (const detail of details) {
+        const qteReappro = reapproMap[detail.idProduit] || 0;
+
+        // 1. Restaurer stock principal (ce qui avait été pris pour réapprovisionner)
+        if (qteReappro > 0) {
+          await db.execute(`
+            UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?
+          `, [qteReappro, detail.idProduit]);
+        }
+
+        // 2. Restaurer stock revendeur : annuler la vente (+qte_decompte) et annuler le réappro (-qte_reappro)
+        const netRevendeur = detail.qte_decompte - qteReappro;
+        if (netRevendeur !== 0) {
+          await db.execute(`
+            UPDATE stock_revendeur
+            SET qte_stock = CASE WHEN qte_stock + ? >= 0 THEN qte_stock + ? ELSE 0 END
+            WHERE idProduit = ? AND idRevendeur = ?
+          `, [netRevendeur, netRevendeur, detail.idProduit, idRevendeur]);
+        }
+      }
+
+      // Supprimer les enregistrements dépendants (sans CASCADE)
+      await db.execute(`DELETE FROM mouvements_revendeur WHERE idDecompte = ?`, [idDecompte]);
+      await db.execute(`DELETE FROM factures_approvisionnement WHERE idDecompte = ?`, [idDecompte]);
+
+      // Supprimer les détails (CASCADE géré par la DB)
       await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [idDecompte]);
-      
+
       // Supprimer le décompte
       await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [idDecompte]);
 
@@ -761,10 +799,10 @@ const loadDecomptes = async () => {
                   placeholder="Statut"
                   clearable
                   data={[
-                    { value: 'brouillon', label: '📝 Brouillon' },
-                    { value: 'valide', label: '✅ Validé' },
-                    { value: 'paye', label: '💳 Payé' },
-                    { value: 'annule', label: '❌ Annulé' }
+                    { value: 'brouillon', label: 'Brouillon' },
+                    { value: 'valide', label: 'Validé' },
+                    { value: 'paye', label: 'Payé' },
+                    { value: 'annule', label: 'Annulé' }
                   ]}
                   value={statutFilter}
                   onChange={setStatutFilter}
@@ -1206,7 +1244,7 @@ const loadDecomptes = async () => {
         centered
         styles={{
           header: {
-            backgroundColor: '#1b365d',
+            backgroundColor: '#1a1a2e',
             padding: '16px 20px',
             borderTopLeftRadius: '12px',
             borderTopRightRadius: '12px',
@@ -1350,4 +1388,5 @@ const loadDecomptes = async () => {
       </Modal>
     </Stack>
   );
-}
+};
+

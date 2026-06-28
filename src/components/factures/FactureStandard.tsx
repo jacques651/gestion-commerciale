@@ -2,15 +2,13 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Paper, Text, Table, Group, Box, Divider,
-  Button, Image, Flex, SimpleGrid, Loader, Center
+  Button, Flex, SimpleGrid, Loader, Center,
+  Badge, Grid, Alert
 } from '@mantine/core';
-import {
-  IconPrinter, IconDownload
-} from '@tabler/icons-react';
+import { IconPrinter, IconDownload, IconAlertCircle } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
 import html2pdf from 'html2pdf.js';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
-import { generateFactureCode } from '../../services/codeGeneratorService';
 import { getDb } from '../../database/db';
 
 interface FactureStandardProps {
@@ -19,125 +17,105 @@ interface FactureStandardProps {
   onDownload?: () => void;
 }
 
-interface DetailsWithCalculs {
-  numero: number;
-  designation: string;
-  qte: number;
-  prix_unitaire: number;
-  total_ligne: number;
-}
+const fmt = (v: number | undefined | null): string =>
+  (v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-export const FactureStandard: React.FC<FactureStandardProps> = ({
-  facture,
-  onDownload
-}) => {
+const fmtDate = (d?: string): string => {
+  if (!d) return '-';
+  try {
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? '-' : date.toLocaleDateString('fr-FR');
+  } catch { return '-'; }
+};
+
+const statutColor = (s?: string) => {
+  const v = (s || '').toLowerCase();
+  if (['payée', 'paye', 'reglee'].includes(v)) return 'green';
+  if (['annulee', 'annulée'].includes(v)) return 'red';
+  return 'orange';
+};
+
+const statutLabel = (s?: string) => {
+  const v = (s || '').toLowerCase();
+  if (['payée', 'paye', 'reglee'].includes(v)) return 'PAYÉE';
+  if (['annulee', 'annulée'].includes(v)) return 'ANNULÉE';
+  return 'EN ATTENTE';
+};
+
+export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => {
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
   const [codeFacture, setCodeFacture] = useState<string>(facture?.code_facture || '');
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    const generateCode = async () => {
-      if (!facture?.code_facture && !codeFacture) {
-        setGenerating(true);
-        try {
-          const code = await generateFactureCode();
-          setCodeFacture(code);
-
-          if (facture?.idFacture) {
-            const db = await getDb();
-            await db.execute(
-              `UPDATE factures SET code_facture = ? WHERE idFacture = ?`,
-              [code, facture.idFacture]
-            );
-          }
-        } catch (error) {
-          console.error('Erreur génération code facture:', error);
-        } finally {
-          setGenerating(false);
+    if (facture?.code_facture) { setCodeFacture(facture.code_facture); return; }
+    if (codeFacture) return;
+    const gen = async () => {
+      setGenerating(true);
+      try {
+        const now = new Date();
+        const prefix = `FAC-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-`;
+        const db = await getDb();
+        const r = await db.select<any[]>(`SELECT COUNT(*) as n FROM factures WHERE code_facture LIKE ?`, [prefix + '%']);
+        const code = `${prefix}${String((r[0]?.n || 0) + 1).padStart(4, '0')}`;
+        setCodeFacture(code);
+        if (facture?.idFacture) {
+          await db.execute(`UPDATE factures SET code_facture = ? WHERE idFacture = ?`, [code, facture.idFacture]);
         }
-      } else if (facture?.code_facture) {
-        setCodeFacture(facture.code_facture);
+      } catch (e) {
+        console.error('Erreur génération code facture:', e);
+      } finally {
+        setGenerating(false);
       }
     };
-    generateCode();
-  }, [facture, codeFacture]);
+    gen();
+  }, [facture]);
 
-  const { detailsWithCalculs, totalHT, totalTTC } = useMemo<{
-    detailsWithCalculs: DetailsWithCalculs[];
-    totalHT: number;
-    totalTTC: number;
-  }>(() => {
-    let totalHTValue = 0;
-    const details = (facture?.details || []).map((detail: any, idx: number): DetailsWithCalculs => {
-      const qte = detail.qte_commande || detail.quantite || detail.qte || 0;
-      const prix = detail.prix_unitaire_vente || detail.prix_vente || detail.prix_unitaire || 0;
-      const totalLigne = prix * qte;
-      totalHTValue += totalLigne;
-
-      return {
-        numero: idx + 1,
-        qte,
-        prix_unitaire: prix,
-        total_ligne: totalLigne,
-        designation: detail.designation || detail.produit_nom || detail.produit_designation || '-'
-      };
+  const { details, totalHT, totalTVA, totalTTC } = useMemo(() => {
+    const src = facture?.details || [];
+    let ht = 0;
+    const rows = src.map((d: any, i: number) => {
+      const qte = d.qte ?? d.qte_commande ?? d.quantite ?? 0;
+      const prix = d.prix_unitaire ?? d.prix_unitaire_vente ?? d.prix_vente ?? 0;
+      const total = qte * prix;
+      ht += total;
+      return { num: i + 1, designation: d.designation || '-', qte, prix, total };
     });
-
-    return {
-      detailsWithCalculs: details,
-      totalHT: totalHTValue,
-      totalTTC: totalHTValue * 1.18
-    };
+    const tva = ht * 0.18;
+    return { details: rows, totalHT: ht, totalTVA: tva, totalTTC: ht + tva };
   }, [facture]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Facture_${codeFacture || 'facture'}`
+    documentTitle: `Facture_${codeFacture || 'standard'}`
   });
 
-  const handleDownloadPdf = async () => {
-    if (onDownload) {
-      onDownload();
-      return;
-    }
+  const handlePdf = async () => {
     if (!printRef.current) return;
-
-    await html2pdf()
-      .set({
-        margin: 0.3,
-        filename: `Facture_${codeFacture || 'facture'}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-      })
-      .from(printRef.current)
-      .save();
-  };
-
-  const formatMontant = (value: number | undefined | null): string => {
-    if (!value) return '0';
-    return value.toLocaleString('fr-FR');
-  };
-
-  const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return '-';
     try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return '-';
-      return d.toLocaleDateString('fr-FR');
-    } catch {
-      return '-';
+      const worker = html2pdf().set({
+        margin: 0.2,
+        filename: `Facture_${codeFacture || 'standard'}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+      }).from(printRef.current);
+      const blob = await worker.outputPdf('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('Erreur PDF:', e);
     }
   };
 
-  const atelier = atelierConfig || {
-    nom_atelier: 'MON ATELIER',
-    telephone: '',
-    adresse: '',
-    message_facture: 'Merci de votre confiance',
-    logo_base64: ''
-  };
+  if (!facture) {
+    return (
+      <Alert icon={<IconAlertCircle size={16} />} title="Facture non trouvée" color="red">
+        <Text>Les données de cette facture sont introuvables.</Text>
+      </Alert>
+    );
+  }
 
   if (atelierLoading || generating) {
     return (
@@ -148,165 +126,140 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({
     );
   }
 
-  if (!facture) {
-    return (
-      <Paper p="xl" ta="center">
-        <Text>Aucune facture à afficher</Text>
-      </Paper>
-    );
-  }
-
-  const displayCodeFacture = codeFacture || facture?.code_facture || 'FACT-XXXX';
+  const atelier = atelierConfig || { nom_atelier: 'MON COMMERCE', telephone: '', adresse: '', message_facture: '' };
+  const code = codeFacture || facture?.code_facture || 'FAC-XXXX';
 
   return (
     <Box>
-      <Group justify="flex-end" mb="md" className="no-print">
-        <Button
-          size="xs"
-          variant="light"
-          onClick={handlePrint}
-          leftSection={<IconPrinter size={14} />}
-        >
+      <Group justify="flex-end" mb="sm" className="no-print">
+        <Button size="xs" variant="light" onClick={handlePrint} leftSection={<IconPrinter size={14} />}>
           Imprimer
         </Button>
-        <Button
-          size="xs"
-          variant="light"
-          color="teal"
-          onClick={handleDownloadPdf}
-          leftSection={<IconDownload size={14} />}
-        >
-          PDF
+        <Button size="xs" variant="light" color="teal" onClick={handlePdf} leftSection={<IconDownload size={14} />}>
+          Télécharger PDF
         </Button>
       </Group>
 
-      <div ref={printRef}>
-        <Paper
-          p="sm"
-          style={{
-            maxWidth: '100%',
-            margin: '0 auto',
-            backgroundColor: 'white'
-          }}
-        >
+      <div ref={printRef} className="print-area">
+        <Paper p="md" maw={1200} mx="auto" style={{ backgroundColor: 'white' }}>
+
+          {/* En-tête identique à FactureRevendeur */}
           <Flex
-            justify="space-between"
-            align="center"
-            wrap="wrap"
-            gap="xs"
-            style={{
-              borderBottom: '1px solid #1b365d',
-              paddingBottom: 8,
-              marginBottom: 12
-            }}
+            justify="space-between" align="center" wrap="wrap" gap="xs"
+            style={{ borderBottom: '1px solid #1b365d', paddingBottom: 6, marginBottom: 10 }}
           >
-            <Flex align="center" gap="sm">
-              {atelier.logo_base64 && (
-                <Image
-                  src={atelier.logo_base64}
-                  alt="Logo"
-                  style={{ height: '40px', objectFit: 'contain' }}
-                />
-              )}
-              <Box>
-                <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
-                <Text size="xs" c="dimmed">{atelier.adresse}</Text>
-                <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text>
-              </Box>
-            </Flex>
             <Box>
-              <Text size="xs" c="dimmed">N°: {displayCodeFacture}</Text>
-              <Text size="xs" c="dimmed">Date: {formatDate(facture.date_facture)}</Text>
+              <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
+              <Text size="xs" c="dimmed">{atelier.adresse}</Text>
+              <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text>
+            </Box>
+            <Box style={{ textAlign: 'right' }}>
+              <Text size="xs" c="dimmed">N° : {code}</Text>
+              <Text size="xs" c="dimmed">Date : {fmtDate(facture.date_facture)}</Text>
             </Box>
           </Flex>
 
-          <Text ta="center" fw={700} size="xs" style={{ backgroundColor: '#f2d2bc', padding: '3px', borderRadius: '4px', marginBottom: 10 }}>
+          <Text
+            ta="center" fw={700} size="xs"
+            style={{ backgroundColor: '#d0e8ff', padding: '3px', borderRadius: '4px', marginBottom: 8 }}
+          >
             FACTURE STANDARD
           </Text>
 
-          <Flex justify="space-between" wrap="wrap" gap="xs" mb="xs" style={{ fontSize: '10px' }}>
-            <Text><Text span fw={400}>Client:</Text> {facture.NomComplet || facture.client_nom || 'Client'}</Text>
-            <Text><Text span fw={400}>Commande:</Text> {facture.code_commande || facture.idCommande || '-'}</Text>
-          </Flex>
+          {/* Infos client */}
+          <Grid mb="xs">
+            <Grid.Col span={7}>
+              <Text size="xs"><Text span fw={600}>Client :</Text> {facture.NomComplet || facture.client_nom || '-'}</Text>
+              {facture.Societe && <Text size="xs" c="dimmed">{facture.Societe}</Text>}
+              {facture.Adresse && <Text size="xs" c="dimmed">{facture.Adresse}</Text>}
+              {facture.Tel && <Text size="xs" c="dimmed">📞 {facture.Tel}</Text>}
+            </Grid.Col>
+            <Grid.Col span={5} style={{ textAlign: 'right' }}>
+              <Text size="xs" c="dimmed">Commande : {facture.code_commande || '-'}</Text>
+              <Badge size="sm" color={statutColor(facture.statut)} variant="filled" mt={3}>
+                {statutLabel(facture.statut)}
+              </Badge>
+            </Grid.Col>
+          </Grid>
 
           <Divider my="xs" />
 
-          <Table withColumnBorders style={{ fontSize: '9px', marginBottom: 12 }}>
+          {/* Tableau produits */}
+          <Table withColumnBorders striped highlightOnHover style={{ fontSize: '12px', marginBottom: 12 }}>
             <Table.Thead>
-              <Table.Tr style={{ backgroundColor: '#1b365d' }}>
-                <Table.Th c="white" ta="center" w={30}>#</Table.Th>
+              <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
+                <Table.Th c="white" ta="center" w={28}>#</Table.Th>
                 <Table.Th c="white">Désignation</Table.Th>
-                <Table.Th c="white" ta="center" w={40}>Qté</Table.Th>
-                <Table.Th c="white" ta="right" w={65}>Prix HT</Table.Th>
-                <Table.Th c="white" ta="right" w={65}>Total HT</Table.Th>
+                <Table.Th c="white" ta="center" w={55}>Qté</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Prix unit. HT</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Total HT</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {detailsWithCalculs.map((detail) => (
-                <Table.Tr key={detail.numero}>
-                  <Table.Td ta="center">{detail.numero}</Table.Td>
-                  <Table.Td>
-                    <Text size="xs" fw={500}>{detail.designation}</Text>
-                  </Table.Td>
-                  <Table.Td ta="center">{detail.qte}</Table.Td>
-                  <Table.Td ta="right">{formatMontant(detail.prix_unitaire)}</Table.Td>
-                  <Table.Td ta="right" fw={600}>{formatMontant(detail.total_ligne)}</Table.Td>
+              {details.length > 0 ? details.map((d: {num:number; designation:string; qte:number; prix:number; total:number}) => (
+                <Table.Tr key={d.num}>
+                  <Table.Td ta="center">{d.num}</Table.Td>
+                  <Table.Td><Text size="xs" fw={500}>{d.designation}</Text></Table.Td>
+                  <Table.Td ta="center">{d.qte}</Table.Td>
+                  <Table.Td ta="right">{fmt(d.prix)}</Table.Td>
+                  <Table.Td ta="right" fw={700}>{fmt(d.total)}</Table.Td>
                 </Table.Tr>
-              ))}
+              )) : (
+                <Table.Tr>
+                  <Table.Td colSpan={5}>
+                    <Text ta="center" c="dimmed" size="sm" py="md">Aucun article dans cette facture</Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
             </Table.Tbody>
           </Table>
 
           <Divider my="xs" />
 
-          <Box style={{ textAlign: 'right', marginBottom: 12 }}>
-            <SimpleGrid cols={3} spacing="xs" style={{ maxWidth: '350px', marginLeft: 'auto' }}>
-              <Paper p="xs" withBorder>
-                <Flex justify="space-between" gap={8} style={{ fontSize: '10px' }}>
-                  <Text fw={400}>Total HT:</Text>
-                  <Text>{formatMontant(totalHT)} FCFA</Text>
-                </Flex>
-              </Paper>
-              <Paper p="xs" withBorder style={{ backgroundColor: '#fff3e0' }}>
-                <Flex justify="space-between" gap={8} style={{ fontSize: '10px' }}>
-                  <Text fw={400}>TVA 18%:</Text>
-                  <Text c="orange">{formatMontant(totalTTC - totalHT)} FCFA</Text>
-                </Flex>
-              </Paper>
-              <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9' }}>
-                <Flex justify="space-between" gap={8} style={{ fontSize: '10px' }}>
-                  <Text fw={400}>Total TTC:</Text>
-                  <Text fw={400} c="green">{formatMontant(totalTTC)} FCFA</Text>
-                </Flex>
-              </Paper>
-            </SimpleGrid>
-          </Box>
+          {/* Récapitulatif — même structure que FactureRevendeur */}
+          <SimpleGrid cols={3} spacing="xs" mb="xs">
+            <Paper p="xs" withBorder bg="gray.0">
+              <Text size="xs" c="dimmed">Total HT</Text>
+              <Text size="sm" fw={700} c="blue">{fmt(totalHT)} FCFA</Text>
+            </Paper>
+            <Paper p="xs" withBorder bg="orange.0">
+              <Text size="xs" c="orange">TVA 18%</Text>
+              <Text size="sm" fw={700} c="orange">{fmt(totalTVA)} FCFA</Text>
+            </Paper>
+            <Paper p="xs" withBorder bg="green.0">
+              <Text size="xs" c="green">Total TTC</Text>
+              <Text size="sm" fw={700} c="green">{fmt(totalTTC)} FCFA</Text>
+            </Paper>
+          </SimpleGrid>
+
+          {/* Total TTC en grand */}
+          <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9', border: '2px solid #4caf50' }}>
+            <Flex justify="space-between" align="center">
+              <Text fw={700} size="sm" c="green.8">TOTAL TTC :</Text>
+              <Text fw={800} size="lg" c="green.8">{fmt(totalTTC)} FCFA</Text>
+            </Flex>
+          </Paper>
 
           <Divider my="xs" />
 
-          <Paper p="xs" withBorder style={{ backgroundColor: '#f8f9fa', marginTop: 8 }}>
-            <Text size="xs" fw={500} ta="center">
-              Arrêté la présente facture à la somme de : {formatMontant(totalTTC)} Francs CFA
+          {/* Pied de page */}
+          <Box style={{ textAlign: 'center' }}>
+            <Text size="xs" c="dimmed" fw={500}>
+              {atelier.message_facture || `Merci de votre confiance — ${atelier.nom_atelier}`}
             </Text>
-          </Paper>
-
-          <Flex justify="flex-end" mt={16}>
-            <Box>
-              <Text fw={600} size="xs">Le responsable</Text>
-              <Text size="xs" c="dimmed" mt={12}>Signature et cachet</Text>
-            </Box>
-          </Flex>
-
-          <Text size="xs" ta="center" fs="italic" c="dimmed" mt={12}>
-            {atelier.message_facture}
-          </Text>
+            <Text size="xs" c="dimmed" mt={2}>
+              Généré le {new Date().toLocaleDateString('fr-FR')} à {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            <Text size="xs" c="dimmed" mt={4} fs="italic">Tous les montants sont en FCFA</Text>
+          </Box>
         </Paper>
       </div>
 
       <style>{`
         @media print {
-          .no-print {
-            display: none !important;
-          }
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-area { width: 100% !important; margin: 0 !important; padding: 0 !important; }
         }
       `}</style>
     </Box>

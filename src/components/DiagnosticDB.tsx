@@ -64,6 +64,7 @@ import {
   IconDeviceFloppy,
   IconFileImport,
   IconActivity,
+  IconClock,
 } from '@tabler/icons-react';
 import { getDb } from '../database/db';
 
@@ -1648,81 +1649,183 @@ const recreateAllFinanceTables = async () => {
 
           {/* TAB SQL CONSOLE */}
           <Tabs.Panel value="sql" pt="md">
-            <Card withBorder radius="lg" shadow="sm" p="lg">
-              <Group justify="space-between" mb="md">
-                <Group>
-                  <IconTerminal size={20} color="#1976d2" />
-                  <Text fw={600} size="lg">Console SQL</Text>
+            <Stack gap="md">
+              {/* Éditeur */}
+              <Card withBorder radius="lg" shadow="sm" p="lg">
+                <Group justify="space-between" mb="sm">
+                  <Group gap="xs">
+                    <IconTerminal size={20} color="#1976d2" />
+                    <Text fw={700} size="md">Console SQL</Text>
+                    <Badge color="blue" variant="light" size="sm">Ctrl+Enter pour exécuter</Badge>
+                  </Group>
+                  <Group gap="xs">
+                    {selectedTable && (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color="grape"
+                        onClick={() => setSqlQuery(`SELECT * FROM ${selectedTable} LIMIT 100`)}
+                      >
+                        SELECT {selectedTable}
+                      </Button>
+                    )}
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="orange"
+                      onClick={() => setSqlQuery('SELECT name FROM sqlite_master WHERE type=\'table\' ORDER BY name')}
+                    >
+                      Tables
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="red"
+                      onClick={() => { setSqlQuery(''); setQueryResult([]); }}
+                    >
+                      Effacer
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="gradient"
+                      gradient={{ from: '#0a1628', to: '#2563eb' }}
+                      onClick={executeSqlQuery}
+                      leftSection={<IconCode size={14} />}
+                    >
+                      Exécuter
+                    </Button>
+                  </Group>
                 </Group>
-                <Group>
-                  <Button
-                    size="xs"
-                    variant="light"
-                    onClick={() => setSqlQuery('SELECT * FROM ' + selectedTable)}
-                  >
-                    SELECT *
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="gradient"
-                    gradient={{ from: 'blue', to: 'cyan' }}
-                    onClick={executeSqlQuery}
-                    leftSection={<IconCode size={14} />}
-                  >
-                    Exécuter
-                  </Button>
-                </Group>
-              </Group>
-              <Divider mb="md" />
 
-              <Textarea
-                placeholder="-- Entrez votre requête SQL ici --"
-                value={sqlQuery}
-                onChange={(e) => setSqlQuery(e.target.value)}
-                minRows={6}
-                maxRows={12}
-                autosize
-                styles={{
-                  input: {
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    backgroundColor: '#1a1a2e',
-                    color: '#00ff00',
-                  },
-                }}
-              />
+                <Textarea
+                  placeholder={`-- Entrez votre requête SQL ici (Ctrl+Enter pour exécuter) --\n-- Exemple : SELECT * FROM users LIMIT 10`}
+                  value={sqlQuery}
+                  onChange={(e) => setSqlQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      executeSqlQuery();
+                    }
+                  }}
+                  minRows={7}
+                  maxRows={14}
+                  autosize
+                  styles={{
+                    input: {
+                      fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                      backgroundColor: '#0d1117',
+                      color: '#58a6ff',
+                      border: '1px solid #30363d',
+                      borderRadius: 8,
+                    },
+                  }}
+                />
+              </Card>
 
+              {/* Résultats */}
               {queryResult.length > 0 && (
-                <Box mt="md">
-                  <Divider label="📊 Résultat" labelPosition="center" />
-                  <ScrollArea h={300} mt="md">
-                    <Table striped highlightOnHover withTableBorder>
-                      <Table.Thead style={{ backgroundColor: '#e3f2fd' }}>
-                        <Table.Tr>
-                          {Object.keys(queryResult[0]).map((key) => (
-                            <Table.Th key={key} fw={600}>{key}</Table.Th>
-                          ))}
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {queryResult.map((row, idx) => (
-                          <Table.Tr key={idx}>
-                            {Object.values(row).map((val, i) => (
-                              <Table.Td key={i}>
-                                {val !== null && val !== undefined ? String(val) : 'NULL'}
-                              </Table.Td>
+                <Card withBorder radius="lg" shadow="sm" p="lg">
+                  <Group justify="space-between" mb="sm">
+                    <Group gap="xs">
+                      <IconCode size={18} color="#2e7d32" />
+                      <Text fw={600} size="sm">Résultats</Text>
+                      {queryResult[0]?.error ? (
+                        <Badge color="red" size="sm">Erreur</Badge>
+                      ) : queryResult[0]?.message ? (
+                        <Badge color="green" size="sm">Succès</Badge>
+                      ) : (
+                        <Badge color="blue" size="sm">{queryResult.length} ligne{queryResult.length > 1 ? 's' : ''}</Badge>
+                      )}
+                    </Group>
+                    <Button size="xs" variant="subtle" color="gray" onClick={() => setQueryResult([])}>
+                      Fermer
+                    </Button>
+                  </Group>
+
+                  {queryResult[0]?.error ? (
+                    <Alert color="red" radius="md" variant="light">
+                      <Text size="sm" style={{ fontFamily: 'monospace' }}>{queryResult[0].error}</Text>
+                    </Alert>
+                  ) : queryResult[0]?.message ? (
+                    <Alert color="green" radius="md" variant="light">
+                      <Text size="sm">{queryResult[0].message}</Text>
+                    </Alert>
+                  ) : (
+                    <ScrollArea h={320}>
+                      <Table striped highlightOnHover withTableBorder style={{ minWidth: Math.max(600, Object.keys(queryResult[0] || {}).length * 120) }}>
+                        <Table.Thead style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)' }}>
+                          <Table.Tr>
+                            <Table.Th c="rgba(255,255,255,0.5)" style={{ whiteSpace: 'nowrap', width: 40, textAlign: 'center', fontSize: 11 }}>#</Table.Th>
+                            {Object.keys(queryResult[0]).map((key) => (
+                              <Table.Th key={key} c="white" style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{key}</Table.Th>
                             ))}
                           </Table.Tr>
-                        ))}
-                      </Table.Tbody>
-                    </Table>
-                  </ScrollArea>
-                  <Text size="xs" c="dimmed" mt="sm">
-                    {queryResult.length} lignes retournées
-                  </Text>
-                </Box>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {queryResult.map((row, idx) => (
+                            <Table.Tr key={idx}>
+                              <Table.Td ta="center" c="dimmed" style={{ fontSize: 11 }}>{idx + 1}</Table.Td>
+                              {Object.values(row).map((val, i) => (
+                                <Table.Td key={i} style={{ whiteSpace: 'nowrap', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 12, fontFamily: 'monospace' }}>
+                                  {val === null || val === undefined
+                                    ? <Text size="xs" c="dimmed" fs="italic">NULL</Text>
+                                    : String(val)}
+                                </Table.Td>
+                              ))}
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    </ScrollArea>
+                  )}
+                </Card>
               )}
-            </Card>
+
+              {/* Historique */}
+              {queryHistory.length > 0 && (
+                <Card withBorder radius="lg" shadow="sm" p="md">
+                  <Group justify="space-between" mb="sm">
+                    <Group gap="xs">
+                      <IconClock size={16} color="#666" />
+                      <Text fw={600} size="sm" c="dimmed">Historique</Text>
+                      <Badge color="gray" variant="light" size="sm">{queryHistory.length}</Badge>
+                    </Group>
+                    <Button size="xs" variant="subtle" color="red" onClick={() => setQueryHistory([])}>
+                      Vider
+                    </Button>
+                  </Group>
+                  <ScrollArea h={180}>
+                    <Stack gap={4}>
+                      {queryHistory.map((h) => (
+                        <Box
+                          key={h.id}
+                          p="xs"
+                          style={{
+                            borderRadius: 6,
+                            backgroundColor: h.success ? 'rgba(46,125,50,0.06)' : 'rgba(211,47,47,0.06)',
+                            border: `1px solid ${h.success ? 'rgba(46,125,50,0.15)' : 'rgba(211,47,47,0.15)'}`,
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => setSqlQuery(h.query)}
+                        >
+                          <Group justify="space-between" mb={2}>
+                            <Group gap={6}>
+                              <Box style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: h.success ? '#2e7d32' : '#d32f2f' }} />
+                              <Text size="xs" c="dimmed">{new Date(h.timestamp).toLocaleTimeString('fr-FR')}</Text>
+                              <Text size="xs" c="dimmed">{h.duration}ms</Text>
+                              {h.success && h.rowCount > 0 && <Badge size="xs" color="blue" variant="light">{h.rowCount} lignes</Badge>}
+                            </Group>
+                          </Group>
+                          <Text size="xs" style={{ fontFamily: 'monospace', color: '#555' }} lineClamp={1}>{h.query}</Text>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </Card>
+              )}
+            </Stack>
           </Tabs.Panel>
 
           {/* TAB BACKUP */}
@@ -2169,154 +2272,45 @@ const recreateAllFinanceTables = async () => {
           overlayProps={{ blur: 3 }}
         >
           <Stack gap="md">
-            <Alert color="orange" variant="light" icon={<IconAlertTriangle size={16} />}>
-              ⚠️ La restauration remplacera toutes les données actuelles.
+            <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
+              <Text size="sm">
+                La restauration remplacera toutes les données actuelles. Cette action est irréversible.
+              </Text>
             </Alert>
 
-            <NativeSelect
-              label="Sélectionner une sauvegarde"
-              data={backups.length > 0 ? backups.map(b => b.name) : ['Aucune sauvegarde disponible']}
-              disabled={backups.length === 0}
-            />
+            {backups.length === 0 ? (
+              <Text c="dimmed" ta="center" py="md">Aucune sauvegarde disponible</Text>
+            ) : (
+              <Stack gap="xs">
+                {backups.map((b, i) => (
+                  <Paper key={i} withBorder p="sm" radius="md">
+                    <Group justify="space-between">
+                      <Box>
+                        <Text size="sm" fw={600}>{b.name}</Text>
+                        <Text size="xs" c="dimmed">{b.date}</Text>
+                      </Box>
+                      <Button
+                        size="xs"
+                        color="orange"
+                        variant="light"
+                        onClick={() => {
+                          closeRestore();
+                        }}
+                      >
+                        Restaurer
+                      </Button>
+                    </Group>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
 
             <Group justify="flex-end" mt="md">
-              <Button variant="light" onClick={closeRestore}>Annuler</Button>
-              <Button color="orange" onClick={closeRestore} disabled={backups.length === 0}>
-                Restaurer
-              </Button>
+              <Button variant="light" onClick={closeRestore}>Fermer</Button>
             </Group>
           </Stack>
         </Modal>
 
-        {/* RÉINITIALISER */}
-        <Modal
-          opened={resetDbOpened}
-          onClose={closeResetDb}
-          title={
-            <Group>
-              <ThemeIcon color="red" size="lg" radius="xl">
-                <IconDatabaseImport size={18} />
-              </ThemeIcon>
-              <Text fw={600} size="lg">Réinitialiser la base de données</Text>
-            </Group>
-          }
-          size="md"
-          centered
-          overlayProps={{ blur: 3 }}
-        >
-          <Stack gap="md">
-            <Alert color="red" variant="filled" icon={<IconAlertTriangle size={16} />}>
-              ⚠️ ATTENTION : Cette action est irréversible !
-              <Text size="sm" mt="sm">
-                Toutes les données seront perdues. La base sera recréée avec le schéma initial.
-              </Text>
-            </Alert>
-
-            <TextInput
-              label="Confirmer la réinitialisation"
-              placeholder="Tapez 'RESET' pour confirmer"
-              value={confirmReset}
-              onChange={(e) => setConfirmReset(e.target.value)}
-              withAsterisk
-            />
-
-            <PasswordInput
-              label="Mot de passe administrateur"
-              placeholder="admin123"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              withAsterisk
-            />
-
-            <Group justify="flex-end" mt="md">
-              <Button variant="light" onClick={closeResetDb}>Annuler</Button>
-              <Button
-                color="red"
-                onClick={handleResetDatabase}
-                disabled={confirmReset !== 'RESET' || confirmPassword !== 'admin123'}
-              >
-                Réinitialiser
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
-
-        {/* MODAL RECREATION TABLES FINANCIERES */}
-        <Modal
-          opened={recreateModal}
-          onClose={() => !recreating && setRecreateModal(false)}
-          title="⚠️ Recréation des tables financières"
-          size="md"
-          centered
-          styles={{
-            header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-            title: { color: 'white', fontWeight: 600 },
-            body: { padding: '20px' }
-          }}
-        >
-          <Stack gap="md">
-            <Alert color="red" variant="filled">
-              <Text c="white" fw={600}>⚠️ Attention !</Text>
-              <Text c="white" size="sm">
-                Cette action va supprimer et recréer toutes les tables financières
-              </Text>
-            </Alert>
-
-            <Box>
-              <Text fw={500} size="sm" mb="xs">Tables concernées :</Text>
-              {financeTables.map(tableName => {
-                const table = tables.find(t => t.name === tableName);
-                const exists = table && table.rowCount >= 0;
-                const rowCount = table?.rowCount ?? 0;
-                return (
-                  <Group key={tableName} gap="xs" mb={4}>
-                    {exists && rowCount > 0 ? (
-                      <IconCheck size={14} color="green" />
-                    ) : (
-                      <IconX size={14} color="red" />
-                    )}
-                    <Text size="sm" c={exists && rowCount > 0 ? 'dimmed' : 'red'}>
-                      {tableName}
-                      {exists && rowCount > 0 && ` (${rowCount} lignes)`}
-                      {(!exists || rowCount === 0) && ' ❌ manquante'}
-                    </Text>
-                  </Group>
-                );
-              })}
-            </Box>
-
-            <Alert color="yellow" variant="light">
-              <Text size="sm" fw={500}>🚨 Conséquences :</Text>
-              <Text size="sm" c="dimmed">
-                • Toutes les données financières seront supprimées
-                • Les règlements, factures et crédits seront réinitialisés
-                • Le journal de caisse sera vidé
-              </Text>
-            </Alert>
-
-            <Alert color="blue" variant="light">
-              <Text size="sm" fw={500}>✅ Après la recréation :</Text>
-              <Text size="sm" c="dimmed">
-                • Les catégories de charges seront réinitialisées
-                • Un redémarrage de l'application sera nécessaire
-              </Text>
-            </Alert>
-
-            <Group justify="flex-end">
-              <Button variant="outline" onClick={() => setRecreateModal(false)} disabled={recreating}>
-                Annuler
-              </Button>
-              <Button
-                color="red"
-                onClick={recreateAllFinanceTables}
-                loading={recreating}
-                leftSection={<IconTrash size={16} />}
-              >
-                Confirmer la recréation
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
       </Stack>
     </Container>
   );

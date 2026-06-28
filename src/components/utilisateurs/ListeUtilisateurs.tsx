@@ -4,7 +4,7 @@ import {
   Stack, Card, Title, Text, Group, Button, Table, Badge, ActionIcon,
   Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
   SimpleGrid, TextInput, Select, PasswordInput, Paper, Flex, Avatar,
-  Loader, Alert, Checkbox, ScrollArea, Grid, Chip
+  Loader, Alert, Checkbox, ScrollArea, Grid, Chip, Tabs, Progress
 } from "@mantine/core";
 import {
   IconUsers, IconPlus, IconEdit, IconTrash, IconSearch, IconInfoCircle,
@@ -646,7 +646,8 @@ const ListeUtilisateurs: React.FC = () => {
           p="xl"
           radius="lg"
           style={{
-            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
+            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+            borderBottom: '3px solid #e94560',
             position: 'relative',
             overflow: 'hidden'
           }}
@@ -654,7 +655,7 @@ const ListeUtilisateurs: React.FC = () => {
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <ThemeIcon size={45} radius="md" color="blue" variant="filled">
                   <IconUsers size={30} />
                 </ThemeIcon>
                 <div>
@@ -675,7 +676,7 @@ const ListeUtilisateurs: React.FC = () => {
             </Group>
           </Flex>
 
-          <SimpleGrid cols={5} spacing="md" mt="xl">
+          <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="md" mt="xl">
             <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
               <Group>
                 <ThemeIcon color="white" variant="light" size="lg">
@@ -809,7 +810,7 @@ const ListeUtilisateurs: React.FC = () => {
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)', }}>
+                <Table.Tr style={{background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', }}>
                   <Table.Th c="white">Utilisateur</Table.Th>
                   <Table.Th c="white">Login</Table.Th>
                   <Table.Th c="white">Rôle</Table.Th>
@@ -943,182 +944,130 @@ const ListeUtilisateurs: React.FC = () => {
       <Modal
         opened={modalOpen}
         onClose={() => { setModalOpen(false); setEditing(null); }}
-        size="xl"
+        size="lg"
         centered
         padding={0}
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '20px 24px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 700, fontSize: '1.2rem', width: '100%' },
-          body: { padding: 0 }
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          title: { color: 'white', fontWeight: 700, width: '100%' },
+          close: { color: 'rgba(255,255,255,0.5)', '&:hover': { background: 'rgba(255,255,255,0.1)' } },
+          body: { padding: 0 },
         }}
         title={
-          <Group gap="md" style={{ width: '100%' }}>
-            <ThemeIcon size="lg" radius="md" color="blue" variant="light">
-              <IconUserShield size={24} />
-            </ThemeIcon>
-            <div>
-              <Text size="lg" fw={700} c="white">{editing ? "Modifier l'utilisateur" : "Nouvel utilisateur"}</Text>
-              <Text size="xs" c="gray.4">
-                {editing ? "Modifiez les informations et les permissions" : "Créez un nouveau compte avec des permissions personnalisées"}
-              </Text>
-            </div>
+          <Group gap="sm">
+            <Avatar
+              radius="xl"
+              size={36}
+              style={{ backgroundColor: 'rgba(74,108,247,0.2)', color: '#4a6cf7', border: '2px solid rgba(74,108,247,0.4)', fontSize: 14 }}
+            >
+              {formData.nom?.charAt(0)?.toUpperCase() || (editing ? editing.nom?.charAt(0)?.toUpperCase() : '+')}
+            </Avatar>
+            <Box>
+              <Text size="sm" fw={700} c="white">{editing ? "Modifier l'utilisateur" : "Nouvel utilisateur"}</Text>
+              <Text size="xs" c="gray.5">{editing ? editing.nom : "Remplissez les informations du compte"}</Text>
+            </Box>
           </Group>
         }
       >
-        <ScrollArea h="calc(100vh - 200px)" type="auto">
-          <Paper p="xl" radius={0}>
-            <Stack gap="lg">
-              {/* Informations de base */}
-              <Card withBorder p="md" radius="md">
-                <Title order={4} size="sm" mb="md">Informations de l'utilisateur</Title>
+        <Tabs defaultValue="compte" styles={{
+          tab: { fontWeight: 500, fontSize: 13 },
+          panel: { padding: 0 },
+          list: { borderBottom: '1px solid #e5e7eb', background: '#f8f9fa' },
+        }}>
+          <Tabs.List px="md">
+            <Tabs.Tab value="compte" leftSection={<IconUser size={14} />}>
+              Compte
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="permissions"
+              leftSection={<IconShieldCheck size={14} />}
+              rightSection={
+                <Badge size="xs" color={selectAll ? 'green' : 'blue'} variant="light" ml={4}>
+                  {Object.values(formData.permissions).filter(v => v).length}/{PERMISSIONS.length}
+                </Badge>
+              }
+            >
+              Permissions
+            </Tabs.Tab>
+          </Tabs.List>
+
+          {/* ─── Onglet Compte ─── */}
+          <Tabs.Panel value="compte">
+            <Box p="lg">
+              <Stack gap="md">
+                {/* Rôle en premier — il précharge les permissions */}
+                <Paper withBorder p="md" radius="md" style={{ background: 'linear-gradient(135deg, rgba(27,54,93,0.04) 0%, rgba(74,108,247,0.03) 100%)' }}>
+                  <Group gap="xs" mb="sm">
+                    <IconUserShield size={15} color="#1b365d" />
+                    <Text size="xs" fw={700} tt="uppercase" c="dimmed" style={{ letterSpacing: 0.5 }}>Rôle</Text>
+                  </Group>
+                  <Select
+                    placeholder="Sélectionner un rôle"
+                    data={[
+                      { value: "admin", label: "Admin — accès total" },
+                      { value: "gestionnaire", label: "Gestionnaire — gestion commerciale" },
+                      { value: "caissier", label: "Caissier — ventes uniquement" },
+                      { value: "commercial", label: "Commercial — clients et commandes" },
+                    ]}
+                    value={formData.role}
+                    onChange={(val) => handleRoleChange(val || "admin")}
+                    size="sm"
+                  />
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Changer le rôle charge automatiquement les permissions recommandées
+                  </Text>
+                </Paper>
+
+                {/* Identité */}
                 <Grid>
                   <Grid.Col span={6}>
                     <TextInput
                       label="Nom complet"
-                      placeholder="Nom de l'utilisateur"
+                      placeholder="Jean Dupont"
                       value={formData.nom}
                       onChange={(e) => setFormData({ ...formData, nom: e.target.value })}
                       required
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={6}>
-                    <TextInput
-                      label="Login (identifiant)"
-                      placeholder="Nom d'utilisateur pour la connexion"
-                      value={formData.login}
-                      onChange={(e) => setFormData({ ...formData, login: e.target.value })}
-                      required
-                      leftSection={<IconUser size={16} />}
-                    />
-                  </Grid.Col>
-                  <Grid.Col span={6}>
-                    <PasswordInput
-                      label="Mot de passe"
-                      placeholder={editing ? "Laisser vide pour conserver" : "Nouveau mot de passe"}
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      required={!editing}
-                      leftSection={<IconLock size={16} />}
+                      size="sm"
                     />
                   </Grid.Col>
                   <Grid.Col span={6}>
                     <TextInput
                       label="Téléphone"
-                      placeholder="Numéro de téléphone"
+                      placeholder="+226 70 00 00 00"
                       value={formData.telephone}
                       onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
-                      leftSection={<IconMail size={16} />}
+                      size="sm"
                     />
                   </Grid.Col>
-                  <Grid.Col span={12}>
-                    <Select
-                      label="Rôle par défaut"
-                      placeholder="Sélectionner un rôle"
-                      data={[
-                        { value: "admin", label: "👑 Admin - Accès total" },
-                        { value: "gestionnaire", label: "📊 Gestionnaire - Gestion commerciale" },
-                        { value: "caissier", label: "💰 Caissier - Ventes uniquement" },
-                        { value: "commercial", label: "🏪 Commercial - Clients et commandes" }
-                      ]}
-                      value={formData.role}
-                      onChange={(val) => handleRoleChange(val || "admin")}
+                  <Grid.Col span={6}>
+                    <TextInput
+                      label="Login (identifiant)"
+                      placeholder="jean.dupont"
+                      value={formData.login}
+                      onChange={(e) => setFormData({ ...formData, login: e.target.value })}
+                      required
+                      leftSection={<IconUser size={14} />}
+                      size="sm"
                     />
-                    <Text size="xs" c="dimmed" mt={4}>
-                      ⚡ Changer le rôle charge automatiquement les permissions par défaut
-                    </Text>
+                  </Grid.Col>
+                  <Grid.Col span={6}>
+                    <PasswordInput
+                      label="Mot de passe"
+                      placeholder={editing ? "Laisser vide = inchangé" : "Mot de passe"}
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      required={!editing}
+                      leftSection={<IconLock size={14} />}
+                      size="sm"
+                    />
                   </Grid.Col>
                 </Grid>
-              </Card>
+              </Stack>
+            </Box>
 
-              {/* Permissions */}
-              <Card withBorder p="md" radius="md">
-                <Group justify="space-between" mb="md">
-                  <Group>
-                    <IconShieldCheck size={20} color="#1b365d" />
-                    <Title order={4} size="sm">Permissions</Title>
-                    <Badge size="sm" variant="light" color="blue">
-                      {Object.values(formData.permissions).filter(v => v).length}/{PERMISSIONS.length}
-                    </Badge>
-                  </Group>
-                  <Group>
-                    <Chip
-                      checked={selectAll}
-                      onChange={handleSelectAll}
-                      size="sm"
-                      color="blue"
-                    >
-                      Tout {selectAll ? 'désélectionner' : 'sélectionner'}
-                    </Chip>
-                  </Group>
-                </Group>
-
-                <Divider mb="md" />
-
-                {getCategories().map((category) => {
-                  const perms = getCategoryPermissions(category);
-                  const checkedCount = perms.filter(p => formData.permissions[p.id]).length;
-                  const allChecked = checkedCount === perms.length;
-                  const isExpanded = expandedCategories.has(category);
-
-                  return (
-                    <Box key={category} mb="sm">
-                      <Group 
-                        justify="space-between" 
-                        p="xs" 
-                        style={{ 
-                          cursor: 'pointer', 
-                          backgroundColor: isExpanded ? 'rgba(27, 54, 93, 0.05)' : 'transparent',
-                          borderRadius: 6,
-                          transition: 'background 0.2s'
-                        }}
-                        onClick={() => toggleCategory(category)}
-                      >
-                        <Group>
-                          <Text size="sm" fw={600} c={isExpanded ? '#1b365d' : 'dimmed'}>
-                            {category}
-                          </Text>
-                          <Badge size="xs" variant="light" color={allChecked ? 'green' : 'orange'}>
-                            {checkedCount}/{perms.length}
-                          </Badge>
-                        </Group>
-                        <Group>
-                          {isExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
-                        </Group>
-                      </Group>
-
-                      {isExpanded && (
-                        <Box pl="md" pt="xs">
-                          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="xs">
-                            {perms.map((perm) => (
-                              <Checkbox
-                                key={perm.id}
-                                label={
-                                  <Group gap={6}>
-                                    <Box style={{ color: '#4a6cf7' }}>{perm.icon}</Box>
-                                    <Text size="xs">{perm.label}</Text>
-                                    <Tooltip label={perm.description} position="top">
-                                      <IconInfoCircle size={12} color="#868e96" style={{ cursor: 'help' }} />
-                                    </Tooltip>
-                                  </Group>
-                                }
-                                checked={formData.permissions[perm.id] || false}
-                                onChange={() => handlePermissionToggle(perm.id)}
-                                size="xs"
-                              />
-                            ))}
-                          </SimpleGrid>
-                        </Box>
-                      )}
-                      <Divider mt="xs" />
-                    </Box>
-                  );
-                })}
-              </Card>
-
-              <Divider />
-
+            <Box px="lg" pb="lg">
               <Group justify="flex-end">
-                <Button variant="outline" onClick={() => setModalOpen(false)} size="md">
+                <Button variant="subtle" color="gray" onClick={() => setModalOpen(false)} size="sm">
                   Annuler
                 </Button>
                 <Button
@@ -1126,71 +1075,124 @@ const ListeUtilisateurs: React.FC = () => {
                   loading={saving}
                   variant="gradient"
                   gradient={{ from: "blue", to: "cyan" }}
-                  size="md"
-                  leftSection={<IconCheck size={16} />}
+                  size="sm"
+                  leftSection={<IconCheck size={14} />}
                 >
-                  {editing ? "Modifier" : "Créer"}
+                  {editing ? "Enregistrer" : "Créer l'utilisateur"}
                 </Button>
               </Group>
-            </Stack>
-          </Paper>
-        </ScrollArea>
-      </Modal>
+            </Box>
+          </Tabs.Panel>
 
-      {/* MODAL CONFIRMATION SUPPRESSION */}
-      <Modal
-        opened={deleteModalOpen}
-        onClose={() => setDeleteModalOpen(false)}
-        title="Supprimer l'utilisateur"
-        centered
-        styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 600 },
-          body: { padding: '20px' }
-        }}
-      >
-        <Stack>
-          <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
-            Êtes-vous sûr de vouloir supprimer cet utilisateur ?
-            <Text size="sm" mt="md" c="red">
-              Cette action est irréversible !
-            </Text>
-          </Alert>
-          <Group justify="flex-end" mt="md">
-            <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>
-              Annuler
-            </Button>
-            <Button color="red" onClick={confirmDelete}>
-              Supprimer
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+          {/* ─── Onglet Permissions ─── */}
+          <Tabs.Panel value="permissions">
+            <Box p="md">
+              {/* Barre de progression globale */}
+              <Group justify="space-between" mb="xs">
+                <Text size="xs" c="dimmed" fw={500}>
+                  {Object.values(formData.permissions).filter(v => v).length} permissions actives sur {PERMISSIONS.length}
+                </Text>
+                <Chip
+                  checked={selectAll}
+                  onChange={handleSelectAll}
+                  size="xs"
+                  color="blue"
+                >
+                  {selectAll ? 'Tout désélectionner' : 'Tout sélectionner'}
+                </Chip>
+              </Group>
+              <Progress
+                value={(Object.values(formData.permissions).filter(v => v).length / PERMISSIONS.length) * 100}
+                size="xs"
+                mb="md"
+                color={selectAll ? 'green' : 'blue'}
+                radius="xl"
+              />
 
-      {/* MODAL INSTRUCTIONS */}
-      <Modal
-        opened={infoModalOpen}
-        onClose={() => setInfoModalOpen(false)}
-        title="📋 Instructions"
-        size="md"
-        centered
-        styles={{
-          header: { backgroundColor: "#1b365d", padding: "16px 20px", borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: "white", fontWeight: 600 },
-          body: { padding: "20px" }
-        }}
-      >
-        <Stack gap="md">
-          <Text size="sm">1. Créez des utilisateurs avec différents rôles</Text>
-          <Text size="sm">2. Chaque rôle a des permissions par défaut</Text>
-          <Text size="sm">3. Vous pouvez personnaliser les permissions individuellement</Text>
-          <Text size="sm">4. Admin : accès total à l'application</Text>
-          <Text size="sm">5. Gestionnaire : gestion commerciale (clients, commandes, factures)</Text>
-          <Text size="sm">6. Caissier : accès aux ventes uniquement</Text>
-          <Text size="sm">7. Commercial : gestion des clients et commandes</Text>
-          <Divider />
-          <Text size="xs" c="dimmed" ta="center">Version 2.0.0 - Gestion Commerciale Pro</Text>
-        </Stack>
+              <ScrollArea h={360} type="auto">
+                <Stack gap="xs">
+                  {getCategories().map((category) => {
+                    const perms = getCategoryPermissions(category);
+                    const checkedCount = perms.filter(p => formData.permissions[p.id]).length;
+                    const allChecked = checkedCount === perms.length;
+                    const isExpanded = expandedCategories.has(category);
+
+                    return (
+                      <Box key={category}>
+                        {/* En-tête de catégorie cliquable */}
+                        <Group
+                          justify="space-between"
+                          p="xs"
+                          style={{
+                            cursor: 'pointer',
+                            borderRadius: 6,
+                            background: isExpanded ? 'rgba(27,54,93,0.06)' : '#f8f9fa',
+                            border: `1px solid ${isExpanded ? 'rgba(27,54,93,0.15)' : '#e9ecef'}`,
+                          }}
+                          onClick={() => toggleCategory(category)}
+                        >
+                          <Group gap="xs">
+                            <Box
+                              style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: allChecked ? '#40c057' : checkedCount > 0 ? '#f59f00' : '#dee2e6',
+                              }}
+                            />
+                            <Text size="xs" fw={600} c={isExpanded ? '#1b365d' : 'dark'}>
+                              {category}
+                            </Text>
+                            <Badge size="xs" variant="light" color={allChecked ? 'green' : checkedCount > 0 ? 'orange' : 'gray'}>
+                              {checkedCount}/{perms.length}
+                            </Badge>
+                          </Group>
+                          <Box style={{ color: '#868e96', fontSize: 12 }}>
+                            {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                          </Box>
+                        </Group>
+
+                        {isExpanded && (
+                          <Box
+                            pl="sm"
+                            pr="xs"
+                            pt="xs"
+                            pb="xs"
+                            style={{ borderLeft: '2px solid rgba(27,54,93,0.12)', marginLeft: 4, marginTop: 2 }}
+                          >
+                            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={4}>
+                              {perms.map((perm) => (
+                                <Checkbox
+                                  key={perm.id}
+                                  label={
+                                    <Group gap={5}>
+                                      <Box style={{ color: '#4a6cf7', flexShrink: 0 }}>{perm.icon}</Box>
+                                      <Text size="xs" style={{ lineHeight: 1.3 }}>{perm.label}</Text>
+                                    </Group>
+                                  }
+                                  checked={formData.permissions[perm.id] || false}
+                                  onChange={() => handlePermissionToggle(perm.id)}
+                                  size="xs"
+                                  styles={{ root: { padding: '4px 0' } }}
+                                />
+                              ))}
+                            </SimpleGrid>
+                          </Box>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              </ScrollArea>
+            </Box>
+
+            <Box px="md" pb="md">
+              <Group justify="flex-end">
+                <Button variant="subtle" color="gray" onClick={() => { setModalOpen(false); setEditing(null); }}>
+                  Fermer
+                </Button>
+              </Group>
+            </Box>
+          </Tabs.Panel>
+        </Tabs>
       </Modal>
     </>
   );

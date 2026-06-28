@@ -60,20 +60,22 @@ export default class FactureService {
     const db =
       await getDb();
 
+    const codeReglement =
+      `REG-${Date.now()}`;
+
     await db.execute(
       `
       INSERT INTO reglements
       (
+        code_reglement,
         idFacture,
         montant,
         mode_reglement
       )
-      VALUES
-      (
-        ?,?,?
-      )
+      VALUES (?, ?, ?, ?)
       `,
       [
+        codeReglement,
         idFacture,
         montant,
         modePaiement
@@ -87,10 +89,7 @@ export default class FactureService {
       montant_regle + ?
       WHERE idFacture = ?
       `,
-      [
-        montant,
-        idFacture
-      ]
+      [montant, idFacture]
     );
   }
 }

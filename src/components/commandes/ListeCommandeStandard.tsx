@@ -1,5 +1,6 @@
 // src/components/commandes/ListeCommandeStandard.tsx
 import React, { useState, useEffect, useMemo } from 'react';
+import { confirm } from '../../utils/confirm';
 import { useNavigate } from 'react-router-dom';
 import {
   Button, Group, Stack, Title, Card, Text,
@@ -229,7 +230,7 @@ export const ListeCommandeStandard: React.FC = () => {
   };
 
   const handleDelete = async (idCommande: number) => {
-    if (!window.confirm('Supprimer cette commande ?')) return;
+    if (!await confirm('Supprimer cette commande ?', 'Suppression')) return;
     try {
       const db = await getDb();
       await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [idCommande]);
@@ -332,11 +333,11 @@ export const ListeCommandeStandard: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
+                <ThemeIcon size={45} radius="md" color="orange" variant="filled">
                   <IconShoppingBag size={30} />
                 </ThemeIcon>
                 <div>
@@ -516,18 +517,18 @@ export const ListeCommandeStandard: React.FC = () => {
 
         {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
-          <ScrollArea h="calc(100vh - 500px)">
-            <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
+          <ScrollArea h="calc(100vh - 500px)" style={{ overflowX: 'auto' }}>
+            <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="md" style={{ minWidth: 950, tableLayout: 'fixed' }}>
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                  <Table.Th c="white" w={50}>N°</Table.Th>
-                  <Table.Th c="white">Client</Table.Th>
-                  <Table.Th c="white" w={120}>Date</Table.Th>
-                  <Table.Th c="white" w={140}>Code commande</Table.Th>
-                  <Table.Th c="white" ta="right" w={120}>Montant TTC</Table.Th>
-                  <Table.Th c="white">Code facture</Table.Th>
-                  <Table.Th c="white">Statut</Table.Th>
-                  <Table.Th c="white" ta="center" w={240}>Actions</Table.Th>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+                  <Table.Th c="white" w={50} style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
+                  <Table.Th c="white" w={180} style={{ whiteSpace: 'nowrap' }}>Client</Table.Th>
+                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
+                  <Table.Th c="white" w={160} style={{ whiteSpace: 'nowrap' }}>Code commande</Table.Th>
+                  <Table.Th c="white" ta="right" w={120} style={{ whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
+                  <Table.Th c="white" w={200} style={{ whiteSpace: 'nowrap' }}>Code facture</Table.Th>
+                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
+                  <Table.Th c="white" ta="center" w={200} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -545,43 +546,43 @@ export const ListeCommandeStandard: React.FC = () => {
                     const num = (currentPage - 1) * itemsPerPage + index + 1;
                     return (
                       <Table.Tr key={commande.idCommande}>
-                        <Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           <Text fw={600} size="sm">{num}</Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Group gap="sm">
-                            <Avatar size="sm" radius="xl" color="blue">
+                        <Table.Td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
+                          <Group gap="sm" wrap="nowrap">
+                            <Avatar size="sm" radius="xl" color="blue" style={{ flexShrink: 0 }}>
                               {(commande.NomComplet || 'C').charAt(0).toUpperCase()}
                             </Avatar>
-                            <div>
-                              <Text fw={500} size="sm">{commande.NomComplet || '-'}</Text>
-                              <Text size="xs" c="dimmed">{commande.Societe || ''}</Text>
+                            <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                              <Text fw={500} size="sm" truncate>{commande.NomComplet || '-'}</Text>
+                              <Text size="xs" c="dimmed" truncate>{commande.Societe || ''}</Text>
                             </div>
                           </Group>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           <Text size="sm">
                             {formatDateCustom(commande.date_commande)}
                           </Text>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           <Text fw={600} size="sm">{commande.code_commande}</Text>
                         </Table.Td>
-                        <Table.Td ta="right">
+                        <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
                           <Text fw={600} size="sm" c="blue">
                             {formatMontant(commande.montant_ttc)} F
                           </Text>
                         </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" c={commande.code_facture ? 'green' : 'dimmed'}>
+                        <Table.Td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
+                          <Text size="sm" c={commande.code_facture ? 'green' : 'dimmed'} truncate>
                             {commande.code_facture || '-'}
                           </Text>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           {getStatusBadge(commande.statut)}
                         </Table.Td>
-                        <Table.Td ta="center">
-                          <Group gap={4} justify="center">
+                        <Table.Td ta="center" style={{ whiteSpace: 'nowrap' }}>
+                          <Group gap={4} justify="center" wrap="nowrap">
                             <Tooltip label="Voir détails">
                               <ActionIcon
                                 variant="light"
@@ -726,37 +727,16 @@ export const ListeCommandeStandard: React.FC = () => {
             <div style={{ borderTop: '1px solid var(--mantine-color-gray-3)', paddingTop: 16 }}>
               <Group justify="flex-end">
                 <div>
-                  <Text size="sm" c="dimmed">Montant total TTC</Text>
-                  <Text fw={700} size="xl" c="blue">
-                    {formatMontant(selectedCommande.montant_ttc)} FCFA
-                  </Text>
+                  <Text size="sm" c="dimmed">Total HT:</Text>
+                  <Text fw={700} size="lg">{formatMontant((selectedCommande as any).montant_ht || 0)} F</Text>
+                  <Text size="xs" c="dimmed">TVA (18%): {formatMontant((selectedCommande as any).montant_tva || 0)} F</Text>
+                  <Text fw={700} size="xl" c="blue">Total TTC: {formatMontant((selectedCommande as any).montant_ttc || 0)} F</Text>
                 </div>
               </Group>
             </div>
           </Stack>
         )}
       </Modal>
-
-      {/* MODAL RÈGLEMENT */}
-      <FormulaireReglement
-        opened={reglementModalOpened}
-        onClose={() => {
-          setReglementModalOpened(false);
-          chargerCommandes();
-        }}
-        idFacture={reglementData.idFacture}
-        idClient={reglementData.idClient}
-        montantMax={reglementData.montantMax}
-      />
-
-      {/* FORMULAIRE NOUVELLE COMMANDE */}
-      <FormulaireCommande
-        opened={formulaireOpened}
-        onClose={() => {
-          setFormulaireOpened(false);
-          chargerCommandes();
-        }}
-      />
     </>
   );
 };

@@ -48,11 +48,9 @@ class JournalCaisseService {
       INSERT INTO journal_caisse (
         code_journal, date_journal, type_mouvement, categorie,
         designation, montant, solde_apres, reference, idReference, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, datetime('now'), 'ENTREE', ?, ?, ?, ?, ?, ?, ?)
     `, [
       codeJournal,
-      new Date().toISOString(),
-      'ENTREE',
       data.categorie,
       data.designation,
       data.montant,
@@ -87,11 +85,9 @@ class JournalCaisseService {
       INSERT INTO journal_caisse (
         code_journal, date_journal, type_mouvement, categorie,
         designation, montant, solde_apres, reference, idReference, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, datetime('now'), 'SORTIE', ?, ?, ?, ?, ?, ?, ?)
     `, [
       codeJournal,
-      new Date().toISOString(),
-      'SORTIE',
       data.categorie,
       data.designation,
       data.montant,
@@ -136,14 +132,15 @@ class JournalCaisseService {
     });
   }
 
+  // ✅ CORRECTION : Décompte revendeur = ENTRÉE (pas sortie)
   async ajouterDecompteRevendeur(data: {
     montant: number;
     idDecompte: number;
     codeDecompte: string;
     revendeurNom?: string;
   }): Promise<number> {
-    return this.ajouterSortie({
-      categorie: 'CHARGE_FONCTIONNEMENT',
+    return this.ajouterEntree({
+      categorie: 'DECOMPTE_REVENDEUR',
       designation: `Décompte revendeur ${data.codeDecompte}${data.revendeurNom ? ` - ${data.revendeurNom}` : ''}`,
       montant: data.montant,
       reference: data.codeDecompte,
@@ -177,10 +174,9 @@ class JournalCaisseService {
         code_charge, date_charge, designation, montant,
         beneficiaire, categorie_charge, reference_paiement,
         idJournal, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
     `, [
       codeCharge,
-      new Date().toISOString(),
       data.designation,
       data.montant,
       data.beneficiaire,
@@ -198,7 +194,6 @@ class JournalCaisseService {
     return this.calculerSolde(db);
   }
 
-  // ✅ CORRECTION : Utiliser BETWEEN pour les dates
   async getMouvementsDuJour(date: string): Promise<any[]> {
     const db = await getDb();
     const startDate = date + ' 00:00:00';

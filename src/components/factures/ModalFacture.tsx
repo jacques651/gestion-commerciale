@@ -37,7 +37,7 @@ const ModalFacture: React.FC<ModalFactureProps> = ({ facture, onClose }) => {
       centered 
       title="Facture" 
       styles={{ 
-        header: { backgroundColor: '#1b365d', padding: '16px 20px' }, 
+        header: { backgroundColor: '#1a1a2e', padding: '16px 20px' }, 
         title: { color: 'white', fontWeight: 600 }, 
         body: { padding: 0 } 
       }}
@@ -45,7 +45,7 @@ const ModalFacture: React.FC<ModalFactureProps> = ({ facture, onClose }) => {
       <div id="print-facture">
         <Stack gap={0}>
           {/* En-tête */}
-          <Paper p="lg" radius={0} bg="#1b365d" c="white">
+          <Paper p="lg" radius={0} bg="#1a1a2e" c="white">
             <Title order={3} ta="center" c="white">FACTURE</Title>
             <Text ta="center" size="sm" c="gray.3">{facture.code_facture || facture.CodeFacture || '-'}</Text>
             <Group justify="center" mt="xs">

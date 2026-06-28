@@ -9,150 +9,15 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconSearch, IconPlus, IconEdit, IconTrash, IconPackage,
-  IconRefresh, IconCube, IconAlertCircle, IconCoin, IconCash,
+  IconRefresh, IconCube, IconAlertCircle, IconCash,
   IconFileExcel, IconFilter, IconPrinter, IconClearAll, IconUpload,
   IconBuildingStore, IconChartBar, IconAlertTriangle
 } from '@tabler/icons-react';
 import { productRepository, Product } from '../../database/repositories/productRepository';
-import { stockService } from '../../database/repositories/stockService';
 import { FormulaireProduit } from './FormulaireProduit';
 import { ModalImportProduits } from './ModalImportProduits';
-
-// Modal d'ajout de stock
-const ModalAjoutStock: React.FC<{
-  opened: boolean;
-  onClose: () => void;
-  produit: Product | null;
-  onSuccess: () => void;
-}> = ({ opened, onClose, produit, onSuccess }) => {
-  const [loading, setLoading] = useState(false);
-  const [quantite, setQuantite] = useState<number>(1);
-  const [prixAchat, setPrixAchat] = useState<number>(0);
-  const [margeFixe, setMargeFixe] = useState<number>(5000);
-  const [dateEntree, setDateEntree] = useState<Date>(new Date());
-  const [referenceFacture, setReferenceFacture] = useState('');
-  const [notes, setNotes] = useState('');
-
-  const prixVenteCalcule = prixAchat + margeFixe;
-
-  useEffect(() => {
-    if (opened && produit) {
-      setQuantite(1);
-      setPrixAchat(0);
-      setMargeFixe(5000);
-      setDateEntree(new Date());
-      setReferenceFacture('');
-      setNotes('');
-    }
-  }, [opened, produit]);
-
-  const handleSubmit = async () => {
-    if (!produit) return;
-    if (quantite <= 0) {
-      notifications.show({ title: 'Erreur', message: 'Quantité invalide', color: 'red' });
-      return;
-    }
-    if (prixAchat <= 0) {
-      notifications.show({ title: 'Erreur', message: "Prix d'achat invalide", color: 'red' });
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await stockService.entreeStock({
-        idProduit: produit.idProduit,
-        quantite: quantite,
-        prix_achat: prixAchat,
-        prix_vente: prixVenteCalcule,
-        date_entree: dateEntree.toISOString().split('T')[0],
-        reference_facture: referenceFacture || undefined,
-        notes: notes || undefined
-      });
-
-      if (result.success) {
-        notifications.show({
-          title: '✅ Stock ajouté',
-          message: `${quantite} ${produit.unite_base} ajouté(s) | Prix vente: ${prixVenteCalcule.toLocaleString()} F`,
-          color: 'green'
-        });
-        onSuccess();
-        onClose();
-      } else {
-        notifications.show({ title: 'Erreur', message: result.message, color: 'red' });
-      }
-    } catch (error) {
-      notifications.show({ title: 'Erreur', message: error instanceof Error ? error.message : 'Erreur', color: 'red' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Modal opened={opened} onClose={onClose} title={`Ajouter du stock - ${produit?.designation}`} size="md" centered>
-      <Stack gap="sm">
-        <Alert icon={<IconPackage size={16} />} color="blue" variant="light" p="xs">
-          <SimpleGrid cols={2} spacing="xs">
-            <Text size="xs">📦 Code: {produit?.code_produit}</Text>
-            <Text size="xs">📊 Stock: {produit?.qte_stock || 0} {produit?.unite_base}</Text>
-            <Text size="xs">💰 PMP: {(produit?.prix_moyen_pondere || produit?.prix_achat_base || 0).toLocaleString()} F</Text>
-            <Text size="xs">📐 Méthode: {produit?.methode_gestion_stock || 'PMP'}</Text>
-          </SimpleGrid>
-        </Alert>
-        <NumberInput 
-          label="Quantité" 
-          value={quantite} 
-          onChange={(val) => setQuantite(typeof val === 'number' ? val : 0)} 
-          min={1} 
-          size="sm" 
-        />
-        <NumberInput 
-          label="Prix d'achat (F CFA)" 
-          value={prixAchat} 
-          onChange={(val) => setPrixAchat(typeof val === 'number' ? val : 0)} 
-          min={0} 
-          step={100} 
-          size="sm" 
-          leftSection={<IconCash size={14} />} 
-        />
-        <NumberInput 
-          label="Marge fixe (F CFA)" 
-          value={margeFixe} 
-          onChange={(val) => setMargeFixe(typeof val === 'number' ? val : 0)} 
-          min={0} 
-          step={100} 
-          size="sm" 
-          leftSection={<IconCoin size={14} />} 
-        />
-        {prixAchat > 0 && (
-          <Alert color="green" variant="light" p="xs">
-            <Group justify="space-between">
-              <Text size="sm">💵 Prix vente:</Text>
-              <Text fw={700} c="blue">{prixVenteCalcule.toLocaleString()} F</Text>
-            </Group>
-          </Alert>
-        )}
-        <TextInput 
-          type="date" 
-          label="Date d'entrée" 
-          value={dateEntree.toISOString().split('T')[0]} 
-          onChange={(e) => setDateEntree(new Date(e.target.value))} 
-          size="sm" 
-        />
-        <TextInput 
-          label="Référence facture" 
-          placeholder="N° de facture" 
-          value={referenceFacture} 
-          onChange={(e) => setReferenceFacture(e.target.value)} 
-          size="sm" 
-        />
-        <Group justify="flex-end" mt="sm">
-          <Button variant="outline" onClick={onClose} size="sm">Annuler</Button>
-          <Button onClick={handleSubmit} loading={loading} color="green" size="sm">Ajouter</Button>
-        </Group>
-      </Stack>
-    </Modal>
-  );
-};
+import { ModalAjoutStock } from './ModalAjoutStock';
+import { PageHeader } from '../common/PageHeader';
 
 export const ListeProduits: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -338,55 +203,48 @@ export const ListeProduits: React.FC = () => {
 
   return (
     <Stack gap="lg" p="md">
-      {/* En-tête avec toutes les statistiques */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-        <Flex justify="space-between" align="center" wrap="wrap" gap="md">
-          <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
-              <IconPackage size={30} />
-            </ThemeIcon>
-            <div>
-              <Title order={1} c="white">GESTION DES STOCKS DE PRODUITS</Title>
-              <Text c="gray.3" size="sm">Gérez votre inventaire et suivez vos stocks</Text>
-            </div>
-          </Group>
-          <Group>
-            <Button variant="light" color="yellow" leftSection={<IconUpload size={18} />} onClick={() => setImportModalOpen(true)}>Importer</Button>
-            <Button variant="light" color="white" leftSection={<IconRefresh size={18} />} onClick={loadProducts}>Actualiser</Button>
-            <Button variant="filled" color="white" c="yellow" leftSection={<IconPlus size={18} />} onClick={() => setModalOpened(true)}>Nouveau produit</Button>
-          </Group>
-        </Flex>
+      <PageHeader
+        title="Produits & Stocks"
+        subtitle="Gestion de l'inventaire et suivi des stocks"
+        icon={<IconPackage size={20} />}
+        color="green"
+        action={{ label: 'Nouveau produit', onClick: () => setModalOpened(true), color: 'green' }}
+        extra={
+          <Button size="sm" variant="subtle" style={{ color: 'rgba(255,255,255,0.6)' }}
+            leftSection={<IconUpload size={14} />} onClick={() => setImportModalOpen(true)}>
+            Importer
+          </Button>
+        }
+        stats={[
+          { label: 'Références', value: stats.total, icon: <IconPackage size={13} /> },
+          { label: 'Valeur vente', value: `${formatMontant(stats.valeurVente)} F`, icon: <IconCash size={13} />, color: '#40c057' },
+          { label: 'Stock bas', value: stats.stockBas, icon: <IconAlertCircle size={13} />, color: stats.stockBas > 0 ? '#f59f00' : 'rgba(255,255,255,0.5)' },
+          { label: 'Rupture', value: stats.ruptureStock, icon: <IconAlertTriangle size={13} />, color: stats.ruptureStock > 0 ? '#ff6b6b' : 'rgba(255,255,255,0.5)' },
+        ]}
+      />
 
-        <SimpleGrid cols={{ base: 2, sm: 3, md: 6 }} spacing="md" mt="xl">
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="white" variant="light" size="lg"><IconPackage size={20} /></ThemeIcon><div><Text c="white" size="xs">Références</Text><Text c="white" fw={700} size="xl">{stats.total}</Text></div></Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="green" variant="light" size="lg"><IconCash size={20} /></ThemeIcon><div><Text c="white" size="xs">Valeur vente</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.valeurVente)} F</Text></div></Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="blue" variant="light" size="lg"><IconBuildingStore size={20} /></ThemeIcon><div><Text c="white" size="xs">Valeur achat</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.valeurAchat)} F</Text></div></Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="yellow" variant="light" size="lg"><IconChartBar size={20} /></ThemeIcon><div><Text c="white" size="xs">Marge pot.</Text><Text c="white" fw={700} size="xl">{formatMontant(stats.margePotentielle)} F</Text></div></Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="orange" variant="light" size="lg"><IconAlertCircle size={20} /></ThemeIcon><div><Text c="white" size="xs">Stock bas</Text><Text c="white" fw={700} size="xl">{stats.stockBas}</Text></div></Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group><ThemeIcon color="red" variant="light" size="lg"><IconAlertTriangle size={20} /></ThemeIcon><div><Text c="white" size="xs">Rupture</Text><Text c="white" fw={700} size="xl">{stats.ruptureStock}</Text></div></Group>
-          </Card>
-        </SimpleGrid>
-      </Paper>
-
-      {/* Alertes */}
-      {stats.ruptureStock > 0 && (
-        <Alert icon={<IconAlertTriangle size={16} />} color="red" variant="light" radius="md">
-          <Group justify="space-between">
-            <Text size="sm" fw={500}>{stats.ruptureStock} produit(s) en rupture de stock</Text>
-            <Button size="xs" variant="white" color="red" onClick={() => setShowRuptureOnly(true)}>Voir les ruptures</Button>
-          </Group>
-        </Alert>
+      {/* Alertes stock */}
+      {(stats.ruptureStock > 0 || stats.stockBas > 0) && (
+        <Stack gap="xs">
+          {stats.ruptureStock > 0 && (
+            <Alert icon={<IconAlertTriangle size={16} />} color="red" variant="light" radius="md">
+              <Group justify="space-between">
+                <Text size="sm" fw={500}>{stats.ruptureStock} produit(s) en rupture de stock</Text>
+                <Button size="xs" variant="white" color="red" onClick={() => setShowRuptureOnly(true)}>Voir les ruptures</Button>
+              </Group>
+            </Alert>
+          )}
+          {stats.stockBas > 0 && (
+            <Alert icon={<IconAlertCircle size={16} />} color="orange" variant="light" radius="md">
+              <Group justify="space-between">
+                <Text size="sm" fw={500}>{stats.stockBas} produit(s) en dessous du seuil d'alerte</Text>
+                <Button size="xs" variant="white" color="orange" onClick={() => { setStockMin(null); setStockMax(null); setShowRuptureOnly(false); setCurrentPage(1); }}>
+                  Voir tous
+                </Button>
+              </Group>
+            </Alert>
+          )}
+        </Stack>
       )}
 
       {/* Barre de recherche, filtres et boutons sur une seule ligne */}
@@ -549,7 +407,7 @@ export const ListeProduits: React.FC = () => {
       <Card withBorder radius="lg" shadow="sm" p={0}>
         <ScrollArea h="calc(100vh - 480px)">
           <Table striped highlightOnHover>
-            <Table.Thead style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+            <Table.Thead style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
               <Table.Tr>
                 <Table.Th style={{ color: 'white' }}>Code</Table.Th>
                 <Table.Th style={{ color: 'white' }}>Désignation</Table.Th>

@@ -291,10 +291,10 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
+            <ThemeIcon size={45} radius="md" color="lime" variant="filled">
               <IconReceipt size={30} />
             </ThemeIcon>
             <div>
@@ -433,11 +433,11 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
               placeholder="Mode de paiement"
               clearable
               data={[
-                { value: 'ESPECES', label: '💰 Espèces' },
-                { value: 'VIREMENT', label: '🏦 Virement' },
-                { value: 'CHEQUE', label: '📝 Chèque' },
-                { value: 'MOBILE_MONEY', label: '📱 Mobile Money' },
-                { value: 'AUTRE', label: '📌 Autre' }
+                { value: 'ESPECES', label: 'Espèces' },
+                { value: 'VIREMENT', label: 'Virement' },
+                { value: 'CHEQUE', label: 'Chèque' },
+                { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+                { value: 'AUTRE', label: 'Autre' }
               ]}
               value={modeFilter}
               onChange={setModeFilter}
@@ -512,7 +512,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
             <ScrollArea h={450}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                     <Table.Th c="white" w={50}>N°</Table.Th>
                     <Table.Th c="white">Code</Table.Th>
                     <Table.Th c="white">Date</Table.Th>
@@ -585,7 +585,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}
@@ -645,11 +645,11 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
           <Select
             label="Mode de paiement *"
             data={[
-              { value: 'ESPECES', label: '💰 Espèces' },
-              { value: 'VIREMENT', label: '🏦 Virement' },
-              { value: 'CHEQUE', label: '📝 Chèque' },
-              { value: 'MOBILE_MONEY', label: '📱 Mobile Money' },
-              { value: 'AUTRE', label: '📌 Autre' }
+              { value: 'ESPECES', label: 'Espèces' },
+              { value: 'VIREMENT', label: 'Virement' },
+              { value: 'CHEQUE', label: 'Chèque' },
+              { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+              { value: 'AUTRE', label: 'Autre' }
             ]}
             value={remboursementForm.mode_paiement}
             onChange={(value) => setRemboursementForm({ ...remboursementForm, mode_paiement: (value as any) || 'ESPECES' })}

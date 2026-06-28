@@ -58,11 +58,11 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
   const [typePaiement, setTypePaiement] = useState<'total' | 'partiel'>('total');
 
   const modesReglement = [
-    { value: 'ESPECES', label: '💰 Espèces' },
-    { value: 'CHEQUE', label: '📝 Chèque' },
-    { value: 'VIREMENT', label: '🏦 Virement bancaire' },
-    { value: 'CARTE', label: '💳 Carte bancaire' },
-    { value: 'MOBILE_MONEY', label: '📱 Mobile Money' },
+    { value: 'ESPECES', label: 'Espèces' },
+    { value: 'CHEQUE', label: 'Chèque' },
+    { value: 'VIREMENT', label: 'Virement bancaire' },
+    { value: 'CARTE', label: 'Carte bancaire' },
+    { value: 'MOBILE_MONEY', label: 'Mobile Money' },
   ];
 
   const loadClients = async () => {
@@ -338,7 +338,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       padding="xl"
       centered
       styles={{
-        header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+        header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
         title: { color: 'white', fontWeight: 700 },
         body: { padding: 0 }
       }}

@@ -47,16 +47,25 @@ async entreeStock(data: EntreeStockInput): Promise<ResultStock> {
       return { success: false, message: 'Produit non trouvé' };
     }
 
-    // Utiliser la marge_fixe passée ou celle du produit
-    const margeFixe = Number(data.marge_fixe ?? product.commission_pourcentage ?? 5000);
-    
+    // Utiliser la marge_fixe passée ou calculée depuis prix_vente_detail existant
+    const margeFixe = Number(
+      data.marge_fixe ??
+      (product.prix_vente_detail > 0 ? product.prix_vente_detail - product.prix_achat_base : null) ??
+      product.commission_pourcentage ??
+      0
+    );
+
     // Calculer le nouveau prix de vente
     const nouveauPrixVente = data.prix_achat + margeFixe;
 
-    // Récupérer le stock actuel et PMP
+    // Récupérer le stock actuel depuis la table produit (source de vérité) ET les lots
+    const stockProduit = Number(product.qte_stock) || 0;
+    const pmpProduit = Number(product.prix_achat_base) || 0;
+
     const currentStats = await lotRepository.recalculerPMP(data.idProduit);
-    const stockAvant = currentStats.stockTotal;
-    const pmpAvant = currentStats.pmp;
+    // Si lots_stock est vide (migration récente), utiliser les valeurs du produit comme référence
+    const stockAvant = currentStats.stockTotal > 0 ? currentStats.stockTotal : stockProduit;
+    const pmpAvant = currentStats.stockTotal > 0 ? currentStats.pmp : pmpProduit;
 
     // Créer le lot
     const idLot = await lotRepository.createLot({
@@ -70,9 +79,11 @@ async entreeStock(data: EntreeStockInput): Promise<ResultStock> {
       notes: data.notes
     });
 
-    // Calculer le nouveau stock et PMP
-    const nouveauStock = stockAvant + data.quantite;
-    const nouveauPMP = ((stockAvant * pmpAvant) + (data.quantite * data.prix_achat)) / nouveauStock;
+    // Calculer le nouveau stock (basé sur la vraie qte_stock produit) et PMP
+    const nouveauStock = stockProduit + data.quantite;
+    const nouveauPMP = stockAvant > 0
+      ? ((stockAvant * pmpAvant) + (data.quantite * data.prix_achat)) / nouveauStock
+      : data.prix_achat;
 
     // ✅ CRUCIAL: Mettre à jour le produit avec le nouveau prix de vente
     await productRepository.update(data.idProduit, {
@@ -280,25 +291,25 @@ async entreeStock(data: EntreeStockInput): Promise<ResultStock> {
   }> {
     const produit = await productRepository.getById(idProduit);
     const lots = await lotRepository.getLotsByProduct(idProduit);
-    const mouvements = await mouvementRepository.getByProduct(idProduit);
-    const historiquePrix = await lotRepository.getHistoriquePrix(idProduit);
+    const db = await getDb();
+    const mouvements = await db.select<any[]>(
+      `SELECT * FROM mouvements_stock WHERE idProduit = ? ORDER BY date_mouvement DESC LIMIT 50`,
+      [idProduit]
+    );
+    const historiquePrix = await db.select<any[]>(
+      `SELECT * FROM historique_prix WHERE idProduit = ? ORDER BY date_changement DESC LIMIT 20`,
+      [idProduit]
+    );
 
     return {
       produit,
-      lots,
+      lots: lots.map((lot: any) => ({
+        ...lot,
+        valeur_totale: lot.quantite_restante * lot.prix_achat_unitaire
+      })),
       mouvements,
-      historiquePrix
+      historiquePrix,
     };
-  }
-
-  // Obtenir les alertes de stock
-  async getAlertesStock(): Promise<any[]> {
-    return await productRepository.getStockAlert();
-  }
-
-  // Obtenir les statistiques des lots
-  async getStatistiquesLots(): Promise<any> {
-    return await lotRepository.getStatistiques();
   }
 }
 

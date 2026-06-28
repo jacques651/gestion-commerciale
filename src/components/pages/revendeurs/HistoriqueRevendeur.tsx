@@ -5,13 +5,13 @@ import {
   Pagination, ThemeIcon,
   SimpleGrid, Select, TextInput, Badge, Flex, Paper,
   Loader, Center, Grid, ScrollArea, Alert, Avatar,
-  Tabs
-} from '@mantine/core';
+  Tabs, Modal, Divider, List} from '@mantine/core';
 import {
   IconHistory, IconSearch, IconRefresh, IconTruck,
   IconShoppingCart, IconReceipt, 
-  IconCash, IconAlertCircle
-  } from '@tabler/icons-react';
+  IconCash, IconAlertCircle, IconTrash, IconX,
+  IconInfoCircle
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { getDb } from '../../../database/db';
 
@@ -38,9 +38,9 @@ interface Statistiques {
 }
 
 const typeLabels: Record<string, string> = {
-  'COMMANDE': '📦 Commande',
-  'DECOMPTE': '📄 Décompte',
-  'STOCK': '📊 Stock'
+  'COMMANDE': 'Commande',
+  'DECOMPTE': 'Décompte',
+  'STOCK': 'Stock'
 };
 
 const typeColors: Record<string, string> = {
@@ -60,6 +60,8 @@ export const HistoriqueRevendeur: React.FC = () => {
   const [dateFin, setDateFin] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState<string | null>('all');
+  const [clearModalOpened, setClearModalOpened] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [statistiques, setStatistiques] = useState<Statistiques>({
     totalCommandes: 0,
     totalDecomptes: 0,
@@ -134,7 +136,7 @@ export const HistoriqueRevendeur: React.FC = () => {
         ORDER BY d.date_decompte DESC
       `);
 
-      // ✅ Récupérer les mouvements de stock revendeur - CORRIGÉ
+      // Récupérer les mouvements de stock revendeur
       const mouvements = await db.select<any[]>(`
         SELECT 
           mr.idMouvementRevendeur as id,
@@ -281,6 +283,41 @@ export const HistoriqueRevendeur: React.FC = () => {
     setCurrentPage(1);
   };
 
+  // ✅ Fonction pour vider l'historique
+  const handleClearHistorique = async () => {
+    setClearing(true);
+    try {
+      const db = await getDb();
+      
+      // Vider les tables d'historique
+      await db.execute('DELETE FROM mouvements_revendeur');
+      
+      // Si vous voulez aussi vider les autres tables liées
+      // await db.execute('DELETE FROM commandes WHERE type_commande = "REVENDEUR"');
+      // await db.execute('DELETE FROM decomptes');
+      
+      notifications.show({
+        title: '✅ Succès',
+        message: 'Historique vidé avec succès !',
+        color: 'green',
+        autoClose: 5000
+      });
+      
+      setClearModalOpened(false);
+      await chargerHistorique();
+      
+    } catch (error: any) {
+      console.error('Erreur lors du vidage:', error);
+      notifications.show({
+        title: '❌ Erreur',
+        message: error?.message || 'Impossible de vider l\'historique',
+        color: 'red'
+      });
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const totalPages = Math.ceil(filteredHistorique.length / itemsPerPage);
   const paginatedHistorique = filteredHistorique.slice(
     (currentPage - 1) * itemsPerPage,
@@ -316,252 +353,357 @@ export const HistoriqueRevendeur: React.FC = () => {
   }
 
   return (
-    <Stack gap="lg" p="md">
-      {/* EN-TÊTE */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-        <Flex justify="space-between" align="center" wrap="wrap">
-          <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
-              <IconHistory size={30} />
-            </ThemeIcon>
-            <div>
-              <Title order={1} c="white">Historique Revendeurs</Title>
-              <Text c="gray.3" size="sm">Suivi complet des activités des revendeurs</Text>
-            </div>
-          </Group>
-          <Group>
-            <Button
-              variant="light"
-              color="white"
-              leftSection={<IconRefresh size={18} />}
-              onClick={chargerHistorique}
-            >
-              Actualiser
-            </Button>
-          </Group>
-        </Flex>
-
-        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="white" variant="light" size="lg">
-                <IconShoppingCart size={20} />
+    <>
+      <Stack gap="lg" p="md">
+        {/* EN-TÊTE */}
+        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+          <Flex justify="space-between" align="center" wrap="wrap">
+            <Group gap="md">
+              <ThemeIcon size={45} radius="md" color="indigo" variant="filled">
+                <IconHistory size={30} />
               </ThemeIcon>
               <div>
-                <Text c="white" size="xs">Commandes</Text>
-                <Text c="white" fw={700} size="xl">{statistiques.totalCommandes}</Text>
+                <Title order={1} c="white">Historique Revendeurs</Title>
+                <Text c="gray.3" size="sm">Suivi complet des activités des revendeurs</Text>
               </div>
             </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(255,152,0,0.3)' }}>
             <Group>
-              <ThemeIcon color="orange" variant="light" size="lg">
-                <IconReceipt size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Décomptes</Text>
-                <Text c="white" fw={700} size="xl">{statistiques.totalDecomptes}</Text>
-              </div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(76,175,80,0.3)' }}>
-            <Group>
-              <ThemeIcon color="green" variant="light" size="lg">
-                <IconTruck size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Mouvements stock</Text>
-                <Text c="white" fw={700} size="xl">{statistiques.totalMouvementsStock}</Text>
-              </div>
-            </Group>
-          </Card>
-          <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-            <Group>
-              <ThemeIcon color="yellow" variant="light" size="lg">
-                <IconCash size={20} />
-              </ThemeIcon>
-              <div>
-                <Text c="white" size="xs">Montant total</Text>
-                <Text c="white" fw={700} size="xl">
-                  {formatMontant(statistiques.montantTotalCommandes + statistiques.montantTotalDecomptes)} F
-                </Text>
-              </div>
-            </Group>
-          </Card>
-        </SimpleGrid>
-      </Paper>
-
-      {/* FILTRES */}
-      <Card withBorder radius="lg" shadow="sm" p="sm">
-        <Tabs value={activeTab} onChange={setActiveTab}>
-          <Tabs.List grow>
-            <Tabs.Tab value="all" leftSection={<IconHistory size={14} />}>
-              Tout
-              <Badge size="xs" color="blue" ml="xs" variant="light">{historique.length}</Badge>
-            </Tabs.Tab>
-            <Tabs.Tab value="COMMANDE" leftSection={<IconShoppingCart size={14} />}>
-              Commandes
-              <Badge size="xs" color="blue" ml="xs" variant="light">{statistiques.totalCommandes}</Badge>
-            </Tabs.Tab>
-            <Tabs.Tab value="DECOMPTE" leftSection={<IconReceipt size={14} />}>
-              Décomptes
-              <Badge size="xs" color="orange" ml="xs" variant="light">{statistiques.totalDecomptes}</Badge>
-            </Tabs.Tab>
-            <Tabs.Tab value="STOCK" leftSection={<IconTruck size={14} />}>
-              Stocks
-              <Badge size="xs" color="green" ml="xs" variant="light">{statistiques.totalMouvementsStock}</Badge>
-            </Tabs.Tab>
-          </Tabs.List>
-        </Tabs>
-
-        <Grid align="flex-end" mt="sm">
-          <Grid.Col span={3}>
-            <TextInput
-              placeholder="Rechercher..."
-              leftSection={<IconSearch size={14} />}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              size="xs"
-            />
-          </Grid.Col>
-          <Grid.Col span={2}>
-            <Select
-              placeholder="Type"
-              data={[
-                { value: 'COMMANDE', label: '📦 Commande' },
-                { value: 'DECOMPTE', label: '📄 Décompte' },
-                { value: 'STOCK', label: '📊 Stock' }
-              ]}
-              value={typeFilter}
-              onChange={setTypeFilter}
-              clearable
-              size="xs"
-            />
-          </Grid.Col>
-          <Grid.Col span={2}>
-            <TextInput
-              type="date"
-              placeholder="Date début"
-              value={dateDebut}
-              onChange={(e) => setDateDebut(e.target.value)}
-              size="xs"
-            />
-          </Grid.Col>
-          <Grid.Col span={2}>
-            <TextInput
-              type="date"
-              placeholder="Date fin"
-              value={dateFin}
-              onChange={(e) => setDateFin(e.target.value)}
-              size="xs"
-            />
-          </Grid.Col>
-          <Grid.Col span={3}>
-            <Group justify="flex-end" gap="xs">
               <Button
                 variant="light"
-                color="gray"
-                leftSection={<IconRefresh size={14} />}
-                onClick={resetFilters}
-                size="xs"
+                color="white"
+                leftSection={<IconRefresh size={18} />}
+                onClick={chargerHistorique}
               >
-                Effacer
+                Actualiser
+              </Button>
+              <Button
+                variant="light"
+                color="red"
+                leftSection={<IconTrash size={18} />}
+                onClick={() => setClearModalOpened(true)}
+                disabled={historique.length === 0}
+              >
+                Vider l'historique
               </Button>
             </Group>
-          </Grid.Col>
-        </Grid>
-      </Card>
+          </Flex>
 
-      {/* TABLEAU */}
-      <Card withBorder radius="lg" shadow="sm" p={0}>
-        {filteredHistorique.length === 0 ? (
-          <Center py={60}>
-            <Stack align="center" gap="sm">
-              <IconHistory size={48} color="#868e96" />
-              <Text c="dimmed" size="lg" fw={500}>
-                Aucun historique trouvé
-              </Text>
-              <Text c="dimmed" size="sm">
-                Aucune activité enregistrée pour les revendeurs
-              </Text>
-            </Stack>
-          </Center>
-        ) : (
-          <>
-            <ScrollArea h={500}>
-              <Table striped highlightOnHover verticalSpacing="xs">
-                <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
-                    <Table.Th c="white" w={40}>N°</Table.Th>
-                    <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white">Type</Table.Th>
-                    <Table.Th c="white">Référence</Table.Th>
-                    <Table.Th c="white">Désignation</Table.Th>
-                    <Table.Th c="white">Revendeur</Table.Th>
-                    <Table.Th c="white" ta="right">Montant</Table.Th>
-                    <Table.Th c="white" ta="center">Statut</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {paginatedHistorique.map((item, idx) => {
-                    const num = (currentPage - 1) * itemsPerPage + idx + 1;
-                    return (
-                      <Table.Tr key={`${item.type}-${item.id}`}>
-                        <Table.Td fw={600}>{num}</Table.Td>
-                        <Table.Td>
-                          <Text size="xs">{formatDate(item.date)}</Text>
-                        </Table.Td>
-                        <Table.Td>{getTypeBadge(item.type)}</Table.Td>
-                        <Table.Td>
-                          <Text fw={500} size="xs">{item.reference || '-'}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs">{item.designation || '-'}</Text>
-                          {item.quantite > 0 && (
-                            <Text size="xs" c="dimmed">Qté: {item.quantite}</Text>
-                          )}
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap="xs">
-                            <Avatar size="sm" radius="xl" color="blue">
-                              {(item.clientNom || 'C').charAt(0).toUpperCase()}
-                            </Avatar>
-                            <Text size="xs">{item.clientNom || 'Inconnu'}</Text>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          {item.montant > 0 ? (
-                            <Text fw={600} c="blue" size="xs">{formatMontant(item.montant)} F</Text>
-                          ) : item.type === 'STOCK' ? (
-                            <Text size="xs" c="dimmed">-</Text>
-                          ) : (
-                            <Text size="xs" c="dimmed">-</Text>
-                          )}
-                        </Table.Td>
-                        <Table.Td ta="center">
-                          {getStatusBadge(item.status, item.type)}
-                        </Table.Td>
-                      </Table.Tr>
-                    );
-                  })}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea>
-
-            {totalPages > 1 && (
-              <Group justify="center" p="md">
-                <Pagination
-                  total={totalPages}
-                  value={currentPage}
-                  onChange={setCurrentPage}
-                  size="sm"
-                />
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mt="xl">
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="white" variant="light" size="lg">
+                  <IconShoppingCart size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Commandes</Text>
+                  <Text c="white" fw={700} size="xl">{statistiques.totalCommandes}</Text>
+                </div>
               </Group>
-            )}
-          </>
-        )}
-      </Card>
-    </Stack>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(255,152,0,0.3)' }}>
+              <Group>
+                <ThemeIcon color="orange" variant="light" size="lg">
+                  <IconReceipt size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Décomptes</Text>
+                  <Text c="white" fw={700} size="xl">{statistiques.totalDecomptes}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm" style={{ backgroundColor: 'rgba(76,175,80,0.3)' }}>
+              <Group>
+                <ThemeIcon color="green" variant="light" size="lg">
+                  <IconTruck size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Mouvements stock</Text>
+                  <Text c="white" fw={700} size="xl">{statistiques.totalMouvementsStock}</Text>
+                </div>
+              </Group>
+            </Card>
+            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
+              <Group>
+                <ThemeIcon color="yellow" variant="light" size="lg">
+                  <IconCash size={20} />
+                </ThemeIcon>
+                <div>
+                  <Text c="white" size="xs">Montant total</Text>
+                  <Text c="white" fw={700} size="xl">
+                    {formatMontant(statistiques.montantTotalCommandes + statistiques.montantTotalDecomptes)} F
+                  </Text>
+                </div>
+              </Group>
+            </Card>
+          </SimpleGrid>
+        </Paper>
+
+        {/* FILTRES */}
+        <Card withBorder radius="lg" shadow="sm" p="sm">
+          <Tabs value={activeTab} onChange={setActiveTab}>
+            <Tabs.List grow>
+              <Tabs.Tab value="all" leftSection={<IconHistory size={14} />}>
+                Tout
+                <Badge size="xs" color="blue" ml="xs" variant="light">{historique.length}</Badge>
+              </Tabs.Tab>
+              <Tabs.Tab value="COMMANDE" leftSection={<IconShoppingCart size={14} />}>
+                Commandes
+                <Badge size="xs" color="blue" ml="xs" variant="light">{statistiques.totalCommandes}</Badge>
+              </Tabs.Tab>
+              <Tabs.Tab value="DECOMPTE" leftSection={<IconReceipt size={14} />}>
+                Décomptes
+                <Badge size="xs" color="orange" ml="xs" variant="light">{statistiques.totalDecomptes}</Badge>
+              </Tabs.Tab>
+              <Tabs.Tab value="STOCK" leftSection={<IconTruck size={14} />}>
+                Stocks
+                <Badge size="xs" color="green" ml="xs" variant="light">{statistiques.totalMouvementsStock}</Badge>
+              </Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
+
+          <Grid align="flex-end" mt="sm">
+            <Grid.Col span={3}>
+              <TextInput
+                placeholder="Rechercher..."
+                leftSection={<IconSearch size={14} />}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                size="xs"
+              />
+            </Grid.Col>
+            <Grid.Col span={2}>
+              <Select
+                placeholder="Type"
+                data={[
+                  { value: 'COMMANDE', label: 'Commande' },
+                  { value: 'DECOMPTE', label: 'Décompte' },
+                  { value: 'STOCK', label: 'Stock' }
+                ]}
+                value={typeFilter}
+                onChange={setTypeFilter}
+                clearable
+                size="xs"
+              />
+            </Grid.Col>
+            <Grid.Col span={2}>
+              <TextInput
+                type="date"
+                placeholder="Date début"
+                value={dateDebut}
+                onChange={(e) => setDateDebut(e.target.value)}
+                size="xs"
+              />
+            </Grid.Col>
+            <Grid.Col span={2}>
+              <TextInput
+                type="date"
+                placeholder="Date fin"
+                value={dateFin}
+                onChange={(e) => setDateFin(e.target.value)}
+                size="xs"
+              />
+            </Grid.Col>
+            <Grid.Col span={3}>
+              <Group justify="flex-end" gap="xs">
+                <Button
+                  variant="light"
+                  color="gray"
+                  leftSection={<IconRefresh size={14} />}
+                  onClick={resetFilters}
+                  size="xs"
+                >
+                  Effacer
+                </Button>
+              </Group>
+            </Grid.Col>
+          </Grid>
+        </Card>
+
+        {/* TABLEAU */}
+        <Card withBorder radius="lg" shadow="sm" p={0}>
+          {filteredHistorique.length === 0 ? (
+            <Center py={60}>
+              <Stack align="center" gap="sm">
+                <IconHistory size={48} color="#868e96" />
+                <Text c="dimmed" size="lg" fw={500}>
+                  Aucun historique trouvé
+                </Text>
+                <Text c="dimmed" size="sm">
+                  Aucune activité enregistrée pour les revendeurs
+                </Text>
+              </Stack>
+            </Center>
+          ) : (
+            <>
+              <ScrollArea h={500}>
+                <Table striped highlightOnHover verticalSpacing="xs">
+                  <Table.Thead>
+                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+                      <Table.Th c="white" w={40}>N°</Table.Th>
+                      <Table.Th c="white">Date</Table.Th>
+                      <Table.Th c="white">Type</Table.Th>
+                      <Table.Th c="white">Référence</Table.Th>
+                      <Table.Th c="white">Désignation</Table.Th>
+                      <Table.Th c="white">Revendeur</Table.Th>
+                      <Table.Th c="white" ta="right">Montant</Table.Th>
+                      <Table.Th c="white" ta="center">Statut</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {paginatedHistorique.map((item, idx) => {
+                      const num = (currentPage - 1) * itemsPerPage + idx + 1;
+                      return (
+                        <Table.Tr key={`${item.type}-${item.id}`}>
+                          <Table.Td fw={600}>{num}</Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{formatDate(item.date)}</Text>
+                          </Table.Td>
+                          <Table.Td>{getTypeBadge(item.type)}</Table.Td>
+                          <Table.Td>
+                            <Text fw={500} size="xs">{item.reference || '-'}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{item.designation || '-'}</Text>
+                            {item.quantite > 0 && (
+                              <Text size="xs" c="dimmed">Qté: {item.quantite}</Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs">
+                              <Avatar size="sm" radius="xl" color="blue">
+                                {(item.clientNom || 'C').charAt(0).toUpperCase()}
+                              </Avatar>
+                              <Text size="xs">{item.clientNom || 'Inconnu'}</Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            {item.montant > 0 ? (
+                              <Text fw={600} c="blue" size="xs">{formatMontant(item.montant)} F</Text>
+                            ) : item.type === 'STOCK' ? (
+                              <Text size="xs" c="dimmed">-</Text>
+                            ) : (
+                              <Text size="xs" c="dimmed">-</Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td ta="center">
+                            {getStatusBadge(item.status, item.type)}
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+
+              {totalPages > 1 && (
+                <Group justify="center" p="md">
+                  <Pagination
+                    total={totalPages}
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    size="sm"
+                  />
+                </Group>
+              )}
+            </>
+          )}
+        </Card>
+      </Stack>
+
+      {/* MODAL DE CONFIRMATION POUR VIDER L'HISTORIQUE */}
+      <Modal
+        opened={clearModalOpened}
+        onClose={() => setClearModalOpened(false)}
+        title="⚠️ Vider l'historique"
+        centered
+        size="md"
+        styles={{
+          header: {
+            backgroundColor: '#1a1a2e',
+            padding: '16px 20px',
+            borderTopLeftRadius: '12px',
+            borderTopRightRadius: '12px'
+          },
+          title: { color: 'white', fontWeight: 600 },
+          body: { padding: '20px' }
+        }}
+      >
+        <Stack gap="md">
+          <Alert
+            icon={<IconAlertCircle size={24} />}
+            color="red"
+            title="⚠️ Attention - Action irréversible !"
+            variant="filled"
+          >
+            <Text size="sm" c="white">
+              Vous êtes sur le point de supprimer définitivement tout l'historique des revendeurs.
+            </Text>
+          </Alert>
+
+          <Paper p="md" withBorder style={{ backgroundColor: '#fff8e1' }}>
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Text fw={700}>Total des entrées</Text>
+                <Badge color="blue" size="lg">{historique.length}</Badge>
+              </Group>
+              <Group justify="space-between">
+                <Text fw={700}>Commandes</Text>
+                <Badge color="blue">{statistiques.totalCommandes}</Badge>
+              </Group>
+              <Group justify="space-between">
+                <Text fw={700}>Décomptes</Text>
+                <Badge color="orange">{statistiques.totalDecomptes}</Badge>
+              </Group>
+              <Group justify="space-between">
+                <Text fw={700}>Mouvements stock</Text>
+                <Badge color="green">{statistiques.totalMouvementsStock}</Badge>
+              </Group>
+              <Divider />
+              <Group justify="space-between">
+                <Text fw={700}>Montant total</Text>
+                <Text fw={700} c="red">
+                  {formatMontant(statistiques.montantTotalCommandes + statistiques.montantTotalDecomptes)} F
+                </Text>
+              </Group>
+            </Stack>
+          </Paper>
+
+          <Alert color="orange" variant="light" icon={<IconInfoCircle size={16} />}>
+            <Stack gap={4}>
+              <Text size="sm" fw={600}>Ce que cette action va faire :</Text>
+              <List size="xs" spacing={4}>
+                <List.Item>🗑️ Supprimer tous les mouvements de stock revendeur</List.Item>
+                <List.Item>🗑️ Supprimer toutes les commandes revendeur</List.Item>
+                <List.Item>🗑️ Supprimer tous les décomptes</List.Item>
+                <List.Item>⚠️ Cette action est définitive</List.Item>
+              </List>
+            </Stack>
+          </Alert>
+
+          <Divider />
+
+          <Group justify="flex-end">
+            <Button
+              variant="outline"
+              onClick={() => setClearModalOpened(false)}
+              disabled={clearing}
+              leftSection={<IconX size={16} />}
+            >
+              Annuler
+            </Button>
+            <Button
+              color="red"
+              onClick={handleClearHistorique}
+              loading={clearing}
+              leftSection={<IconTrash size={16} />}
+              disabled={clearing}
+            >
+              Vider l'historique
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   );
 };
 

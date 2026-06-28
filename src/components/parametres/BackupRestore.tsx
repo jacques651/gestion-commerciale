@@ -1,5 +1,6 @@
 // src/components/parametres/BackupRestore.tsx
 import React, { useState } from 'react';
+import { confirm } from '../../utils/confirm';
 import { Card, Button, Group, Stack, Text, Alert, LoadingOverlay } from '@mantine/core';
 import { IconDatabase, IconRefresh, IconAlertCircle } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -28,7 +29,7 @@ export const BackupRestore: React.FC = () => {
   };
 
   const handleRestore = async () => {
-    if (confirm('La restauration va remplacer la base actuelle. Continuer ?')) {
+    if (await confirm('La restauration va remplacer la base actuelle. Continuer ?', 'Restauration')) {
       setLoading(true);
       try {
         notifications.show({
@@ -74,9 +75,11 @@ export const BackupRestore: React.FC = () => {
             variant="outline"
           >
             Restaurer une sauvegarde
-          </Button>
+                </Button>
         </Group>
       </Stack>
     </Card>
   );
 };
+
+export default BackupRestore;

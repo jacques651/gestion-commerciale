@@ -38,8 +38,9 @@ interface ModalAjoutStockProps {
     qte_stock: number;
     prix_achat_base: number;
     prix_vente_detail: number;
-    commission_pourcentage: number;
+    commission_pourcentage?: number;
     prix_moyen_pondere?: number;
+    [key: string]: any;
   } | null;
   onSuccess: () => void;
 }
@@ -53,18 +54,24 @@ export const ModalAjoutStock: React.FC<ModalAjoutStockProps> = ({
   const [loading, setLoading] = useState(false);
   const [quantite, setQuantite] = useState<number>(1);
   const [prixAchat, setPrixAchat] = useState<number>(0);
-  const [margeFixe, setMargeFixe] = useState<number>(produit?.commission_pourcentage || 5000);
+  // Initialiser la marge depuis prix_vente_detail - prix_achat_base (marge réelle du produit)
+  const getMargeInitiale = (p: typeof produit) => {
+    if (!p) return 0;
+    const margeReelle = (p.prix_vente_detail || 0) - (p.prix_achat_base || 0);
+    return margeReelle > 0 ? margeReelle : 0;
+  };
+  const [margeFixe, setMargeFixe] = useState<number>(getMargeInitiale(produit));
   const [dateEntree, setDateEntree] = useState<string>(new Date().toISOString().split('T')[0]);
   const [referenceFacture, setReferenceFacture] = useState('');
   const [notes, setNotes] = useState('');
 
-  const prixVenteCalcule = prixAchat + margeFixe;
+  const prixVenteCalcule = prixAchat > 0 ? prixAchat + margeFixe : (produit?.prix_vente_detail || 0);
 
   React.useEffect(() => {
     if (opened && produit) {
       setQuantite(1);
-      setPrixAchat(0);
-      setMargeFixe(produit.commission_pourcentage || 5000);
+      setPrixAchat(produit.prix_achat_base || 0);
+      setMargeFixe(getMargeInitiale(produit));
       setDateEntree(new Date().toISOString().split('T')[0]);
       setReferenceFacture('');
       setNotes('');
@@ -131,7 +138,7 @@ export const ModalAjoutStock: React.FC<ModalAjoutStockProps> = ({
       centered
       radius="lg"
       styles={{
-        header: { backgroundColor: '#1b365d', padding: '12px 16px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+        header: { backgroundColor: '#1a1a2e', padding: '12px 16px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
         title: { color: 'white', fontWeight: 600 },
         body: { padding: '16px' }
       }}
@@ -151,8 +158,8 @@ export const ModalAjoutStock: React.FC<ModalAjoutStockProps> = ({
         {/* Infos stock actuelles */}
         <Flex justify="space-between" wrap="wrap" gap="xs" style={{ fontSize: '11px' }}>
           <Text c="dimmed">Stock actuel: <Text span fw={600}>{produit.qte_stock} {produit.unite_base}</Text></Text>
-          <Text c="dimmed">PMP actuel: <Text span fw={600}>{produit.prix_achat_base.toLocaleString()} F</Text></Text>
-          <Text c="dimmed">Marge: <Text span fw={600}>+{margeFixe.toLocaleString()} F</Text></Text>
+          <Text c="dimmed">PA (PMP): <Text span fw={600}>{produit.prix_achat_base.toLocaleString()} F</Text></Text>
+          <Text c="dimmed">PV actuel: <Text span fw={600}>{produit.prix_vente_detail.toLocaleString()} F</Text></Text>
         </Flex>
 
         <Divider my={4} />
@@ -201,18 +208,17 @@ export const ModalAjoutStock: React.FC<ModalAjoutStockProps> = ({
           />
         </SimpleGrid>
 
-        {/* Prix de vente calculé */}
-        {prixAchat > 0 && (
-          <Alert color="green" variant="light" p="xs" radius="md">
-            <Flex justify="space-between" align="center">
-              <Group gap={4}>
-                <IconShoppingCart size={14} color="#2e7d32" />
-                <Text size="sm" fw={500}>Prix vente détail:</Text>
-              </Group>
-              <Text fw={700} size="md" c="blue">{prixVenteCalcule.toLocaleString()} F</Text>
-            </Flex>
-          </Alert>
-        )}
+        {/* Prix de vente calculé + Nouveau stock prévu */}
+        <Alert color="green" variant="light" p="xs" radius="md">
+          <Flex justify="space-between" align="center" wrap="wrap" gap="xs">
+            <Group gap={4}>
+              <IconShoppingCart size={14} color="#2e7d32" />
+              <Text size="sm" fw={500}>Nouveau PV:</Text>
+            </Group>
+            <Text fw={700} size="md" c="blue">{prixVenteCalcule.toLocaleString()} F</Text>
+            <Text size="xs" c="dimmed">Stock → {(produit.qte_stock + quantite).toLocaleString()} {produit.unite_base}</Text>
+          </Flex>
+        </Alert>
 
         {/* Facture et Notes */}
         <TextInput
@@ -232,15 +238,12 @@ export const ModalAjoutStock: React.FC<ModalAjoutStockProps> = ({
           size="sm"
         />
 
-        <Divider my={4} />
-
-        {/* Boutons */}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="outline" onClick={onClose} size="sm" leftSection={<IconX size={14} />}>
+        <Group justify="flex-end" mt="md">
+          <Button variant="outline" onClick={onClose} size="sm">
             Annuler
           </Button>
-          <Button onClick={handleSubmit} loading={loading} color="green" size="sm" leftSection={<IconCheck size={14} />}>
-            Ajouter
+          <Button onClick={handleSubmit} loading={loading} color="green" size="sm">
+            Enregistrer
           </Button>
         </Group>
       </Stack>

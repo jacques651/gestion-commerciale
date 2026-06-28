@@ -1,5 +1,6 @@
 // src/components/caisse/ChargesFonctionnement.tsx
 import React, { useState, useEffect } from 'react';
+import { confirm } from '../../utils/confirm';
 import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   Pagination, Tooltip, Modal, Divider, ThemeIcon,
@@ -39,13 +40,13 @@ interface RecapCharge {
 }
 
 const categoriesCharges = [
-  { value: 'EAU', label: '💧 Eau', icon: '💧', color: 'blue' },
-  { value: 'ELECTRICITE', label: '⚡ Électricité', icon: '⚡', color: 'yellow' },
-  { value: 'LOYER', label: '🏠 Loyer', icon: '🏠', color: 'green' },
-  { value: 'SALAIRE', label: '👤 Salaire', icon: '👤', color: 'grape' },
-  { value: 'TRANSPORT', label: '🚗 Transport', icon: '🚗', color: 'orange' },
-  { value: 'COMMUNICATION', label: '📱 Communication', icon: '📱', color: 'cyan' },
-  { value: 'AUTRE', label: '📌 Autres charges', icon: '📌', color: 'gray' }
+  { value: 'EAU', label: 'Eau', icon: '💧', color: 'blue' },
+  { value: 'ELECTRICITE', label: 'Électricité', icon: '⚡', color: 'yellow' },
+  { value: 'LOYER', label: 'Loyer', icon: '🏠', color: 'green' },
+  { value: 'SALAIRE', label: 'Salaire', icon: '👤', color: 'grape' },
+  { value: 'TRANSPORT', label: 'Transport', icon: '🚗', color: 'orange' },
+  { value: 'COMMUNICATION', label: 'Communication', icon: '📱', color: 'cyan' },
+  { value: 'AUTRE', label: 'Autres charges', icon: '📌', color: 'gray' }
 ];
 
 const getCategorieInfo = (code: string) => {
@@ -303,7 +304,7 @@ export const ChargesFonctionnement: React.FC = () => {
   };
 
   const handleDelete = async (idCharge: number) => {
-    if (!confirm('Voulez-vous vraiment supprimer cette charge ?')) return;
+    if (!await confirm('Voulez-vous vraiment supprimer cette charge ?', 'Suppression')) return;
 
     try {
       const db = await getDb();
@@ -363,10 +364,10 @@ export const ChargesFonctionnement: React.FC = () => {
   return (
     <Stack gap="lg" p="md">
       {/* EN-TÊTE */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
+            <ThemeIcon size={45} radius="md" color="red" variant="filled">
               <IconMoneybag size={30} />
             </ThemeIcon>
             <div>
@@ -560,7 +561,7 @@ export const ChargesFonctionnement: React.FC = () => {
         <ScrollArea h={450}>
           <Table striped highlightOnHover verticalSpacing="xs">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+              <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                 <Table.Th c="white" w={40}>N°</Table.Th>
                 <Table.Th c="white">Date</Table.Th>
                 <Table.Th c="white">Désignation</Table.Th>
@@ -668,7 +669,7 @@ export const ChargesFonctionnement: React.FC = () => {
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}
@@ -764,7 +765,7 @@ export const ChargesFonctionnement: React.FC = () => {
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}

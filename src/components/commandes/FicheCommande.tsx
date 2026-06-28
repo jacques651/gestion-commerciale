@@ -242,7 +242,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
   };
 
   const getTypeLabel = (type: string) => {
-    return type === 'STANDARD' ? '📦 Standard' : '🔄 Revendeur';
+    return type === 'STANDARD' ? 'Standard' : 'Revendeur';
   };
 
   const getTypeColor = (type: string) => {
@@ -282,7 +282,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
     <Box p="md">
       <Stack gap="lg">
         {/* En-tête */}
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
           <Flex justify="space-between" align="center" wrap="wrap">
             <Group gap="md">
               <ThemeIcon size={45} radius="md" color="white" variant="light">
@@ -401,7 +401,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
               <ScrollArea h={250}>
                 <Table striped highlightOnHover>
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                       <Table.Th c="white">Code</Table.Th>
                       <Table.Th c="white">Désignation</Table.Th>
                       <Table.Th c="white">Catégorie</Table.Th>

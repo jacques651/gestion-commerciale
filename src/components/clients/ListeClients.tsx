@@ -14,6 +14,7 @@ import {
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { FormulaireClient } from './FormulaireClient';
+import { PageHeader } from '../common/PageHeader';
 import { Client } from '../../database/repositories/clientRepository';
 import { notifications } from '@mantine/notifications';
 
@@ -30,10 +31,6 @@ export const ListeClients: React.FC = () => {
 
   // Extraire les types uniques
   const typesUniques = [...new Set(clients.map(c => c.TypeClient).filter(Boolean))];
-
-  const handleSearch = () => {
-    searchClients(searchTerm);
-  };
 
   const handleDeleteClick = (client: Client) => {
     setSelectedClient(client);
@@ -144,89 +141,19 @@ export const ListeClients: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        {/* EN-TÊTE ATTRACTIF */}
-        <Paper
-          p="xl"
-          radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          <Flex justify="space-between" align="center" wrap="wrap">
-            <Stack gap={4}>
-              <Group gap="md">
-                <ThemeIcon size={50} radius="md" color="white" variant="light">
-                  <IconUsers size={30} />
-                </ThemeIcon>
-                <div>
-                  <Title order={1} c="white" style={{ fontSize: '2rem' }}>Clients</Title>
-                  <Text c="gray.3" size="sm">Gérez votre portefeuille clients</Text>
-                </div>
-              </Group>
-            </Stack>
-            <Group>
-              <Button
-                size="md"
-                variant="light"
-                color="white"
-                leftSection={<IconUserPlus size={18} />}
-                onClick={() => setModalOpened(true)}
-              >
-                Nouveau client
-              </Button>
-            </Group>
-          </Flex>
-
-          {/* Cartes statistiques */}
-          <SimpleGrid cols={4} spacing="md" mt="xl">
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="white" variant="light" size="lg">
-                  <IconUsers size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Total clients</Text>
-                  <Text c="white" fw={700} size="xl">{stats.total}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="blue" variant="light" size="lg">
-                  <IconUserCheck size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Clients standards</Text>
-                  <Text c="white" fw={700} size="xl">{stats.clients}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="green" variant="light" size="lg">
-                  <IconBuildingStore size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Revendeurs</Text>
-                  <Text c="white" fw={700} size="xl">{stats.revendeurs}</Text>
-                </div>
-              </Group>
-            </Card>
-            <Card bg="rgba(255,255,255,0.1)" radius="md" p="sm">
-              <Group>
-                <ThemeIcon color="yellow" variant="light" size="lg">
-                  <IconPhone size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text c="white" size="xs">Contacts enregistrés</Text>
-                  <Text c="white" fw={700} size="xl">{stats.avecTel}</Text>
-                </div>
-              </Group>
-            </Card>
-          </SimpleGrid>
-        </Paper>
+        <PageHeader
+          title="Clients"
+          subtitle="Gestion du portefeuille clients et revendeurs"
+          icon={<IconUsers size={20} />}
+          color="blue"
+          action={{ label: 'Nouveau client', onClick: () => setModalOpened(true), icon: <IconUserPlus size={14} /> }}
+          stats={[
+            { label: 'Total', value: stats.total, icon: <IconUsers size={13} /> },
+            { label: 'Standards', value: stats.clients, icon: <IconUserCheck size={13} /> },
+            { label: 'Revendeurs', value: stats.revendeurs, icon: <IconBuildingStore size={13} />, color: '#40c057' },
+            { label: 'Avec contact', value: stats.avecTel, icon: <IconPhone size={13} />, color: '#f59f00' },
+          ]}
+        />
 
         {/* SECTION RECHERCHE ET FILTRE - SUR UNE SEULE LIGNE */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
@@ -236,8 +163,7 @@ export const ListeClients: React.FC = () => {
               <TextInput
                 placeholder="Rechercher par nom, société, téléphone, email..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); searchClients(e.target.value); }}
                 leftSection={<IconSearch size={16} />}
                 size="sm"
               />
@@ -262,20 +188,11 @@ export const ListeClients: React.FC = () => {
             {/* Boutons d'action */}
             <Grid.Col span={3.5}>
               <Group gap="xs" justify="flex-end">
-                <Button
-                  onClick={handleSearch}
-                  size="sm"
-                  variant="filled"
-                  color="blue"
-                  leftSection={<IconSearch size={14} />}
-                >
-                  Rechercher
-                </Button>
                 <Tooltip label="Réinitialiser">
-                  <ActionIcon 
-                    variant="light" 
-                    color="red" 
-                    size="md" 
+                  <ActionIcon
+                    variant="light"
+                    color="red"
+                    size="md"
                     onClick={resetFilters}
                   >
                     <IconX size={16} />
@@ -294,7 +211,7 @@ export const ListeClients: React.FC = () => {
           <ScrollArea style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                   <Table.Th c="white" w={200}>Nom / Société</Table.Th>
                   <Table.Th c="white" w={100}>Type</Table.Th>
                   <Table.Th c="white" w={150}>Téléphone</Table.Th>

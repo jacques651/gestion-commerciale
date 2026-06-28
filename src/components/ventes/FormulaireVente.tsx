@@ -1,17 +1,19 @@
 // src/components/ventes/FormulaireVente.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Modal, TextInput, Select, Button, Group, Stack,
+  TextInput, Select, Button, Group, Stack, Box,
   NumberInput, Table, ActionIcon, Text, Card,
   Divider, Title, LoadingOverlay, ScrollArea, Badge, Tooltip,
   Checkbox, Alert
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconTrash, IconPlus, IconShoppingCart, IconSearch, IconRefresh, IconUserPlus, IconAlertCircle } from '@tabler/icons-react';
+import {
+  IconTrash, IconPlus, IconShoppingCart, IconSearch,
+  IconRefresh, IconUserPlus, IconAlertCircle, IconBoxMultiple
+} from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
 import { useSales } from '../../hooks/useSales';
-
 import { FormulaireClient } from '../clients/FormulaireClient';
 import { stockService } from '../../database/repositories/stockService';
 import { journalCaisseService } from '../../services/journalCaisseService';
@@ -22,16 +24,34 @@ interface FormulaireVenteProps {
   onCancel: () => void;
 }
 
+interface Conditionnement {
+  idConditionnement: number;
+  libelle: string;
+  quantite_par_unite_base: number;
+  prix_vente_ttc: number;
+  est_conditionnement_par_defaut: number;
+}
+
+interface SelectedUnit {
+  idConditionnement: number | null;
+  libelle: string;
+  quantite_par_unite_base: number;
+  prix: number;
+}
+
 interface CartItem {
   idProduit: number;
+  idConditionnement: number | null;
   designation: string;
   code_produit: string;
   categorie?: string;
-  unite_base?: string;
-  quantite_stock: number;
-  prix_vente: number;
+  unite_base: string;
+  quantite_stock: number;         // en unités de base (pièces)
+  prix_vente: number;             // prix de l'unité sélectionnée
   prix_achat_base?: number;
-  quantite: number;
+  quantite: number;               // en unités sélectionnées (boîtes, pièces…)
+  quantite_par_unite_base: number;// 1 = pièce, n = conditionnement
+  libelle_conditionnement: string;// "pièce", "Boîte", etc.
   total: number;
 }
 
@@ -52,9 +72,13 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
   const [codeVente, setCodeVente] = useState<string>('');
   const [clientModalOpened, setClientModalOpened] = useState(false);
 
+  // Conditionnements: map idProduit → liste de conditionnements
+  const [condMap, setCondMap] = useState<Record<number, Conditionnement[]>>({});
+  // Unité sélectionnée par produit dans la liste
+  const [selectedUnits, setSelectedUnits] = useState<Record<number, SelectedUnit>>({});
+
   const itemsPerPage = 5;
 
-  // Fonction pour générer un code de vente unique
   const generateUniqueVenteCode = async (): Promise<string> => {
     const db = await getDb();
     const prefix = 'VENTE-';
@@ -62,12 +86,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
-    
     let baseCode = `${prefix}${year}${month}${day}`;
     let code = `${baseCode}-001`;
     let counter = 1;
     let exists = true;
-    
     while (exists && counter <= 100) {
       code = `${baseCode}-${String(counter).padStart(3, '0')}`;
       const result = await db.select(
@@ -77,21 +99,44 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       exists = (result[0]?.count ?? 0) > 0;
       if (exists) counter++;
     }
-    
-    if (counter > 100) {
-      code = `${prefix}${Date.now()}`;
-    }
-    
+    if (counter > 100) code = `${prefix}${Date.now()}`;
     return code;
   };
 
   useEffect(() => {
-    const generateCode = async () => {
-      const code = await generateUniqueVenteCode();
-      setCodeVente(code);
-    };
-    generateCode();
+    generateUniqueVenteCode().then(setCodeVente);
   }, []);
+
+  // Charger les conditionnements de tous les produits affichés
+  const loadConditionnements = useCallback(async (productIds: number[]) => {
+    if (productIds.length === 0) return;
+    try {
+      const db = await getDb();
+      const placeholders = productIds.map(() => '?').join(',');
+      const rows = await db.select<(Conditionnement & { idProduit: number })[]>(
+        `SELECT idConditionnement, idProduit, libelle, quantite_par_unite_base,
+                prix_vente_ttc, est_conditionnement_par_defaut
+         FROM conditionnements
+         WHERE idProduit IN (${placeholders}) AND est_actif = 1
+         ORDER BY est_conditionnement_par_defaut DESC, quantite_par_unite_base ASC`,
+        productIds
+      );
+      const map: Record<number, Conditionnement[]> = {};
+      for (const row of rows) {
+        if (!map[row.idProduit]) map[row.idProduit] = [];
+        map[row.idProduit].push(row);
+      }
+      setCondMap(map);
+    } catch (err) {
+      console.error('Erreur chargement conditionnements:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (products.length > 0) {
+      loadConditionnements(products.map(p => p.idProduit));
+    }
+  }, [products, loadConditionnements]);
 
   useEffect(() => {
     if (selectedClientId && clients.length > 0) {
@@ -111,9 +156,76 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
   }, [selectedClientId, clients, ajouterClient]);
 
+  // Construire les options d'unité pour un produit
+  const getUnitOptions = (product: any): { value: string; label: string }[] => {
+    const opts: { value: string; label: string }[] = [
+      { value: 'piece', label: `Pièce — ${formatMontant(product.prix_vente_detail)} F` }
+    ];
+    const conds = condMap[product.idProduit] || [];
+    for (const c of conds) {
+      opts.push({
+        value: `cond_${c.idConditionnement}`,
+        label: `${c.libelle} (${c.quantite_par_unite_base} pièces) — ${c.prix_vente_ttc.toLocaleString('fr-FR')} F`,
+      });
+    }
+    return opts;
+  };
+
+  // Résoudre l'unité sélectionnée (ou par défaut) pour un produit
+  const getResolvedUnit = (product: any): SelectedUnit => {
+    const manual = selectedUnits[product.idProduit];
+    if (manual) return manual;
+    // Par défaut: le conditionnement marqué par défaut, sinon pièce
+    const conds = condMap[product.idProduit] || [];
+    const def = conds.find(c => c.est_conditionnement_par_defaut === 1) || conds[0];
+    if (def) {
+      return {
+        idConditionnement: def.idConditionnement,
+        libelle: def.libelle,
+        quantite_par_unite_base: def.quantite_par_unite_base,
+        prix: def.prix_vente_ttc,
+      };
+    }
+    return {
+      idConditionnement: null,
+      libelle: product.unite_base || 'pièce',
+      quantite_par_unite_base: 1,
+      prix: product.prix_vente_detail || 0,
+    };
+  };
+
+  const handleUnitChange = (product: any, value: string | null) => {
+    if (!value) return;
+    if (value === 'piece') {
+      setSelectedUnits(prev => ({
+        ...prev,
+        [product.idProduit]: {
+          idConditionnement: null,
+          libelle: product.unite_base || 'pièce',
+          quantite_par_unite_base: 1,
+          prix: product.prix_vente_detail || 0,
+        }
+      }));
+    } else {
+      const condId = parseInt(value.replace('cond_', ''));
+      const cond = (condMap[product.idProduit] || []).find(c => c.idConditionnement === condId);
+      if (cond) {
+        setSelectedUnits(prev => ({
+          ...prev,
+          [product.idProduit]: {
+            idConditionnement: cond.idConditionnement,
+            libelle: cond.libelle,
+            quantite_par_unite_base: cond.quantite_par_unite_base,
+            prix: cond.prix_vente_ttc,
+          }
+        }));
+      }
+    }
+  };
+
   const filteredProducts = products.filter(product => {
     const stockDisponible = (product.qte_stock || 0) > 0;
-    const matchesSearch = searchTerm === '' || 
+    const matchesSearch = searchTerm === '' ||
       product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.categorie?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -131,12 +243,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
   const totalTTC = totalHT + tva;
 
   const addToCart = (product: any) => {
-    const existingItem = cart.find(item => item.idProduit === product.idProduit);
-    const qte = 1;
+    const unit = getResolvedUnit(product);
     const stock = product.qte_stock || 0;
-    const prix = product.prix_vente_detail || 0;
 
-    if (prix <= 0) {
+    if (unit.prix <= 0) {
       notifications.show({
         title: 'Erreur',
         message: `Le prix du produit "${product.designation}" n'est pas défini`,
@@ -144,75 +254,80 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       });
       return;
     }
-
     if (stock <= 0) {
       notifications.show({
         title: 'Stock insuffisant',
-        message: `Le produit "${product.designation}" est en rupture de stock`,
+        message: `"${product.designation}" est en rupture de stock`,
         color: 'red',
       });
       return;
     }
 
-    if (existingItem) {
-      const newQuantite = existingItem.quantite + qte;
-      if (newQuantite > stock) {
+    // Vérifier qu'on a au moins 1 unité en stock (en pièces)
+    const piecesNecessaires = 1 * unit.quantite_par_unite_base;
+    if (piecesNecessaires > stock) {
+      notifications.show({
+        title: 'Stock insuffisant',
+        message: `Stock disponible: ${stock} pièce(s), il en faut ${piecesNecessaires} pour 1 ${unit.libelle}`,
+        color: 'red',
+      });
+      return;
+    }
+
+    // Chercher si déjà dans le panier AVEC LA MÊME unité
+    const existingIdx = cart.findIndex(
+      item => item.idProduit === product.idProduit && item.idConditionnement === unit.idConditionnement
+    );
+
+    if (existingIdx >= 0) {
+      const existing = cart[existingIdx];
+      const newQty = existing.quantite + 1;
+      const newPieces = newQty * unit.quantite_par_unite_base;
+      if (newPieces > stock) {
         notifications.show({
           title: 'Stock insuffisant',
-          message: `Stock disponible: ${stock}`,
+          message: `Stock disponible: ${stock} pièce(s)`,
           color: 'red',
         });
         return;
       }
-      setCart(cart.map(item =>
-        item.idProduit === product.idProduit
-          ? {
-              ...item,
-              quantite: newQuantite,
-              total: newQuantite * item.prix_vente
-            }
+      setCart(cart.map((item, i) =>
+        i === existingIdx
+          ? { ...item, quantite: newQty, total: newQty * unit.prix }
           : item
       ));
     } else {
-      if (qte > stock) {
-        notifications.show({
-          title: 'Stock insuffisant',
-          message: `Stock disponible: ${stock}`,
-          color: 'red',
-        });
-        return;
-      }
-      setCart([
-        ...cart,
-        {
-          idProduit: product.idProduit,
-          designation: product.designation,
-          code_produit: product.code_produit,
-          categorie: product.categorie || 'Non catégorisé',
-          unite_base: product.unite_base || 'pièce',
-          quantite_stock: stock,
-          prix_vente: prix,
-          prix_achat_base: product.prix_achat_base || 0,
-          quantite: qte,
-          total: qte * prix,
-        }
-      ]);
+      setCart([...cart, {
+        idProduit: product.idProduit,
+        idConditionnement: unit.idConditionnement,
+        designation: product.designation,
+        code_produit: product.code_produit,
+        categorie: product.categorie || 'Non catégorisé',
+        unite_base: product.unite_base || 'pièce',
+        quantite_stock: stock,
+        prix_vente: unit.prix,
+        prix_achat_base: product.prix_achat_base || 0,
+        quantite: 1,
+        quantite_par_unite_base: unit.quantite_par_unite_base,
+        libelle_conditionnement: unit.libelle,
+        total: unit.prix,
+      }]);
     }
   };
 
   const updateQuantity = (index: number, newQuantite: number) => {
     const item = cart[index];
-    if (newQuantite > item.quantite_stock) {
+    const newPieces = newQuantite * item.quantite_par_unite_base;
+    if (newPieces > item.quantite_stock) {
       notifications.show({
         title: 'Stock insuffisant',
-        message: `Stock disponible: ${item.quantite_stock}`,
+        message: `Stock disponible: ${item.quantite_stock} pièce(s). Vous avez ${newQuantite} × ${item.libelle_conditionnement} = ${newPieces} pièce(s) requises.`,
         color: 'red',
       });
       return;
     }
     const newCart = [...cart];
-    newCart[index].quantite = newQuantite;
-    newCart[index].total = newQuantite * item.prix_vente;
+    newCart[index] = { ...newCart[index], quantite: newQuantite, total: newQuantite * item.prix_vente };
     setCart(newCart);
   };
 
@@ -227,10 +342,11 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
 
     for (const item of cart) {
-      if (item.quantite > item.quantite_stock) {
+      const piecesRequises = item.quantite * item.quantite_par_unite_base;
+      if (piecesRequises > item.quantite_stock) {
         notifications.show({
           title: 'Stock insuffisant',
-          message: `Stock insuffisant pour ${item.designation}. Disponible: ${item.quantite_stock}`,
+          message: `${item.designation}: ${piecesRequises} pièces requises, ${item.quantite_stock} disponibles`,
           color: 'red'
         });
         return;
@@ -238,9 +354,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
 
     setSubmitting(true);
-
     try {
-      // 1. Enregistrer la vente dans la base
       const sale = {
         code_vente: codeVente,
         idClient: selectedClientId ? parseInt(selectedClientId) : null,
@@ -256,36 +370,33 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       const details = cart.map(item => ({
         idProduit: item.idProduit,
         quantite: item.quantite,
+        quantite_pieces: item.quantite * item.quantite_par_unite_base,
+        idConditionnement: item.idConditionnement || null,
+        libelle_conditionnement: item.libelle_conditionnement,
         prix_unitaire_ht: item.prix_vente,
         prix_unitaire_ttc: item.prix_vente * 1.18,
         tva_taux: 18,
         remise_percent: 0
       }));
 
-      // Créer la vente et récupérer l'ID
       const createdSaleId = await createSale(sale, details);
 
-      // 2. Pour chaque produit, enregistrer la sortie de stock
       const results = [];
       for (const item of cart) {
+        const quantiteEnPieces = item.quantite * item.quantite_par_unite_base;
         const result = await stockService.sortieStock({
           idProduit: item.idProduit,
-          quantite: item.quantite,
-          prix_vente: item.prix_vente,
+          quantite: quantiteEnPieces, // toujours en pièces
+          prix_vente: item.prix_vente / item.quantite_par_unite_base, // prix unitaire pièce
           reference: `VENTE-${codeVente}`,
-          notes: `Vente au comptoir - ${codeVente} - Client: ${sale.nom_prenom}`
+          notes: `Vente au comptoir - ${codeVente} - ${item.quantite} ${item.libelle_conditionnement}(s) - Client: ${sale.nom_prenom}`
         });
-        
-        if (!result.success) {
-          throw new Error(`Erreur pour ${item.designation}: ${result.message}`);
-        }
-        
+        if (!result.success) throw new Error(`Erreur pour ${item.designation}: ${result.message}`);
         results.push(result);
       }
 
       const beneficeTotal = results.reduce((sum, r) => sum + (r.benefice || 0), 0);
 
-      // 4. ✅ ENREGISTRER DANS LE JOURNAL DE CAISSE via le service
       try {
         await journalCaisseService.ajouterVenteComptoir({
           montant: totalTTC,
@@ -293,26 +404,23 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
           codeVente: codeVente,
           clientNom: sale.nom_prenom
         });
-        console.log('✅ Journal de caisse mis à jour pour la vente', codeVente);
       } catch (journalError) {
         console.error('Erreur journal de caisse:', journalError);
-        // Ne pas bloquer la vente si le journal échoue
       }
 
       notifications.show({
-        title: '✅ Vente enregistrée avec succès',
-        message: `${cart.length} produit(s) vendu(s) - Chiffre d'affaires: ${totalTTC.toLocaleString()} F - Bénéfice: ${beneficeTotal.toLocaleString()} F`,
+        title: 'Vente enregistrée',
+        message: `${cart.length} article(s) — Total: ${totalTTC.toLocaleString()} F — Bénéfice: ${beneficeTotal.toLocaleString()} F`,
         color: 'green',
         autoClose: 5000
       });
 
       await refreshProducts();
       onSuccess();
-
     } catch (error: any) {
       console.error('Erreur lors de la vente:', error);
       notifications.show({
-        title: '❌ Erreur',
+        title: 'Erreur',
         message: error?.message || 'Erreur lors de l\'enregistrement de la vente',
         color: 'red',
       });
@@ -325,7 +433,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     if (value === undefined || value === null) return '0';
     const num = typeof value === 'string' ? parseFloat(value) : value;
     if (isNaN(num)) return '0';
-    return num.toLocaleString();
+    return num.toLocaleString('fr-FR');
   };
 
   const clientData = clients.map(c => ({
@@ -335,167 +443,213 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
   return (
     <>
-      <Modal
-        opened={true}
-        onClose={onCancel}
-        title="Nouvelle vente au comptoir"
-        size="900px"
-        padding="md"
-      >
-        <ScrollArea h="calc(100vh - 200px)" type="auto">
-          <Stack gap="md" pr="sm">
-            {/* Code vente */}
-            <Card withBorder p="sm" radius="md">
-              <Group grow>
-                <TextInput
-                  label="Code vente"
-                  value={codeVente}
-                  readOnly
-                  disabled
+      <Box p="md">
+        {/* En-tête */}
+        <Box mb="md" p="md" style={{
+          background: 'linear-gradient(135deg, #0a1628 0%, #122040 60%, #1b365d 100%)',
+          borderRadius: 12,
+        }}>
+          <Group justify="space-between" wrap="nowrap">
+            <Button
+              variant="subtle"
+              size="sm"
+              leftSection={<IconShoppingCart size={15} />}
+              style={{ color: 'rgba(255,255,255,0.7)' }}
+              onClick={onCancel}
+            >
+              ← Retour aux ventes
+            </Button>
+            <Box ta="center" style={{ flex: 1 }}>
+              <Text fw={700} c="white" size="md">Nouvelle vente au comptoir</Text>
+              {codeVente && <Text size="xs" c="rgba(255,255,255,0.5)">{codeVente}</Text>}
+            </Box>
+            <Button
+              size="sm"
+              variant="outline"
+              style={{ borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.6)' }}
+              onClick={onCancel}
+            >
+              Annuler
+            </Button>
+          </Group>
+        </Box>
+
+        <Stack gap="md">
+          {/* Code vente */}
+          <Card withBorder p="sm" radius="md">
+            <TextInput
+              label="Code vente"
+              value={codeVente}
+              readOnly
+              disabled
+              size="sm"
+              styles={{ input: { backgroundColor: '#f5f5f5', cursor: 'not-allowed' } }}
+            />
+          </Card>
+
+          {/* Client */}
+          <Card withBorder p="sm" radius="md">
+            <Group justify="space-between" mb="sm">
+              <Title order={5}>Informations client (optionnel)</Title>
+              <Checkbox
+                label="Ajouter les infos client"
+                checked={ajouterClient}
+                onChange={(e) => {
+                  setAjouterClient(e.currentTarget.checked);
+                  if (!e.currentTarget.checked) {
+                    setSelectedClientId(null);
+                    setClientNom('');
+                    setClientContact('');
+                  }
+                }}
+              />
+            </Group>
+
+            {ajouterClient && (
+              <>
+                <Group grow>
+                  <Select
+                    label="Client existant"
+                    placeholder="Choisir un client"
+                    data={clientData}
+                    value={selectedClientId}
+                    onChange={setSelectedClientId}
+                    searchable
+                    clearable
+                    size="sm"
+                  />
+                  <Button
+                    leftSection={<IconUserPlus size={14} />}
+                    onClick={() => setClientModalOpened(true)}
+                    size="sm"
+                    variant="light"
+                    mt="auto"
+                  >
+                    Nouveau client
+                  </Button>
+                </Group>
+                <Group grow mt="sm">
+                  <TextInput
+                    label="Nom complet"
+                    placeholder="Nom du client"
+                    value={clientNom}
+                    onChange={(e) => setClientNom(e.target.value)}
+                    size="sm"
+                  />
+                  <TextInput
+                    label="Contact"
+                    placeholder="Téléphone"
+                    value={clientContact}
+                    onChange={(e) => setClientContact(e.target.value)}
+                    size="sm"
+                  />
+                </Group>
+              </>
+            )}
+            {!ajouterClient && (
+              <Text size="xs" c="dimmed" ta="center" mt="sm">
+                La vente sera enregistrée comme "Client anonyme"
+              </Text>
+            )}
+          </Card>
+
+          {/* Produits */}
+          <Card withBorder p="sm" radius="md">
+            <Title order={5} mb="sm">Produits disponibles en stock</Title>
+            <Group mb="sm" gap="xs">
+              <TextInput
+                placeholder="Rechercher un produit..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                style={{ flex: 1 }}
+                leftSection={<IconSearch size={14} />}
+                size="sm"
+              />
+              <Tooltip label="Actualiser">
+                <ActionIcon
+                  onClick={() => { refreshProducts(); loadConditionnements(products.map(p => p.idProduit)); }}
                   size="sm"
-                  styles={{ input: { backgroundColor: '#f5f5f5', cursor: 'not-allowed' } }}
-                />
-              </Group>
-            </Card>
+                  variant="outline"
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
 
-            {/* Client - Optionnel */}
-            <Card withBorder p="sm" radius="md">
-              <Group justify="space-between" mb="sm">
-                <Title order={5}>Informations client (optionnel)</Title>
-                <Checkbox
-                  label="Ajouter les infos client"
-                  checked={ajouterClient}
-                  onChange={(e) => {
-                    setAjouterClient(e.currentTarget.checked);
-                    if (!e.currentTarget.checked) {
-                      setSelectedClientId(null);
-                      setClientNom('');
-                      setClientContact('');
-                    }
-                  }}
-                />
-              </Group>
-
-              {ajouterClient && (
-                <>
-                  <Group grow>
-                    <Select
-                      label="Client existant"
-                      placeholder="Choisir un client"
-                      data={clientData}
-                      value={selectedClientId}
-                      onChange={setSelectedClientId}
-                      searchable
-                      clearable
-                      size="sm"
-                    />
-                    <Button
-                      leftSection={<IconUserPlus size={14} />}
-                      onClick={() => setClientModalOpened(true)}
-                      size="sm"
-                      variant="light"
-                      mt="auto"
-                    >
-                      Nouveau client
-                    </Button>
-                  </Group>
-
-                  <Group grow mt="sm">
-                    <TextInput
-                      label="Nom complet"
-                      placeholder="Nom du client"
-                      value={clientNom}
-                      onChange={(e) => setClientNom(e.target.value)}
-                      size="sm"
-                    />
-                    <TextInput
-                      label="Contact"
-                      placeholder="Téléphone"
-                      value={clientContact}
-                      onChange={(e) => setClientContact(e.target.value)}
-                      size="sm"
-                    />
-                  </Group>
-                </>
-              )}
-
-              {!ajouterClient && (
-                <Text size="xs" c="dimmed" ta="center" mt="sm">
-                  La vente sera enregistrée comme "Client anonyme"
+            {filteredProducts.length === 0 && (
+              <Alert color="yellow" variant="light" icon={<IconAlertCircle size={16} />}>
+                <Text size="sm">
+                  {searchTerm
+                    ? 'Aucun produit ne correspond à votre recherche'
+                    : 'Aucun produit en stock disponible pour la vente'}
                 </Text>
-              )}
-            </Card>
+              </Alert>
+            )}
 
-            {/* Produits */}
-            <Card withBorder p="sm" radius="md">
-              <Title order={5} mb="sm">Produits disponibles en stock</Title>
+            {filteredProducts.length > 0 && (
+              <ScrollArea h={280}>
+                <Table striped highlightOnHover style={{ minWidth: 700 }}>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Désignation</Table.Th>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Catégorie</Table.Th>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Unité / Conditionnement</Table.Th>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Prix sélectionné</Table.Th>
+                      <Table.Th style={{ whiteSpace: 'nowrap' }}>Stock</Table.Th>
+                      <Table.Th></Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {paginatedProducts.map((product) => {
+                      const hasConds = (condMap[product.idProduit] || []).length > 0;
+                      const unitOpts = getUnitOptions(product);
+                      const resolvedUnit = getResolvedUnit(product);
+                      const currentSelectValue = resolvedUnit.idConditionnement
+                        ? `cond_${resolvedUnit.idConditionnement}`
+                        : 'piece';
 
-              <Group mb="sm" gap="xs">
-                <TextInput
-                  placeholder="Rechercher un produit..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{ flex: 1 }}
-                  leftSection={<IconSearch size={14} />}
-                  size="sm"
-                />
-                <Tooltip label="Actualiser">
-                  <ActionIcon onClick={refreshProducts} size="sm" variant="outline">
-                    <IconRefresh size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </Group>
-
-              {filteredProducts.length === 0 && (
-                <Alert color="yellow" variant="light" icon={<IconAlertCircle size={16} />}>
-                  <Text size="sm">
-                    {searchTerm ? 'Aucun produit ne correspond à votre recherche' : 'Aucun produit en stock disponible pour la vente'}
-                  </Text>
-                </Alert>
-              )}
-
-              {filteredProducts.length > 0 && (
-                <ScrollArea h={250}>
-                  <Table striped highlightOnHover>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>Désignation</Table.Th>
-                        <Table.Th>Catégorie</Table.Th>
-                        <Table.Th>Unité</Table.Th>
-                        <Table.Th>Prix vente</Table.Th>
-                        <Table.Th>Prix achat (PMP)</Table.Th>
-                        <Table.Th>Stock</Table.Th>
-                        <Table.Th></Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {paginatedProducts.map((product) => (
+                      return (
                         <Table.Tr key={product.idProduit}>
-                          <Table.Td>
+                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
                             <Text size="sm" fw={500}>{product.designation}</Text>
                             <Text size="xs" c="dimmed">{product.code_produit}</Text>
                           </Table.Td>
-                          <Table.Td>
+                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
                             <Badge variant="light" size="xs" color="grape">
                               {product.categorie || 'Non catégorisé'}
                             </Badge>
                           </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" c="dimmed">{product.unite_base || 'pièce'}</Text>
+                          <Table.Td style={{ minWidth: 200 }}>
+                            {hasConds ? (
+                              <Select
+                                data={unitOpts}
+                                value={currentSelectValue}
+                                onChange={(val) => handleUnitChange(product, val)}
+                                size="xs"
+                                leftSection={<IconBoxMultiple size={12} />}
+                                styles={{ input: { fontSize: 12 } }}
+                              />
+                            ) : (
+                              <Text size="xs" c="dimmed">{product.unite_base || 'pièce'}</Text>
+                            )}
                           </Table.Td>
-                          <Table.Td>
-                            <Text fw={600} c="blue">{formatMontant(product.prix_vente_detail)} F</Text>
+                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                            <Text fw={600} c="blue" size="sm">
+                              {formatMontant(resolvedUnit.prix)} F
+                            </Text>
+                            {resolvedUnit.quantite_par_unite_base > 1 && (
+                              <Text size="xs" c="dimmed">
+                                ({Math.round(resolvedUnit.prix / resolvedUnit.quantite_par_unite_base).toLocaleString('fr-FR')} F/{product.unite_base || 'pièce'})
+                              </Text>
+                            )}
                           </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" c="dimmed">{formatMontant(product.prix_achat_base)} F</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge 
-                              color={product.qte_stock <= 5 ? 'orange' : 'green'} 
-                              variant="light" 
-                              size="sm"
+                          <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                            <Badge
+                              color={product.qte_stock <= 0 ? 'red' : product.qte_stock <= (product.seuil_alerte || 0) ? 'orange' : 'green'}
+                              variant="light"
+                              size="xs"
                             >
-                              {product.qte_stock || 0} unités
+                              {product.qte_stock} {product.unite_base || 'pièce'}(s)
                             </Badge>
                           </Table.Td>
                           <Table.Td>
@@ -503,142 +657,147 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                               size="xs"
                               leftSection={<IconPlus size={12} />}
                               onClick={() => addToCart(product)}
-                              variant="light"
-                              color="blue"
+                              disabled={product.qte_stock <= 0}
                             >
                               Ajouter
                             </Button>
                           </Table.Td>
                         </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-              )}
-
-              {totalPages > 1 && (
-                <Group justify="center" mt="md">
-                  <Button.Group>
-                    <Button
-                      variant="light"
-                      size="xs"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(p => p - 1)}
-                    >
-                      Précédent
-                    </Button>
-                    <Button variant="light" size="xs">
-                      Page {currentPage} / {totalPages}
-                    </Button>
-                    <Button
-                      variant="light"
-                      size="xs"
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(p => p + 1)}
-                    >
-                      Suivant
-                    </Button>
-                  </Button.Group>
-                </Group>
-              )}
-            </Card>
-
-            {/* Panier */}
-            {cart.length > 0 && (
-              <Card withBorder p="sm" radius="md" style={{ backgroundColor: '#fafafa' }}>
-                <Title order={5} mb="sm">Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
-
-                <ScrollArea h={200}>
-                  <Table striped highlightOnHover>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>Produit</Table.Th>
-                        <Table.Th>Catégorie</Table.Th>
-                        <Table.Th>Unité</Table.Th>
-                        <Table.Th>Qté</Table.Th>
-                        <Table.Th>Prix unit.</Table.Th>
-                        <Table.Th>Total</Table.Th>
-                        <Table.Th></Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {cart.map((item, index) => (
-                        <Table.Tr key={index}>
-                          <Table.Td>
-                            <Text size="sm" fw={500}>{item.designation}</Text>
-                            <Text size="xs" c="dimmed">{item.code_produit}</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <Badge variant="light" size="xs" color="grape">
-                              {item.categorie || 'Non catégorisé'}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Text size="xs" c="dimmed">{item.unite_base || 'pièce'}</Text>
-                          </Table.Td>
-                          <Table.Td style={{ width: 80 }}>
-                            <NumberInput
-                              value={item.quantite}
-                              onChange={(val) => updateQuantity(index, Number(val) || 1)}
-                              min={1}
-                              max={item.quantite_stock}
-                              size="xs"
-                            />
-                          </Table.Td>
-                          <Table.Td>{formatMontant(item.prix_vente)} F</Table.Td>
-                          <Table.Td>
-                            <Text fw={600} c="blue">{formatMontant(item.total)} F</Text>
-                          </Table.Td>
-                          <Table.Td>
-                            <ActionIcon color="red" onClick={() => removeFromCart(index)} size="sm" variant="subtle">
-                              <IconTrash size={14} />
-                            </ActionIcon>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </ScrollArea>
-
-                <Divider my="sm" />
-                <Group justify="flex-end">
-                  <div style={{ textAlign: 'right' }}>
-                    <Text size="sm">Total HT: <strong>{formatMontant(totalHT)} F</strong></Text>
-                    <Text size="xs" c="dimmed">TVA (18%): {formatMontant(tva)} F</Text>
-                    <Text size="xl" fw={700} c="blue">Total TTC: {formatMontant(totalTTC)} F</Text>
-                  </div>
-                </Group>
-              </Card>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
             )}
 
-            <Group justify="flex-end">
-              <Button variant="outline" onClick={onCancel} size="sm">
-                Annuler
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                loading={submitting || loading}
-                disabled={cart.length === 0}
-                leftSection={<IconShoppingCart size={14} />}
-                size="sm"
-                color="green"
-              >
-                Enregistrer la vente
-              </Button>
-            </Group>
-          </Stack>
-        </ScrollArea>
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <Group justify="center" mt="sm">
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                >
+                  ← Précédent
+                </Button>
+                <Text size="xs" c="dimmed">
+                  Page {currentPage} / {totalPages}
+                </Text>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                >
+                  Suivant →
+                </Button>
+              </Group>
+            )}
+          </Card>
 
-        <LoadingOverlay visible={clientsLoading || productsLoading} />
-      </Modal>
+          {/* Panier */}
+          {cart.length > 0 && (
+            <Card withBorder p="sm" radius="md">
+              <Title order={5} mb="sm">Panier ({cart.length} article(s))</Title>
+              <ScrollArea h={200}>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Produit</Table.Th>
+                      <Table.Th>Unité</Table.Th>
+                      <Table.Th>Qté</Table.Th>
+                      <Table.Th>Prix unit.</Table.Th>
+                      <Table.Th>Total</Table.Th>
+                      <Table.Th></Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {cart.map((item, index) => (
+                      <Table.Tr key={`${item.idProduit}-${String(item.idConditionnement)}`}>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>{item.designation}</Text>
+                          <Text size="xs" c="dimmed">{item.code_produit}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge variant="light" size="xs">
+                            {item.libelle_conditionnement}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            value={item.quantite}
+                            onChange={(val) => updateQuantity(index, Number(val) || 1)}
+                            min={1}
+                            max={Math.floor(item.quantite_stock / item.quantite_par_unite_base)}
+                            size="xs"
+                            style={{ width: 80 }}
+                          />
+                        </Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                          <Text size="sm">{formatMontant(item.prix_vente)} F</Text>
+                        </Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                          <Text size="sm" fw={600} c="blue">{formatMontant(item.total)} F</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <ActionIcon color="red" variant="subtle" size="sm" onClick={() => removeFromCart(index)}>
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Card>
+          )}
 
-      <FormulaireClient
-        opened={clientModalOpened}
-        onClose={() => {
-          setClientModalOpened(false);
-          refreshClients();
-        }}
-      />
+          {/* Totaux + Soumettre */}
+          {cart.length > 0 && (
+            <Card withBorder p="sm" radius="md">
+              <Group justify="space-between" mb="xs">
+                <Text size="sm" c="dimmed">Total HT</Text>
+                <Text size="sm">{formatMontant(totalHT)} F</Text>
+              </Group>
+              <Group justify="space-between" mb="xs">
+                <Text size="sm" c="dimmed">TVA (18%)</Text>
+                <Text size="sm">{formatMontant(tva)} F</Text>
+              </Group>
+              <Divider mb="xs" />
+              <Group justify="space-between" mb="md">
+                <Text fw={700} size="lg">Total TTC</Text>
+                <Text fw={700} size="lg" c="blue">{formatMontant(totalTTC)} F</Text>
+              </Group>
+              <Group justify="flex-end">
+                <Button variant="outline" onClick={onCancel}>
+                  Annuler
+                </Button>
+                <Button
+                  leftSection={<IconShoppingCart size={16} />}
+                  onClick={handleSubmit}
+                  loading={submitting || loading}
+                  disabled={cart.length === 0}
+                >
+                  Enregistrer la vente
+                </Button>
+              </Group>
+            </Card>
+          )}
+        </Stack>
+      </Box>
+
+      {/* Modal nouveau client */}
+      {clientModalOpened && (
+        <FormulaireClient
+          opened={clientModalOpened}
+          onClose={() => setClientModalOpened(false)}
+          onSuccess={() => {
+            setClientModalOpened(false);
+            refreshClients();
+          }}
+        />
+      )}
     </>
   );
 };

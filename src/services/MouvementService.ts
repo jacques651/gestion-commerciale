@@ -38,42 +38,26 @@ export default class MouvementService {
       `
       INSERT INTO mouvements_stock
       (
-        code_mouvement,
         idProduit,
         type_mouvement,
         quantite,
         stock_avant,
         stock_apres,
-        document_type,
-        document_id,
         reference,
-        motif
+        notes,
+        date_mouvement
       )
-      VALUES
-      (
-        ?,
-        ?,
-        ?,
-        ?,
-        ?,
-        ?,
-        ?,
-        ?,
-        ?,
-        ?
-      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
-        `MVT-${Date.now()}`,
         dto.idProduit,
         dto.typeMouvement,
         dto.quantite,
         dto.stockAvant,
         dto.stockApres,
-        dto.documentType ?? null,
-        dto.documentId ?? null,
         dto.reference ?? null,
-        dto.motif ?? null
+        dto.motif ?? null,
+        new Date().toISOString()
       ]
     );
   }

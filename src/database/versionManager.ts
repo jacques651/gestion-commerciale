@@ -33,17 +33,17 @@ export class DatabaseVersionManager {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
           )
         `);
-        
-        // Version initiale
+
+        // Fresh install → démarrer directement à la version courante
         await db.execute(`
           INSERT INTO database_version (id, version, last_migration)
-          VALUES (1, 1, 'Initial creation')
-        `);
-        
+          VALUES (1, ?, 'Initial installation')
+        `, [this.CURRENT_VERSION]);
+
         return {
-          version: 1,
-          lastMigration: 'Initial creation',
-          status: 'MIGRATION_NEEDED',
+          version: this.CURRENT_VERSION,
+          lastMigration: 'Initial installation',
+          status: 'OK',
           tables: await this.getTableList()
         };
       }

@@ -277,7 +277,7 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
             <>
               <Table withColumnBorders style={{ fontSize: '12px', marginBottom: 12 }}>
                 <Table.Thead>
-                  <Table.Tr style={{ backgroundColor: '#1b365d' }}>
+                  <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
                     <Table.Th c="white" ta="center" w={25}>#</Table.Th>
                     <Table.Th c="white">Désignation</Table.Th>
                     <Table.Th c="white">Catégorie</Table.Th>

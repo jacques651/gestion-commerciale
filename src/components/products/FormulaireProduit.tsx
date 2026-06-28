@@ -217,7 +217,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
         radius="lg"
         styles={{
           header: { 
-            backgroundColor: '#1b365d', 
+            backgroundColor: '#1a1a2e', 
             padding: '14px 24px', 
             borderTopLeftRadius: '12px', 
             borderTopRightRadius: '12px' 

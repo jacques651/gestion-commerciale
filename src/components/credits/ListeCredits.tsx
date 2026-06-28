@@ -334,11 +334,11 @@ export default function ListeCredits() {
 
   const getModePaiementLabel = (mode: string) => {
     switch (mode) {
-      case 'ESPECES': return '💰 Espèces';
-      case 'VIREMENT': return '🏦 Virement';
-      case 'CHEQUE': return '📝 Chèque';
-      case 'MOBILE_MONEY': return '📱 Mobile Money';
-      default: return '📌 Autre';
+      case 'ESPECES': return 'Espèces';
+      case 'VIREMENT': return 'Virement';
+      case 'CHEQUE': return 'Chèque';
+      case 'MOBILE_MONEY': return 'Mobile Money';
+      default: return 'Autre';
     }
   };
 
@@ -364,10 +364,10 @@ export default function ListeCredits() {
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
-            <ThemeIcon size={50} radius="md" color="white" variant="light">
+            <ThemeIcon size={45} radius="md" color="violet" variant="filled">
               <IconCreditCard size={30} />
             </ThemeIcon>
             <div>
@@ -483,9 +483,9 @@ export default function ListeCredits() {
             placeholder="Statut"
             clearable
             data={[
-              { value: 'EN_COURS', label: '🟠 En cours' },
-              { value: 'TERMINE', label: '✅ Terminé' },
-              { value: 'ANNULE', label: '❌ Annulé' }
+              { value: 'EN_COURS', label: 'En cours' },
+              { value: 'TERMINE', label: 'Terminé' },
+              { value: 'ANNULE', label: 'Annulé' }
             ]}
             value={statutFilter}
             onChange={setStatutFilter}
@@ -536,7 +536,7 @@ export default function ListeCredits() {
         <ScrollArea h={500}>
           <Table striped highlightOnHover verticalSpacing="sm">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1b365d 0%, #295080 100%)' }}>
+              <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
                 <Table.Th c="white" w={50}>N°</Table.Th>
                 <Table.Th c="white">Code</Table.Th>
                 <Table.Th c="white">Date</Table.Th>
@@ -652,7 +652,7 @@ export default function ListeCredits() {
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}
@@ -894,7 +894,7 @@ export default function ListeCredits() {
         size="md"
         centered
         styles={{
-          header: { backgroundColor: '#1b365d', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
+          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
           title: { color: 'white', fontWeight: 600 },
           body: { padding: '20px' }
         }}
@@ -926,11 +926,11 @@ export default function ListeCredits() {
           <Select
             label="Mode de paiement *"
             data={[
-              { value: 'ESPECES', label: '💰 Espèces' },
-              { value: 'VIREMENT', label: '🏦 Virement' },
-              { value: 'CHEQUE', label: '📝 Chèque' },
-              { value: 'MOBILE_MONEY', label: '📱 Mobile Money' },
-              { value: 'AUTRE', label: '📌 Autre' }
+              { value: 'ESPECES', label: 'Espèces' },
+              { value: 'VIREMENT', label: 'Virement' },
+              { value: 'CHEQUE', label: 'Chèque' },
+              { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+              { value: 'AUTRE', label: 'Autre' }
             ]}
             value={remboursementForm.mode_paiement}
             onChange={(value) => setRemboursementForm({ ...remboursementForm, mode_paiement: (value as any) || 'ESPECES' })}
