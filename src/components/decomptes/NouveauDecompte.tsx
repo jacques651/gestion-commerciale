@@ -22,7 +22,9 @@ import {
   Divider,
   Grid,
   Tooltip,
-  Pagination
+  Pagination,
+  Modal,
+  Checkbox,
 } from '@mantine/core';
 import {
   IconReceipt,
@@ -35,7 +37,9 @@ import {
   IconShoppingCart,
   IconRefresh,
   IconSearch,
-  IconBuildingStore
+  IconBuildingStore,
+  IconTruck,
+  IconPlayerSkipForward,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -80,6 +84,18 @@ interface DecompteDetail {
   unite_base?: string;
 }
 
+interface ReapproItem {
+  idProduit: number;
+  designation: string;
+  qte_decompte: number;
+  qte_reappro: number;
+  stock_principal: number;
+  checked: boolean;
+  prix_achat: number;
+  prix_vente: number;
+  commission_pourcentage: number;
+}
+
 export default function NouveauDecompte({
   decompteId,
   clientId: clientIdProp,
@@ -105,7 +121,12 @@ export default function NouveauDecompte({
   const [produitsDisponibles, setProduitsDisponibles] = useState<Produit[]>([]);
   const [quantites, setQuantites] = useState<Record<number, number>>({});
   const [details, setDetails] = useState<DecompteDetail[]>([]);
-  const [produitsNonReapprovisionnes, setProduitsNonReapprovisionnes] = useState<string[]>([]);
+  // Modal réapprovisionnement
+  const [reapproModalOpened, setReapproModalOpened] = useState(false);
+  const [reapproItems, setReapproItems] = useState<ReapproItem[]>([]);
+  const [savedDecompteId, setSavedDecompteId] = useState<number | null>(null);
+  const [savedCodeRecu, setSavedCodeRecu] = useState('');
+  const [processingReappro, setProcessingReappro] = useState(false);
 
   const [loadingDecompte, setLoadingDecompte] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -422,6 +443,7 @@ export default function NouveauDecompte({
 
   const categories = [...new Set(produitsDisponibles.map((p: Produit) => p.categorie).filter(Boolean))];
 
+  // ─── Phase 1 : enregistrer le décompte + déstocker revendeur ─────────────────
   const handleSubmit = async () => {
     if (!selectedClientId) {
       notifications.show({ title: 'Erreur', message: 'Selectionnez un revendeur', color: 'red' });
@@ -434,13 +456,9 @@ export default function NouveauDecompte({
 
     setSaving(true);
     setError(null);
-    setProduitsNonReapprovisionnes([]);
-
-    let db: any = null;
 
     try {
-      db = await getDb();
-
+      const db = await getDb();
       const codeRecu = `DCP-${Date.now()}`;
 
       const result = await db.execute(`
@@ -452,187 +470,58 @@ export default function NouveauDecompte({
 
       const idDecompte = Number(result.lastInsertId);
 
-      const produitsNonReappro: string[] = [];
-      const detailsReapprovisionnes: any[] = [];
+      const items: ReapproItem[] = [];
 
-      // ==========================
-      // DETAILS DU DECOMPTE
-      // ==========================
       for (const detail of details) {
-        // Verification stock principal (avant insert pour connaître qte_reappro)
-        const stockPrincipal = await db.select(`
-          SELECT qte_stock FROM products WHERE idProduit = ?
-        `, [detail.idProduit]);
+        // Stock principal disponible
+        const stockRows = await db.select<any[]>(
+          `SELECT qte_stock FROM products WHERE idProduit = ?`, [detail.idProduit]
+        );
+        const stockPrincipal = stockRows.length > 0 ? (stockRows[0].qte_stock || 0) : 0;
 
-        const stockDisponible = stockPrincipal.length > 0 ? stockPrincipal[0].qte_stock : 0;
-        const quantiteAReapprovisionner = Math.min(detail.qte_decompte, stockDisponible);
-
+        // Insérer détail (qte_reappro = 0, sera rempli lors de l'appro)
         await db.execute(`
           INSERT INTO decompte_details (
             idDecompte, idProduit, qte_decompte, qte_avant_decompte,
             prix_achat, prix_vente, commission_pourcentage,
             designation, total, qte_reappro
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         `, [
           idDecompte, detail.idProduit, detail.qte_decompte,
-          detail.qte_stock,
-          detail.prix_achat, detail.prix_vente,
+          detail.qte_stock, detail.prix_achat, detail.prix_vente,
           detail.commission_pourcentage || 60,
           detail.designation, detail.total,
-          quantiteAReapprovisionner
         ]);
 
-        // Destockage revendeur
+        // Déstocker le revendeur (les produits ont été vendus)
         await db.execute(`
           UPDATE stock_revendeur
           SET qte_stock = qte_stock - ?
           WHERE idProduit = ? AND idRevendeur = ?
         `, [detail.qte_decompte, detail.idProduit, selectedClientId]);
 
-        if (quantiteAReapprovisionner > 0) {
-          detailsReapprovisionnes.push({ ...detail, quantiteReapprovisionnee: quantiteAReapprovisionner });
-
-          // Reapprovisionnement revendeur
-          await db.execute(`
-            UPDATE stock_revendeur
-            SET qte_stock = qte_stock + ?
-            WHERE idProduit = ? AND idRevendeur = ?
-          `, [quantiteAReapprovisionner, detail.idProduit, selectedClientId]);
-
-          // Destockage principal
-          await db.execute(`
-            UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-          `, [quantiteAReapprovisionner, detail.idProduit]);
-
-          // Mouvement stock principal
-          await db.execute(`
-            INSERT INTO mouvements_stock (
-              idProduit, type_mouvement, quantite,
-              stock_avant, stock_apres, reference, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-          `, [
-            detail.idProduit, 'SORTIE_REAPPRO', quantiteAReapprovisionner,
-            stockDisponible, stockDisponible - quantiteAReapprovisionner,
-            `REAPPRO-${codeRecu}`,
-            `Reapprovisionnement revendeur ${selectedClientId}`
-          ]);
-
-        } else {
-          produitsNonReappro.push(detail.designation);
-        }
-
         // Mouvement revendeur
         await db.execute(`
           INSERT INTO mouvements_revendeur (
             idProduit, idRevendeur, idDecompte,
             type_mouvement, qte_mouvement
-          ) VALUES (?, ?, ?, ?, ?)
-        `, [detail.idProduit, selectedClientId, idDecompte, 'DECOMPTE_REAPPRO', detail.qte_decompte]);
+          ) VALUES (?, ?, ?, 'DECOMPTE', ?)
+        `, [detail.idProduit, selectedClientId, idDecompte, detail.qte_decompte]);
+
+        items.push({
+          idProduit: detail.idProduit,
+          designation: detail.designation,
+          qte_decompte: detail.qte_decompte,
+          qte_reappro: Math.min(detail.qte_decompte, stockPrincipal),
+          stock_principal: stockPrincipal,
+          checked: stockPrincipal > 0,
+          prix_achat: detail.prix_achat,
+          prix_vente: detail.prix_vente,
+          commission_pourcentage: detail.commission_pourcentage || 60,
+        });
       }
 
-      // ==========================
-      // COMMANDE REVENDEUR AUTOMATIQUE
-      // ==========================
-      const codeCommande = `CMD-REV-${codeRecu}`;
-      const tousCompletes = produitsNonReappro.length === 0;
-      const aucunComplete = detailsReapprovisionnes.length === 0;
-      const statutCommande = tousCompletes ? 'LIVREE' : aucunComplete ? 'EN_ATTENTE' : 'PARTIELLE';
-
-      const commandeResult = await db.execute(`
-        INSERT INTO commandes (
-          code_commande, idClient, type_commande,
-          montant_ht, montant_ttc,
-          statut
-        ) VALUES (?, ?, 'REVENDEUR', ?, ?, ?)
-      `, [
-        codeCommande, selectedClientId,
-        totalAchat, totalVente,
-        statutCommande
-      ]);
-
-      const idCommandeRevendeur = Number(commandeResult.lastInsertId);
-
-      for (const detail of details) {
-        await db.execute(`
-          INSERT INTO commande_details (
-            idCommande, idProduit, qte_commande,
-            prix_unitaire_vente, remise
-          ) VALUES (?, ?, ?, ?, 0)
-        `, [idCommandeRevendeur, detail.idProduit, detail.qte_decompte, detail.prix_vente]);
-      }
-
-      // ==========================
-      // FACTURE D'APPROVISIONNEMENT
-      // ==========================
-      if (detailsReapprovisionnes.length > 0) {
-
-        const year = new Date().getFullYear();
-
-        const lastFacture: any[] = await db.select(`
-          SELECT code_facture FROM factures_approvisionnement
-          WHERE code_facture LIKE 'APP-${year}-%'
-          ORDER BY idFactureAppro DESC LIMIT 1
-        `);
-
-        let nextNumber = 1;
-        if (lastFacture.length > 0) {
-          const match = lastFacture[0].code_facture.match(/APP-\d+-(\d+)/);
-          if (match) nextNumber = parseInt(match[1]) + 1;
-        }
-
-        const codeFactureAppro = `APP-${year}-${nextNumber.toString().padStart(6, '0')}`;
-
-        let montantHT = 0;
-        for (const detail of detailsReapprovisionnes) {
-          montantHT += detail.prix_achat * detail.quantiteReapprovisionnee;
-        }
-        const montantTTC = montantHT * 1.18;
-
-        const factureResult = await db.execute(`
-          INSERT INTO factures_approvisionnement (
-            code_facture, idRevendeur, idDecompte, date_facture,
-            montant_ht, montant_ttc, statut, reference_decompte
-          ) VALUES (?, ?, ?, datetime('now'), ?, ?, 'EN_ATTENTE', ?)
-        `, [codeFactureAppro, selectedClientId, idDecompte, montantHT, montantTTC, codeRecu]);
-
-        const idFactureAppro = Number(factureResult.lastInsertId);
-
-        for (const detail of detailsReapprovisionnes) {
-          await db.execute(`
-            INSERT INTO factures_approvisionnement_details (
-              idFactureAppro, idProduit, quantite,
-              prix_achat, prix_vente, total_ht, total_ttc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-          `, [
-            idFactureAppro, detail.idProduit, detail.quantiteReapprovisionnee,
-            detail.prix_achat, detail.prix_vente,
-            detail.prix_achat * detail.quantiteReapprovisionnee,
-            detail.prix_achat * detail.quantiteReapprovisionnee * 1.18
-          ]);
-        }
-
-        await db.execute(`
-          UPDATE decomptes SET id_facture_approvisionnement = ? WHERE idDecompte = ?
-        `, [idFactureAppro, idDecompte]);
-
-        // Facture revendeur liee a la commande (produits completes uniquement)
-        const codeFactureRev = `FACT-REV-${codeRecu}`;
-        await db.execute(`
-          INSERT INTO factures_revendeur (
-            idCommande, idRevendeur, code_facture,
-            montant_ht, montant_ttc, commission, statut
-          ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
-        `, [
-          idCommandeRevendeur, selectedClientId, codeFactureRev,
-          montantHT, montantTTC, totalCommission
-        ]);
-      }
-
-      if (produitsNonReappro.length > 0) {
-        setProduitsNonReapprovisionnes(produitsNonReappro);
-      }
-
-      // Enregistrer l'entrée dans le journal de caisse (montant net reçu du revendeur)
+      // Journal de caisse
       if (!isEditMode && montantNet > 0) {
         try {
           const revendeurNom = revendeurs.find((r: any) => parseInt(r.value) === selectedClientId)?.label;
@@ -643,34 +532,198 @@ export default function NouveauDecompte({
             revendeurNom,
           });
         } catch (journalErr) {
-          console.warn('Avertissement: impossible d\'enregistrer dans le journal de caisse:', journalErr);
+          console.warn('Journal caisse:', journalErr);
         }
       }
 
       notifications.show({
-        title: 'Succes',
-        message: isEditMode
-          ? `Decompte modifie | Commande ${codeCommande} [${statutCommande}]`
-          : `Decompte cree | Commande ${codeCommande} [${statutCommande}]`,
-        color: 'green'
+        title: 'Décompte enregistré',
+        message: `Code : ${codeRecu} — Choisissez maintenant les produits à réapprovisionner`,
+        color: 'green',
       });
 
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        navigate('/decomptes');
-      }
+      setSavedDecompteId(idDecompte);
+      setSavedCodeRecu(codeRecu);
+      setReapproItems(items);
+      setReapproModalOpened(true);
 
     } catch (err: any) {
-      console.error('Erreur creation decompte:', err);
-      setError(err?.message || 'Erreur lors de la creation du decompte');
-      notifications.show({
-        title: 'Erreur',
-        message: err?.message || 'Erreur lors de la creation du decompte',
-        color: 'red'
-      });
+      console.error('Erreur création décompte:', err);
+      setError(err?.message || 'Erreur lors de la création du décompte');
+      notifications.show({ title: 'Erreur', message: err?.message, color: 'red' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const updateReapproItem = (idProduit: number, field: 'checked' | 'qte_reappro', value: boolean | number) => {
+    setReapproItems(prev => prev.map(i =>
+      i.idProduit === idProduit ? { ...i, [field]: value } : i
+    ));
+  };
+
+  // ─── Phase 2a : approvisionner les produits cochés ────────────────────────
+  const handleReapprovisionner = async () => {
+    const aApprovisionner = reapproItems.filter(i => i.checked && i.qte_reappro > 0);
+    if (aApprovisionner.length === 0) {
+      await handlePasserSansReappro();
+      return;
+    }
+
+    setProcessingReappro(true);
+    try {
+      const db = await getDb();
+      const codeCommande = `CMD-REV-${savedCodeRecu}`;
+      const year = new Date().getFullYear();
+
+      // Commande revendeur
+      const commandeResult = await db.execute(`
+        INSERT INTO commandes (
+          code_commande, idClient, type_commande, montant_ht, montant_ttc, statut
+        ) VALUES (?, ?, 'REVENDEUR', ?, ?, 'LIVREE')
+      `, [codeCommande, selectedClientId, totalAchat, totalVente]);
+      const idCommande = Number(commandeResult.lastInsertId);
+
+      for (const detail of reapproItems) {
+        await db.execute(`
+          INSERT INTO commande_details (idCommande, idProduit, qte_commande, prix_unitaire_vente, remise)
+          VALUES (?, ?, ?, ?, 0)
+        `, [idCommande, detail.idProduit, detail.qte_decompte, detail.prix_vente]);
+      }
+
+      // Réapprovisionner les produits sélectionnés
+      let montantHT = 0;
+      for (const item of aApprovisionner) {
+        const stockAvant = item.stock_principal;
+
+        // Remettre en stock revendeur
+        await db.execute(`
+          UPDATE stock_revendeur SET qte_stock = qte_stock + ?
+          WHERE idProduit = ? AND idRevendeur = ?
+        `, [item.qte_reappro, item.idProduit, selectedClientId]);
+
+        // Déduire du stock principal
+        await db.execute(
+          `UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?`,
+          [item.qte_reappro, item.idProduit]
+        );
+
+        // Mouvement stock principal
+        await db.execute(`
+          INSERT INTO mouvements_stock (
+            idProduit, type_mouvement, quantite, stock_avant, stock_apres, reference, notes
+          ) VALUES (?, 'SORTIE_REAPPRO', ?, ?, ?, ?, ?)
+        `, [
+          item.idProduit, item.qte_reappro,
+          stockAvant, stockAvant - item.qte_reappro,
+          `REAPPRO-${savedCodeRecu}`,
+          `Réapprovisionnement revendeur #${selectedClientId}`,
+        ]);
+
+        // Mettre à jour qte_reappro dans decompte_details
+        await db.execute(`
+          UPDATE decompte_details SET qte_reappro = ?
+          WHERE idDecompte = ? AND idProduit = ?
+        `, [item.qte_reappro, savedDecompteId, item.idProduit]);
+
+        montantHT += item.prix_achat * item.qte_reappro;
+      }
+
+      // Facture d'approvisionnement
+      const montantTTC = montantHT * 1.18;
+      const lastFacture = await db.select<any[]>(`
+        SELECT code_facture FROM factures_approvisionnement
+        WHERE code_facture LIKE 'APP-${year}-%'
+        ORDER BY idFactureAppro DESC LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastFacture.length > 0) {
+        const m = lastFacture[0].code_facture.match(/APP-\d+-(\d+)/);
+        if (m) nextNum = parseInt(m[1]) + 1;
+      }
+      const codeFactureAppro = `APP-${year}-${nextNum.toString().padStart(6, '0')}`;
+
+      const factureResult = await db.execute(`
+        INSERT INTO factures_approvisionnement (
+          code_facture, idRevendeur, idDecompte, date_facture,
+          montant_ht, montant_ttc, statut, reference_decompte
+        ) VALUES (?, ?, ?, datetime('now'), ?, ?, 'EN_ATTENTE', ?)
+      `, [codeFactureAppro, selectedClientId, savedDecompteId, montantHT, montantTTC, savedCodeRecu]);
+      const idFactureAppro = Number(factureResult.lastInsertId);
+
+      for (const item of aApprovisionner) {
+        await db.execute(`
+          INSERT INTO factures_approvisionnement_details (
+            idFactureAppro, idProduit, quantite, prix_achat, prix_vente, total_ht, total_ttc
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+          idFactureAppro, item.idProduit, item.qte_reappro,
+          item.prix_achat, item.prix_vente,
+          item.prix_achat * item.qte_reappro,
+          item.prix_achat * item.qte_reappro * 1.18,
+        ]);
+      }
+
+      await db.execute(
+        `UPDATE decomptes SET id_facture_approvisionnement = ? WHERE idDecompte = ?`,
+        [idFactureAppro, savedDecompteId]
+      );
+
+      // Facture revendeur
+      const codeFactureRev = `FACT-REV-${savedCodeRecu}`;
+      await db.execute(`
+        INSERT INTO factures_revendeur (
+          idCommande, idRevendeur, code_facture, montant_ht, montant_ttc, commission, statut
+        ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
+      `, [idCommande, selectedClientId, codeFactureRev, montantHT, montantTTC, totalCommission]);
+
+      notifications.show({
+        title: 'Réapprovisionnement effectué',
+        message: `${aApprovisionner.length} produit(s) réapprovisionné(s) — Facture ${codeFactureAppro}`,
+        color: 'green',
+      });
+
+      setReapproModalOpened(false);
+      if (onSuccess) onSuccess(); else navigate('/decomptes');
+
+    } catch (err: any) {
+      notifications.show({ title: 'Erreur réappro', message: err?.message, color: 'red' });
+    } finally {
+      setProcessingReappro(false);
+    }
+  };
+
+  // ─── Phase 2b : passer sans réapprovisionnement ───────────────────────────
+  const handlePasserSansReappro = async () => {
+    try {
+      const db = await getDb();
+      const codeCommande = `CMD-REV-${savedCodeRecu}`;
+
+      const commandeResult = await db.execute(`
+        INSERT INTO commandes (
+          code_commande, idClient, type_commande, montant_ht, montant_ttc, statut
+        ) VALUES (?, ?, 'REVENDEUR', ?, ?, 'EN_ATTENTE')
+      `, [codeCommande, selectedClientId, totalAchat, totalVente]);
+      const idCommande = Number(commandeResult.lastInsertId);
+
+      for (const detail of reapproItems) {
+        await db.execute(`
+          INSERT INTO commande_details (idCommande, idProduit, qte_commande, prix_unitaire_vente, remise)
+          VALUES (?, ?, ?, ?, 0)
+        `, [idCommande, detail.idProduit, detail.qte_decompte, detail.prix_vente]);
+      }
+
+      notifications.show({
+        title: 'Décompte sans réapprovisionnement',
+        message: `Commande ${codeCommande} créée en attente`,
+        color: 'blue',
+      });
+
+      setReapproModalOpened(false);
+      if (onSuccess) onSuccess(); else navigate('/decomptes');
+
+    } catch (err: any) {
+      notifications.show({ title: 'Erreur', message: err?.message, color: 'red' });
     }
   };
 
@@ -724,21 +777,6 @@ export default function NouveauDecompte({
         </Alert>
       )}
 
-      {produitsNonReapprovisionnes.length > 0 && (
-        <Alert icon={<IconAlertCircle size={16} />} title="Produits non reapprovisionnes" color="orange">
-          <Text size="sm">
-            Les produits suivants n'ont pas pu etre reapprovisionnes (stock principal insuffisant) :
-          </Text>
-          <Group gap="xs" mt="xs" wrap="wrap">
-            {produitsNonReapprovisionnes.map((nom, idx) => (
-              <Badge key={idx} color="orange" variant="light">{nom}</Badge>
-            ))}
-          </Group>
-          <Text size="xs" mt="xs" c="dimmed">
-            Ces produits figurent dans la commande revendeur avec le statut EN_ATTENTE.
-          </Text>
-        </Alert>
-      )}
 
       <Card withBorder radius="lg" shadow="sm" p="lg">
         <Grid>
@@ -1054,7 +1092,7 @@ export default function NouveauDecompte({
 
       {/* Boutons d'action */}
       <Group justify="flex-end" mt="md">
-        <Button variant="outline" onClick={onCancel} size="sm">
+        <Button variant="outline" onClick={handleCancel} size="sm">
           Annuler
         </Button>
         <Button
@@ -1067,7 +1105,121 @@ export default function NouveauDecompte({
           {decompteId ? 'Modifier le décompte' : 'Créer le décompte'}
         </Button>
       </Group>
+
+      {/* ── Modal réapprovisionnement ─────────────────────────────────────── */}
+      <Modal
+        opened={reapproModalOpened}
+        onClose={() => {}}
+        title={
+          <Group gap="sm">
+            <ThemeIcon color="blue" variant="light" radius="md">
+              <IconTruck size={18} />
+            </ThemeIcon>
+            <div>
+              <Text fw={700}>Réapprovisionnement</Text>
+              <Text size="xs" c="dimmed">Décompte {savedCodeRecu}</Text>
+            </div>
+          </Group>
+        }
+        size="xl"
+        withCloseButton={false}
+        closeOnClickOutside={false}
+        closeOnEscape={false}
+      >
+        <Stack gap="md">
+          <Alert color="blue" variant="light" icon={<IconTruck size={16} />}>
+            Le décompte a été enregistré. Cochez les produits à réapprovisionner
+            et ajustez les quantités selon la disponibilité.
+          </Alert>
+
+          <ScrollArea>
+            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
+                  <Table.Th c="white" w={40}></Table.Th>
+                  <Table.Th c="white">Produit</Table.Th>
+                  <Table.Th c="white" ta="center">Qté décomptée</Table.Th>
+                  <Table.Th c="white" ta="center">Stock principal</Table.Th>
+                  <Table.Th c="white" ta="center">Qté à approvisionner</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {reapproItems.map((item) => (
+                  <Table.Tr
+                    key={item.idProduit}
+                    style={!item.checked ? { opacity: 0.5 } : {}}
+                  >
+                    <Table.Td>
+                      <Checkbox
+                        checked={item.checked}
+                        onChange={(e) => updateReapproItem(item.idProduit, 'checked', e.currentTarget.checked)}
+                        disabled={item.stock_principal === 0}
+                      />
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>{item.designation}</Text>
+                      {item.stock_principal === 0 && (
+                        <Badge color="red" size="xs" variant="light">Stock principal épuisé</Badge>
+                      )}
+                    </Table.Td>
+                    <Table.Td ta="center">
+                      <Badge color="orange" variant="light">{item.qte_decompte}</Badge>
+                    </Table.Td>
+                    <Table.Td ta="center">
+                      <Badge
+                        color={item.stock_principal > 0 ? 'green' : 'red'}
+                        variant={item.stock_principal === 0 ? 'filled' : 'light'}
+                      >
+                        {item.stock_principal}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td ta="center">
+                      <NumberInput
+                        value={item.qte_reappro}
+                        onChange={(val) => updateReapproItem(item.idProduit, 'qte_reappro', Number(val) || 0)}
+                        min={0}
+                        max={item.stock_principal}
+                        disabled={!item.checked || item.stock_principal === 0}
+                        size="xs"
+                        w={80}
+                        hideControls
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+
+          <Divider />
+
+          <Group justify="space-between">
+            <Text size="sm" c="dimmed">
+              {reapproItems.filter(i => i.checked && i.qte_reappro > 0).length} produit(s) sélectionné(s)
+            </Text>
+            <Group gap="sm">
+              <Button
+                variant="outline"
+                color="gray"
+                leftSection={<IconPlayerSkipForward size={16} />}
+                onClick={handlePasserSansReappro}
+                loading={processingReappro}
+              >
+                Passer sans approvisionnement
+              </Button>
+              <Button
+                color="blue"
+                leftSection={<IconTruck size={16} />}
+                onClick={handleReapprovisionner}
+                loading={processingReappro}
+                disabled={!reapproItems.some(i => i.checked && i.qte_reappro > 0)}
+              >
+                Approvisionner les sélectionnés
+              </Button>
+            </Group>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 };
-

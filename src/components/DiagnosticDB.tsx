@@ -2311,6 +2311,65 @@ const recreateAllFinanceTables = async () => {
           </Stack>
         </Modal>
 
+        {/* Modal de reinitialisation de la base de donnees */}
+        <Modal
+          opened={resetDbOpened}
+          onClose={() => { closeResetDb(); setConfirmPassword(''); setConfirmReset(''); }}
+          title={
+            <Group>
+              <ThemeIcon color="red" size="lg" radius="xl">
+                <IconDatabaseImport size={18} />
+              </ThemeIcon>
+              <Text fw={600} size="lg" c="red">Reinitialiser la base de donnees</Text>
+            </Group>
+          }
+          size="md"
+          centered
+          overlayProps={{ blur: 3 }}
+        >
+          <Stack gap="md">
+            <Alert color="red" variant="light" icon={<IconAlertCircle size={16} />}>
+              <Text size="sm" fw={600}>Attention - action irreversible</Text>
+              <Text size="sm" mt={4}>
+                Toutes les donnees (produits, clients, ventes, stocks, etc.) seront
+                definitivement supprimees. La structure de la base sera recreee vide.
+              </Text>
+            </Alert>
+
+            <PasswordInput
+              label="Mot de passe administrateur"
+              placeholder="Entrez le mot de passe"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.currentTarget.value)}
+            />
+
+            <TextInput
+              label='Tapez "REINITIALISER" pour confirmer'
+              placeholder="REINITIALISER"
+              value={confirmReset}
+              onChange={(e) => setConfirmReset(e.currentTarget.value)}
+            />
+
+            <Group justify="flex-end" mt="md">
+              <Button
+                variant="light"
+                onClick={() => { closeResetDb(); setConfirmPassword(''); setConfirmReset(''); }}
+              >
+                Annuler
+              </Button>
+              <Button
+                color="red"
+                leftSection={<IconDatabaseImport size={16} />}
+                disabled={confirmReset !== 'REINITIALISER' || !confirmPassword}
+                loading={loading}
+                onClick={handleResetDatabase}
+              >
+                Reinitialiser
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
       </Stack>
     </Container>
   );

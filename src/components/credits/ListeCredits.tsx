@@ -102,6 +102,7 @@ export default function ListeCredits() {
     type_credit: 'AUTRE' as 'CLIENT' | 'FOURNISSEUR' | 'AUTRE',
     reference: '',
     notes: '',
+    date_echeance: '',
   });
 
   // Formulaire remboursement
@@ -183,6 +184,7 @@ export default function ListeCredits() {
     try {
       await creditRepository.createCredit({
         date_credit: new Date().toISOString(),
+        date_echeance: creditForm.date_echeance || undefined,
         designation: creditForm.designation,
         montant_total: creditForm.montant_total,
         beneficiaire: creditForm.beneficiaire,
@@ -194,8 +196,8 @@ export default function ListeCredits() {
       });
 
       notifications.show({
-        title: '✅ Succès',
-        message: 'Crédit ajouté avec succès',
+        title: 'Crédit enregistré',
+        message: 'Le crédit/créance a été ajouté avec succès',
         color: 'green',
       });
 
@@ -207,6 +209,7 @@ export default function ListeCredits() {
         type_credit: 'AUTRE',
         reference: '',
         notes: '',
+        date_echeance: '',
       });
       chargerDonnees();
     } catch (error) {
@@ -497,8 +500,8 @@ export default function ListeCredits() {
             placeholder="Type"
             clearable
             data={[
-              { value: 'CLIENT', label: '👤 Client' },
-              { value: 'FOURNISSEUR', label: '🏢 Fournisseur' },
+              { value: 'CLIENT', label: 'Vente à crédit' },
+              { value: 'FOURNISSEUR', label: 'Avance / Prêt accordé' },
               { value: 'AUTRE', label: '📌 Autre' }
             ]}
             value={typeFilter}
@@ -679,34 +682,44 @@ export default function ListeCredits() {
           />
 
           <TextInput
-            label="Bénéficiaire *"
-            placeholder="Nom du bénéficiaire"
+            label="Débiteur / Créancier *"
+            placeholder="Nom de la personne ou entité (client, ami, fournisseur...)"
+            description="Peut être n'importe qui — pas obligatoirement un client enregistré"
             value={creditForm.beneficiaire}
             onChange={(e) => setCreditForm({ ...creditForm, beneficiaire: e.target.value })}
             required
           />
 
           <Select
-            label="Type"
+            label="Nature du crédit"
+            description="Choisissez la catégorie qui correspond le mieux"
             data={[
-              { value: 'CLIENT', label: '👤 Client' },
-              { value: 'FOURNISSEUR', label: '🏢 Fournisseur' },
-              { value: 'AUTRE', label: '📌 Autre' }
+              { value: 'CLIENT', label: 'Vente à crédit (client)' },
+              { value: 'FOURNISSEUR', label: 'Avance ou prêt accordé' },
+              { value: 'AUTRE', label: 'Créance diverse / autre' },
             ]}
             value={creditForm.type_credit}
             onChange={(value) => setCreditForm({ ...creditForm, type_credit: (value as any) || 'AUTRE' })}
           />
 
           <TextInput
+            label="Date d'échéance"
+            placeholder="JJ/MM/AAAA"
+            description="Date limite de remboursement (optionnel)"
+            value={creditForm.date_echeance}
+            onChange={(e) => setCreditForm({ ...creditForm, date_echeance: e.target.value })}
+          />
+
+          <TextInput
             label="Référence"
-            placeholder="N° de facture, bon de commande..."
+            placeholder="N° de facture, bon de commande, contrat..."
             value={creditForm.reference}
             onChange={(e) => setCreditForm({ ...creditForm, reference: e.target.value })}
           />
 
           <Textarea
             label="Notes"
-            placeholder="Informations complémentaires"
+            placeholder="Contexte, conditions de remboursement, remarques..."
             value={creditForm.notes}
             onChange={(e) => setCreditForm({ ...creditForm, notes: e.target.value })}
             rows={3}
@@ -724,7 +737,7 @@ export default function ListeCredits() {
               color="blue"
               leftSection={<IconPlus size={16} />}
             >
-              Ajouter le crédit
+              Enregistrer le crédit
             </Button>
           </Group>
         </Stack>
@@ -946,7 +959,7 @@ export default function ListeCredits() {
 
           <Textarea
             label="Notes"
-            placeholder="Informations complémentaires"
+            placeholder="Notes sur ce remboursement..."
             value={remboursementForm.notes}
             onChange={(e) => setRemboursementForm({ ...remboursementForm, notes: e.target.value })}
             rows={3}
@@ -969,6 +982,8 @@ export default function ListeCredits() {
           </Group>
         </Stack>
       </Modal>
+
     </Stack>
   );
 }
+

@@ -6,6 +6,7 @@ export interface Credit {
   idCredit: number;
   code_credit: string;
   date_credit: string;
+  date_echeance?: string;
   designation: string;
   montant_total: number;
   montant_restant: number;
@@ -125,6 +126,7 @@ class CreditRepository {
 
   async createCredit(data: {
     date_credit: string;
+    date_echeance?: string;
     designation: string;
     montant_total: number;
     beneficiaire: string;
@@ -136,24 +138,22 @@ class CreditRepository {
   }): Promise<number> {
     const db = await getDb();
     const now = new Date().toISOString();
-    
-    // Générer le code crédit
-    const count = await db.select<{ count: number }[]>(`
-      SELECT COUNT(*) as count FROM credits
-    `);
+
+    const count = await db.select<{ count: number }[]>(`SELECT COUNT(*) as count FROM credits`);
     const codeCredit = `CRD-${String((count[0]?.count || 0) + 1).padStart(4, '0')}`;
 
     const result = await db.execute(`
       INSERT INTO credits (
-        code_credit, date_credit, designation, montant_total, montant_restant,
+        code_credit, date_credit, date_echeance, designation, montant_total, montant_restant,
         beneficiaire, type_credit, reference, notes, statut, idJournal, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       codeCredit,
-      data.date_credit || new Date().toISOString(),
+      data.date_credit || now,
+      data.date_echeance || null,
       data.designation,
       data.montant_total,
-      data.montant_total, // au départ, montant_restant = montant_total
+      data.montant_total,
       data.beneficiaire,
       data.type_credit || 'AUTRE',
       data.reference || null,
