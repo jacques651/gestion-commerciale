@@ -4,6 +4,9 @@ import { Modal, Text, Group, Button, Divider, Paper, Table, SimpleGrid, Badge, C
 import { IconPrinter, IconReceipt, IconCurrencyFrank } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { useReactToPrint } from "react-to-print";
+import { useTVAConfig } from "../../hooks/useTVAConfig";
+import { construireCssImpression } from "../../utils/printFormats";
+import SelecteurFormatImpression, { useFormatImpression } from "../common/SelecteurFormatImpression";
 
 interface ProduitVente {
   designation: string;
@@ -24,6 +27,8 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>(null);
   const [numReçu, setNumReçu] = useState<string>("");
+  const { tvaActive, tauxTVA } = useTVAConfig();
+  const { format, setFormat } = useFormatImpression();
 
   useEffect(() => {
     const chargerDonnees = async () => {
@@ -64,14 +69,19 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
     chargerDonnees();
   }, [vente.idVente]);
 
+  // Le format papier choisi (A4, A5, A6, ticket 80 mm...) est appliqué au
+  // moment de l'impression et le corps du reçu s'y adapte automatiquement.
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Reçu_Vente_${vente.idVente}_${new Date().toLocaleDateString()}`,
+    pageStyle: construireCssImpression({ format, racine: ".recu-body" }),
   });
 
   const totalHT = produits.reduce((sum, p) => sum + p.total_ht, 0);
   const totalTTC = produits.reduce((sum, p) => sum + p.total_ttc, 0);
-  const tva = totalTTC - totalHT;
+  // La TVA n'est affichée que si elle est activée dans les paramètres ET
+  // effectivement présente dans les montants enregistrés lors de la vente.
+  const tva = tvaActive ? Math.max(0, totalTTC - totalHT) : 0;
 
   const nombreEnLettres = (nombre: number): string => {
     if (nombre === 0) return 'zéro';
@@ -123,11 +133,6 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
   const printStyles = `
     @media print {
       .no-print { display: none !important; }
-
-      @page {
-        size: A4 portrait;
-        margin: 12mm 14mm;
-      }
 
       body, html {
         margin: 0 !important;
@@ -200,7 +205,7 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
         </Group>
       }
     >
-      <div ref={printRef}>
+      <div ref={printRef} className="tk-print">
         <Box className="recu-body" style={{ padding: '12px', backgroundColor: 'white', fontSize: '11px' }}>
 
           {/* En-tête */}
@@ -274,24 +279,26 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
           </Table>
 
           {/* Totaux */}
-          <SimpleGrid cols={3} spacing={4} mb={4}>
+          <SimpleGrid cols={tvaActive && tva > 0 ? 3 : 2} spacing={4} mb={4}>
             <Paper p={4} withBorder>
               <Flex justify="space-between" align="center">
-                <Text size="xs" fw={600}>Total HT</Text>
+                <Text size="xs" fw={600}>{tvaActive && tva > 0 ? 'Total HT' : 'Sous-total'}</Text>
                 <Text size="xs" fw={600}>{totalHT.toLocaleString()} F</Text>
               </Flex>
             </Paper>
+            {tvaActive && tva > 0 && (
             <Paper p={4} withBorder style={{ backgroundColor: '#fff3e0' }}>
               <Flex justify="space-between" align="center">
-                <Text size="xs" fw={600} c="orange">TVA (18%)</Text>
+                <Text size="xs" fw={600} c="orange">{`TVA (${tauxTVA}%)`}</Text>
                 <Text size="xs" fw={600} c="orange">{tva.toLocaleString()} F</Text>
               </Flex>
             </Paper>
+            )}
             <Paper p={4} withBorder style={{ backgroundColor: '#e8f5e9', borderColor: '#4caf50' }}>
               <Flex justify="space-between" align="center">
                 <Group gap={4}>
                   <IconCurrencyFrank size={14} color="#2e7d32" />
-                  <Text size="xs" fw={700} c="green.8">Total TTC</Text>
+                  <Text size="xs" fw={700} c="green.8">{tvaActive && tva > 0 ? 'Total TTC' : 'Total à payer'}</Text>
                 </Group>
                 <Text size="sm" fw={800} c="green.8">{totalTTC.toLocaleString()} F</Text>
               </Flex>
@@ -334,11 +341,20 @@ const ReçuVente: React.FC<ReçuVenteProps> = ({ vente, onClose }) => {
       <Divider />
 
       {/* Boutons */}
-      <Group justify="flex-end" p="xs" className="no-print" gap="xs">
+      <Group justify="space-between" align="flex-end" p="xs" className="no-print" gap="xs" wrap="wrap">
+        <SelecteurFormatImpression
+          format={format}
+          onFormatChange={setFormat}
+          avecOrientation={false}
+          size="xs"
+          label="Format"
+        />
+        <Group gap="xs">
         <Button size="compact-xs" variant="subtle" onClick={onClose}>Fermer</Button>
         <Button size="compact-xs" onClick={handlePrint} leftSection={<IconPrinter size={14} />} color="blue">
           Imprimer
         </Button>
+        </Group>
       </Group>
 
       <style dangerouslySetInnerHTML={{ __html: printStyles }} />

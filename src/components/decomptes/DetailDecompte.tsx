@@ -137,7 +137,7 @@ export default function DetailDecompte() {
   }
 
   // Récupérer le taux de commission du décompte (ou 60% par défaut)
-  const tauxCommission = decompte.taux_commission || 60;
+  const tauxCommission = decompte.taux_commission ?? 60;
 
   // Calcul des totaux avec gestion des valeurs null/undefined
   const totalVente = decompte.details?.reduce((sum: number, d: any) => {
@@ -194,14 +194,9 @@ export default function DetailDecompte() {
     <>
       <Stack gap="md" p="md">
         {/* En-tête compact */}
-        <Paper
+        <Paper className="tk-page-tools"
           p="md"
-          radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            borderBottom: '3px solid #e94560',
-          }}
-        >
+          radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Group gap="md">
               <ThemeIcon size={40} radius="md" color="white" variant="light">
@@ -253,7 +248,7 @@ export default function DetailDecompte() {
           </div>
 
           {/* Informations générales compactes */}
-          <Card withBorder radius="md" shadow="sm" p="sm">
+          <Card className="tk-detail-section" withBorder radius="md" shadow="sm" p="sm">
             <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="xs">
               <Group gap="xs">
                 <IconFileInvoice size={14} color="#4a6cf7" />
@@ -301,7 +296,7 @@ export default function DetailDecompte() {
           </Card>
 
           {/* Tableau des produits compact */}
-          <Card withBorder radius="md" shadow="sm" p="sm" mt="xs">
+          <Card className="tk-detail-section" withBorder radius="md" shadow="sm" p="sm" mt="xs">
             <Flex justify="space-between" align="center" mb="xs">
               <Group gap="xs">
                 <IconPackage size={14} color="#4a6cf7" />
@@ -315,14 +310,14 @@ export default function DetailDecompte() {
               <Table striped highlightOnHover withColumnBorders verticalSpacing="xs" horizontalSpacing="xs" style={{ fontSize: '12px' }}>
                 <Table.Thead>
                   <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                    <Table.Th c="white" w={30}>#</Table.Th>
-                    <Table.Th c="white">Produit</Table.Th>
-                    <Table.Th c="white" ta="center" w={50}>Qté</Table.Th>
-                    <Table.Th c="white" ta="right" w={80}>PA</Table.Th>
-                    <Table.Th c="white" ta="right" w={80}>PV</Table.Th>
-                    <Table.Th c="white" ta="right" w={90}>Bénéf</Table.Th>
-                    <Table.Th c="white" ta="right" w={90}>Total</Table.Th>
-                    <Table.Th c="white" ta="right" w={90}>Commission</Table.Th>
+                    <Table.Th w={30}>#</Table.Th>
+                    <Table.Th>Produit</Table.Th>
+                    <Table.Th ta="center" w={50}>Qté</Table.Th>
+                    <Table.Th ta="right" w={80}>PA</Table.Th>
+                    <Table.Th ta="right" w={80}>PV</Table.Th>
+                    <Table.Th ta="right" w={90}>Bénéf</Table.Th>
+                    <Table.Th ta="right" w={90}>Total</Table.Th>
+                    <Table.Th ta="right" w={90}>Commission</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -362,15 +357,15 @@ export default function DetailDecompte() {
           </Card>
 
           {/* Récapitulatif compact */}
-          <Card withBorder radius="md" shadow="sm" p="sm" mt="xs">
+          <Card className="tk-detail-section" withBorder radius="md" shadow="sm" p="sm" mt="xs">
             <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="xs">
-              <Paper p="xs" withBorder bg="gray.0">
+              <Paper className="tk-detail-tile" p="xs" withBorder bg="gray.0">
                 <Flex justify="space-between" align="center">
                   <Text size="xs" c="dimmed">Total Achat</Text>
                   <Text size="xs" fw={600}>{totalAchat.toLocaleString()} F</Text>
                 </Flex>
               </Paper>
-              <Paper p="xs" withBorder bg="gray.0">
+              <Paper className="tk-detail-tile" p="xs" withBorder bg="gray.0">
                 <Flex justify="space-between" align="center">
                   <Text size="xs" c="dimmed">Total Vente</Text>
                   <Text size="xs" fw={600}>{totalVente.toLocaleString()} F</Text>

@@ -15,8 +15,10 @@ import {
   IconUser, IconCash, IconList
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
+import { useAuth } from '../../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
 import { journalCaisseService } from '../../services/journalCaisseService';
+import TkFilters from '../TkFilters';
 
 interface ChargeFonctionnement {
   idCharge: number;
@@ -25,7 +27,7 @@ interface ChargeFonctionnement {
   designation: string;
   montant: number;
   beneficiaire: string;
-  categorie_charge: 'EAU' | 'ELECTRICITE' | 'LOYER' | 'SALAIRE' | 'TRANSPORT' | 'COMMUNICATION' | 'AUTRE';
+  categorie_charge: string;
   reference_paiement: string;
   idJournal: number;
   notes: string;
@@ -50,7 +52,8 @@ const categoriesCharges = [
 ];
 
 const getCategorieInfo = (code: string) => {
-  return categoriesCharges.find(c => c.value === code) || categoriesCharges[6];
+  return categoriesCharges.find(c => c.value === code)
+    || { value: code, label: code || 'Autre', icon: '📌', color: 'gray' };
 };
 
 // ✅ Fonction de formatage de date personnalisée (sans date-fns)
@@ -73,6 +76,7 @@ const formatDateCustom = (dateStr: string): string => {
 };
 
 export const ChargesFonctionnement: React.FC = () => {
+  const { user } = useAuth();
   const [charges, setCharges] = useState<ChargeFonctionnement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -87,6 +91,10 @@ export const ChargesFonctionnement: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<ChargeFonctionnement | null>(null);
   const [soldeActuel, setSoldeActuel] = useState(0);
+  const [categoriesList, setCategoriesList] = useState(categoriesCharges);
+  const [newCatModalOpen, setNewCatModalOpen] = useState(false);
+  const [newCatLabel, setNewCatLabel] = useState('');
+  const [addingCat, setAddingCat] = useState(false);
 
   const [formData, setFormData] = useState({
     designation: '',
@@ -145,16 +153,17 @@ export const ChargesFonctionnement: React.FC = () => {
       setCharges(result || []);
 
       // Calculer les récapitulatifs
-      const totalCharges = result.reduce((sum, c) => sum + c.montant, 0);
+      const actives = result.filter(c => !(c as any).est_annule);
+      const totalCharges = actives.reduce((sum, c) => sum + c.montant, 0);
       const today = new Date().toISOString().split('T')[0];
       const currentMonth = today.substring(0, 7);
       
-      const chargesJour = result.filter(c => c.date_charge.startsWith(today));
-      const chargesMois = result.filter(c => c.date_charge.startsWith(currentMonth));
+      const chargesJour = actives.filter(c => c.date_charge.startsWith(today));
+      const chargesMois = actives.filter(c => c.date_charge.startsWith(currentMonth));
       
       const parCategorie: Record<string, number> = {};
       for (const c of categoriesCharges) {
-        const total = result.filter(r => r.categorie_charge === c.value).reduce((sum, r) => sum + r.montant, 0);
+        const total = actives.filter(r => r.categorie_charge === c.value).reduce((sum, r) => sum + r.montant, 0);
         if (total > 0) {
           parCategorie[c.value] = total;
         }
@@ -182,8 +191,55 @@ export const ChargesFonctionnement: React.FC = () => {
     }
   };
 
+  const loadCategoriesCharges = async () => {
+    try {
+      const db = await getDb();
+      const rows = await db.select<any[]>(
+        'SELECT code_categorie, libelle FROM categories_charges WHERE est_actif = 1 ORDER BY libelle'
+      );
+      const merged = [...categoriesCharges];
+      for (const r of rows) {
+        if (!merged.find(c => c.value === r.code_categorie)) {
+          merged.push({ value: r.code_categorie, label: r.libelle, icon: '📌', color: 'gray' });
+        }
+      }
+      setCategoriesList(merged);
+    } catch (e) {
+      console.error('Erreur chargement catégories de charge:', e);
+    }
+  };
+
+  const handleAddCategorie = async () => {
+    const libelle = newCatLabel.trim();
+    if (!libelle) {
+      notifications.show({ title: 'Erreur', message: 'Le nom de la catégorie est requis', color: 'red' });
+      return;
+    }
+    setAddingCat(true);
+    try {
+      const db = await getDb();
+      // Générer un code à partir du libellé (sans accents, MAJUSCULES)
+      const code = libelle.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || 'CAT_' + Date.now();
+      await db.execute(
+        'INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES (?, ?)',
+        [code, libelle]
+      );
+      await loadCategoriesCharges();
+      setFormData(prev => ({ ...prev, categorie_charge: code }));
+      setNewCatModalOpen(false);
+      setNewCatLabel('');
+      notifications.show({ title: 'Succès', message: `Catégorie « ${libelle} » ajoutée`, color: 'green' });
+    } catch (e) {
+      notifications.show({ title: 'Erreur', message: "Impossible d'ajouter la catégorie", color: 'red' });
+    } finally {
+      setAddingCat(false);
+    }
+  };
+
   useEffect(() => {
     chargerCharges();
+    loadCategoriesCharges();
   }, []);
 
   useEffect(() => {
@@ -215,18 +271,8 @@ export const ChargesFonctionnement: React.FC = () => {
     try {
       const db = await getDb();
 
-      // Vérifier le solde avant d'ajouter
-      const soldeAvant = await journalCaisseService.getSoldeActuel();
-      if (formData.montant > soldeAvant) {
-        notifications.show({
-          title: '❌ Solde insuffisant',
-          message: `Solde actuel: ${soldeAvant.toLocaleString()} FCFA. La charge de ${formData.montant.toLocaleString()} FCFA dépasse le solde disponible.`,
-          color: 'red'
-        });
-        setSaving(false);
-        return;
-      }
-
+      // Une charge de fonctionnement est une dépense réelle : elle doit
+      // toujours pouvoir être enregistrée, même si le solde est bas ou nul.
       if (editing) {
         await db.execute(`
           UPDATE charges_fonctionnement
@@ -241,6 +287,16 @@ export const ChargesFonctionnement: React.FC = () => {
           formData.notes.trim(),
           editing.idCharge
         ]);
+
+        // Répercuter la modification sur l'écriture de caisse liée (montant/libellé)
+        // puis recalculer les soldes, pour que la caisse reste cohérente.
+        if ((editing as any).idJournal) {
+          await db.execute(
+            `UPDATE journal_caisse SET designation = ?, montant = ? WHERE idJournal = ?`,
+            [formData.designation.trim(), formData.montant, (editing as any).idJournal]
+          );
+          try { await journalCaisseService.recomputeSoldeApres(); } catch {}
+        }
 
         notifications.show({
           title: '✅ Succès',
@@ -304,34 +360,58 @@ export const ChargesFonctionnement: React.FC = () => {
   };
 
   const handleDelete = async (idCharge: number) => {
-    if (!await confirm('Voulez-vous vraiment supprimer cette charge ?', 'Suppression')) return;
+    if (!await confirm('Annuler cette charge ? Son impact sur la caisse sera neutralisé et la charge restera visible, marquée « Annulé ».', 'Annulation')) return;
 
     try {
       const db = await getDb();
-      
-      const charge = await db.select<ChargeFonctionnement[]>(`
-        SELECT idJournal, designation, montant FROM charges_fonctionnement WHERE idCharge = ?
+
+      const rows = await db.select<any[]>(`
+        SELECT idJournal, designation, montant, COALESCE(est_annule, 0) AS est_annule
+        FROM charges_fonctionnement WHERE idCharge = ?
       `, [idCharge]);
-      
-      if (charge.length > 0 && charge[0].idJournal) {
-        await db.execute(`DELETE FROM journal_caisse WHERE idJournal = ?`, [charge[0].idJournal]);
-        console.log(`✅ Entrée journal ${charge[0].idJournal} supprimée`);
+      const charge = rows[0];
+      if (!charge) return;
+      if (charge.est_annule) {
+        notifications.show({ title: 'Info', message: 'Charge déjà annulée', color: 'blue' });
+        return;
       }
-      
-      await db.execute(`DELETE FROM charges_fonctionnement WHERE idCharge = ?`, [idCharge]);
-      
+
+      // Neutraliser l'impact caisse SANS supprimer l'écriture d'origine (la
+      // suppression violerait la clé étrangère de charges_fonctionnement).
+      // On poste une ENTREE de contrepassation du même montant : l'entrée annule
+      // la sortie, le solde revient à sa valeur correcte, la piste d'audit reste
+      // complète (sortie + entrée toutes deux visibles).
+      try {
+        await journalCaisseService.ajouterEntree({
+          categorie: 'AUTRE_ENTREE',
+          designation: `Annulation charge — ${charge.designation || ''}`.trim(),
+          montant: Number(charge.montant) || 0,
+          notes: `CONTREPASSATION CHARGE #${idCharge}`,
+        });
+      } catch (e) {
+        console.error('Contrepassation charge:', e);
+      }
+
+      // Marquer la charge annulée (conservée et tracée, exclue des totaux).
+      await db.execute(
+        `UPDATE charges_fonctionnement
+         SET est_annule = 1, date_annulation = datetime('now'), annule_par = ?
+         WHERE idCharge = ?`,
+        [user?.nom || null, idCharge]
+      );
+
       notifications.show({
-        title: '✅ Succès',
-        message: `Charge "${charge[0]?.designation || ''}" supprimée avec succès`,
-        color: 'green'
+        title: '✅ Charge annulée',
+        message: `Charge "${charge[0]?.designation || ''}" annulée (impact caisse neutralisé)`,
+        color: 'orange'
       });
-      
+
       await chargerCharges();
     } catch (error) {
-      console.error('Erreur suppression:', error);
+      console.error('Erreur annulation:', error);
       notifications.show({
         title: '❌ Erreur',
-        message: 'Impossible de supprimer la charge',
+        message: "Impossible d'annuler la charge",
         color: 'red'
       });
     }
@@ -364,7 +444,7 @@ export const ChargesFonctionnement: React.FC = () => {
   return (
     <Stack gap="lg" p="md">
       {/* EN-TÊTE */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+      <Paper className="tk-page-tools" p="xl" radius="lg">
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
             <ThemeIcon size={45} radius="md" color="red" variant="filled">
@@ -383,6 +463,18 @@ export const ChargesFonctionnement: React.FC = () => {
               onClick={chargerCharges}
             >
               Actualiser
+            </Button>
+            <Button
+              variant="filled"
+              color="red"
+              leftSection={<IconPlus size={18} />}
+              onClick={() => {
+                setEditing(null);
+                setFormData({ designation: '', montant: 0, beneficiaire: '', categorie_charge: 'AUTRE', reference_paiement: '', notes: '' });
+                setModalOpened(true);
+              }}
+            >
+              Ajouter une charge
             </Button>
           </Group>
         </Flex>
@@ -447,6 +539,7 @@ export const ChargesFonctionnement: React.FC = () => {
       </Paper>
 
       {/* FILTRES */}
+      <TkFilters>
       <Card withBorder radius="lg" shadow="sm" p="sm">
         <Grid align="flex-end">
           <Grid.Col span={3}>
@@ -467,6 +560,7 @@ export const ChargesFonctionnement: React.FC = () => {
               value={selectedCategorie}
               onChange={setSelectedCategorie}
               clearable
+              searchable
               size="xs"
             />
           </Grid.Col>
@@ -532,6 +626,7 @@ export const ChargesFonctionnement: React.FC = () => {
           </Grid.Col>
         </Grid>
       </Card>
+      </TkFilters>
 
       {/* RÉCAPITULATIF PAR CATÉGORIE */}
       {recap && Object.keys(recap.par_categorie).length > 0 && (
@@ -561,14 +656,14 @@ export const ChargesFonctionnement: React.FC = () => {
         <ScrollArea h={450}>
           <Table striped highlightOnHover verticalSpacing="xs">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                <Table.Th c="white" w={40}>N°</Table.Th>
-                <Table.Th c="white">Date</Table.Th>
-                <Table.Th c="white">Désignation</Table.Th>
-                <Table.Th c="white">Bénéficiaire</Table.Th>
-                <Table.Th c="white">Catégorie</Table.Th>
-                <Table.Th c="white" ta="right">Montant</Table.Th>
-                <Table.Th c="white" ta="center" w={120}>Actions</Table.Th>
+              <Table.Tr>
+                <Table.Th w={40}>N°</Table.Th>
+                <Table.Th>Date</Table.Th>
+                <Table.Th>Désignation</Table.Th>
+                <Table.Th>Bénéficiaire</Table.Th>
+                <Table.Th>Catégorie</Table.Th>
+                <Table.Th ta="right">Montant</Table.Th>
+                <Table.Th ta="center" w={120}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -582,12 +677,16 @@ export const ChargesFonctionnement: React.FC = () => {
                 paginatedCharges.map((charge, idx) => {
                   const num = (currentPage - 1) * itemsPerPage + idx + 1;
                   const info = getCategorieInfo(charge.categorie_charge);
+                  const estAnnulee = !!(charge as any).est_annule;
                   return (
-                    <Table.Tr key={charge.idCharge}>
+                    <Table.Tr key={charge.idCharge} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                       <Table.Td fw={600}>{num}</Table.Td>
                       <Table.Td>{formatDate(charge.date_charge)}</Table.Td>
                       <Table.Td>
-                        <Text fw={500} size="xs">{charge.designation}</Text>
+                        <Group gap={6}>
+                          <Text fw={500} size="xs">{charge.designation}</Text>
+                          {estAnnulee && <Badge color="orange" variant="filled" size="xs">Annulé</Badge>}
+                        </Group>
                         {charge.reference_paiement && (
                           <Text size="xs" c="dimmed">Réf: {charge.reference_paiement}</Text>
                         )}
@@ -631,11 +730,12 @@ export const ChargesFonctionnement: React.FC = () => {
                               <IconEdit size={14} />
                             </ActionIcon>
                           </Tooltip>
-                          <Tooltip label="Supprimer">
+                          <Tooltip label={estAnnulee ? 'Charge déjà annulée' : 'Annuler la charge'}>
                             <ActionIcon
                               variant="light"
                               color="red"
                               size="sm"
+                              disabled={estAnnulee}
                               onClick={() => handleDelete(charge.idCharge)}
                             >
                               <IconTrash size={14} />
@@ -679,26 +779,31 @@ export const ChargesFonctionnement: React.FC = () => {
             Solde actuel: <strong>{formatMontant(soldeActuel)} FCFA</strong>
           </Alert>
 
-          <TextInput
-            label="Désignation *"
-            placeholder="Ex: Achat fournitures bureau"
-            value={formData.designation}
-            onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-            required
-            size="xs"
-          />
-
-          <NumberInput
-            label="Montant *"
-            placeholder="0"
-            value={formData.montant}
-            onChange={(val) => setFormData({ ...formData, montant: typeof val === 'number' ? val : 0 })}
-            min={0}
-            step={100}
-            required
-            leftSection="FCFA"
-            size="xs"
-          />
+          <Group align="flex-end" gap="xs" wrap="nowrap">
+            <TextInput
+              style={{ flex: 1 }}
+              label="Désignation *"
+              placeholder="Ex: Achat fournitures bureau"
+              value={formData.designation}
+              onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
+              required
+              size="xs"
+            />
+            <NumberInput
+              w={130}
+              label="Montant *"
+              placeholder="0"
+              value={formData.montant || ''}
+              onChange={(val) => setFormData({ ...formData, montant: typeof val === 'number' ? val : 0 })}
+              min={0}
+              step={100}
+              required
+              hideControls
+              thousandSeparator=" "
+              size="xs"
+              styles={{ input: { textAlign: 'right' } }}
+            />
+          </Group>
 
           <TextInput
             label="Bénéficiaire *"
@@ -709,14 +814,28 @@ export const ChargesFonctionnement: React.FC = () => {
             size="xs"
           />
 
-          <Select
-            label="Catégorie"
-            placeholder="Sélectionner une catégorie"
-            data={categoriesCharges.map(c => ({ value: c.value, label: c.label }))}
-            value={formData.categorie_charge}
-            onChange={(value) => setFormData({ ...formData, categorie_charge: value || 'AUTRE' })}
-            size="xs"
-          />
+          <Group align="flex-end" gap="xs" wrap="nowrap">
+            <Select
+              style={{ flex: 1 }}
+              label="Catégorie"
+              placeholder="Sélectionner une catégorie"
+              data={categoriesList.map(c => ({ value: c.value, label: c.label }))}
+              value={formData.categorie_charge}
+              onChange={(value) => setFormData({ ...formData, categorie_charge: value || 'AUTRE' })}
+              size="xs"
+              searchable
+            />
+            <Tooltip label="Ajouter une catégorie">
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => setNewCatModalOpen(true)}
+              >
+                Catégorie
+              </Button>
+            </Tooltip>
+          </Group>
 
           <TextInput
             label="Référence de paiement"
@@ -811,19 +930,39 @@ export const ChargesFonctionnement: React.FC = () => {
             {selectedCharge.notes && (
               <div>
                 <Text size="xs" c="dimmed">Notes</Text>
-                <Text size="sm">{selectedCharge.notes}</Text>
+                <Text>{selectedCharge.notes}</Text>
               </div>
             )}
-
-            <Divider />
-
-            <Group justify="flex-end">
-              <Button variant="outline" onClick={() => setDetailsModalOpened(false)} size="xs">
-                Fermer
-              </Button>
-            </Group>
           </Stack>
         )}
+      </Modal>
+
+      {/* Modal : ajouter une catégorie de charge */}
+      <Modal
+        opened={newCatModalOpen}
+        onClose={() => { setNewCatModalOpen(false); setNewCatLabel(''); }}
+        title="Nouvelle catégorie de charge"
+        size="sm"
+        centered
+      >
+        <Stack>
+          <TextInput
+            label="Nom de la catégorie"
+            placeholder="Ex : Maintenance, Fournitures, Impôts…"
+            value={newCatLabel}
+            onChange={(e) => setNewCatLabel(e.currentTarget.value)}
+            data-autofocus
+            required
+          />
+          <Group justify="flex-end">
+            <Button variant="light" color="gray" onClick={() => { setNewCatModalOpen(false); setNewCatLabel(''); }}>
+              Annuler
+            </Button>
+            <Button onClick={handleAddCategorie} loading={addingCat} leftSection={<IconPlus size={16} />}>
+              Ajouter
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );

@@ -29,6 +29,7 @@ import {
 } from '@tabler/icons-react';
 import * as XLSX from 'xlsx';
 import { productRepository, CreateProductInput } from '../../database/repositories/productRepository';
+import { getDb } from '../../database/db';
 
 interface ModalImportProduitsProps {
   opened: boolean;
@@ -38,6 +39,7 @@ interface ModalImportProduitsProps {
 
 const EXPECTED_COLUMNS = [
   { key: 'designation', label: 'Désignation', required: true },
+  { key: 'reference', label: 'Référence', required: false },
   { key: 'categorie', label: 'Catégorie', required: false },
   { key: 'unite_base', label: 'Unité', required: false },
   { key: 'prix_achat_base', label: 'Prix achat', required: false },
@@ -67,6 +69,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
     const headers = EXPECTED_COLUMNS.map(col => col.label).join(',');
     const exampleRow = [
       'Disque dur SSD 1To',
+      'REF-001',
       'Informatique',
       'pièce',
       '25000',
@@ -92,7 +95,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
     URL.revokeObjectURL(url);
     notifications.show({ 
       title: '✅ Template téléchargé', 
-      message: '9 colonnes disponibles - Seule Désignation est obligatoire', 
+      message: '10 colonnes disponibles - Seule Désignation est obligatoire', 
       color: 'green' 
     });
   };
@@ -109,6 +112,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
         EXPECTED_COLUMNS.map(col => col.label),
         [
           'Disque dur SSD 1To',
+          'REF-001',
           'Informatique',
           'pièce',
           '25000',
@@ -150,6 +154,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
       .replace(/[*_]/g, '');
 
     if (h === 'designation') return 'designation';
+    if (h === 'reference' || h === 'ref') return 'reference';
     if (h === 'categorie') return 'categorie';
     if (h === 'unite' || h === 'unitebase') return 'unite_base';
     if (h === 'prixachat') return 'prix_achat_base';
@@ -224,9 +229,24 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
     });
   };
 
+  // Conversion numérique tolérante : accepte "25 000", "25,5", "25000 F", etc.
+  const parseNum = (v: any): number => {
+    if (v === undefined || v === null || String(v).trim() === '') return 0;
+    const cleaned = String(v).replace(/\s/g, '').replace(/[^\d.,-]/g, '').replace(',', '.');
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  };
+
   const validateAndCompleteData = async (data: any[]): Promise<{ valid: any[]; errors: any[] }> => {
     const valid: any[] = [];
     const errors: any[] = [];
+
+    // Codes propres et uniques : PROD-XXXX, à la suite du plus grand PROD- existant
+    const dbSeq = await getDb();
+    const seqRes = await dbSeq.select<any[]>(
+      `SELECT COALESCE(MAX(CAST(substr(code_produit, 6) AS INTEGER)), 0) as maxseq FROM products WHERE code_produit LIKE 'PROD-%'`
+    );
+    const baseSeq = Number(seqRes[0]?.maxseq || 0);
 
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
@@ -236,34 +256,30 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
         continue;
       }
 
-      const timestamp = Date.now();
-      const random = Math.floor(Math.random() * 10000);
-      const codeProduit = timestamp * 10000 + random;
+      // Code produit propre et unique : PROD-XXXX (l'index évite toute collision dans le lot)
+      const codeProduit = `PROD-${String(baseSeq + i + 1).padStart(4, '0')}`;
 
       // Valeurs par défaut
       const uniteBase = row.unite_base || 'pièce';
-      const seuilAlerte = row.seuil_alerte ? parseFloat(String(row.seuil_alerte)) : 10;
-      const prixAchat = row.prix_achat_base ? parseFloat(String(row.prix_achat_base)) : 0;
-      const prixVenteDetail = row.prix_vente_detail ? parseFloat(String(row.prix_vente_detail)) : 0;
-      const prixVenteGros = row.prix_vente_gros ? parseFloat(String(row.prix_vente_gros)) : 0;
-      const qteStock = row.qte_stock ? parseFloat(String(row.qte_stock)) : 0;
+      const seuilAlerte = row.seuil_alerte !== undefined && String(row.seuil_alerte).trim() !== '' ? parseNum(row.seuil_alerte) : 5;
+      const prixAchat = parseNum(row.prix_achat_base);
+      const prixVenteDetail = parseNum(row.prix_vente_detail);
+      const prixVenteGros = parseNum(row.prix_vente_gros);
+      const qteStock = parseNum(row.qte_stock);
       const methodeGestion = row.methode_gestion_stock || 'PMP';
-
-      // Si seul le prix d'achat est fourni, on utilise une marge par défaut
-      const prixVenteFinal = prixVenteDetail > 0 ? prixVenteDetail : (prixAchat > 0 ? prixAchat + 5000 : 0);
-      const prixGrosFinal = prixVenteGros > 0 ? prixVenteGros : Math.round(prixVenteFinal * 0.9);
 
       const product: CreateProductInput = {
         code_produit: codeProduit,
+        reference: (row.reference ? String(row.reference).trim() : '') || undefined,
         designation: row.designation.trim(),
         categorie: row.categorie || '',
         unite_base: uniteBase,
         prix_achat_base: prixAchat,
-        prix_vente_detail: prixVenteFinal,
-        prix_vente_gros: prixGrosFinal,
+        prix_vente_detail: prixVenteDetail,
+        prix_vente_gros: prixVenteGros,
         seuil_alerte: seuilAlerte,
         qte_stock: qteStock,
-        prix_moyen_pondere: 0,
+        prix_moyen_pondere: prixAchat,
         methode_gestion_stock: methodeGestion
       };
 
@@ -418,7 +434,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
         {step === 1 && (
           <>
             <Alert color="green" variant="light" icon={<IconAutomation size={18} />}>
-              <Text fw={600}>📋 9 colonnes disponibles</Text>
+              <Text fw={600}>📋 10 colonnes disponibles</Text>
               <Text size="sm">Seule la colonne <strong>Désignation</strong> est obligatoire.</Text>
             </Alert>
 
@@ -461,10 +477,10 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
               <Card withBorder p="md" radius="md" bg="green.0">
                 <Text fw={600} mb="xs">🤖 Valeurs par défaut</Text>
                 <Text size="sm">• Unité : "pièce"</Text>
-                <Text size="sm">• Seuil alerte : 10</Text>
+                <Text size="sm">• Seuil alerte : 5</Text>
                 <Text size="sm">• Méthode de gestion : "PMP"</Text>
                 <Text size="sm">• Code produit : Généré auto</Text>
-                <Text size="sm">• Prix vente = Prix achat + 5000 F (si non renseigné)</Text>
+                <Text size="sm">• Prix achat / vente / gros : 0 si non renseigné</Text>
               </Card>
             </SimpleGrid>
           </>
@@ -517,6 +533,7 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
                       <Table.Thead>
                         <Table.Tr>
                           <Table.Th>Désignation</Table.Th>
+                          <Table.Th>Référence</Table.Th>
                           <Table.Th>Catégorie</Table.Th>
                           <Table.Th>Unité</Table.Th>
                           <Table.Th>Prix achat</Table.Th>
@@ -531,6 +548,9 @@ export const ModalImportProduits: React.FC<ModalImportProduitsProps> = ({
                           <Table.Tr key={idx}>
                             <Table.Td>
                               <Text fw={500} size="sm">{item.designation}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{item.reference || '-'}</Text>
                             </Table.Td>
                             <Table.Td>
                               <Text size="sm">{item.categorie || '-'}</Text>

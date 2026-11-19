@@ -129,14 +129,9 @@ export const GestionDecomptes: React.FC = () => {
   return (
     <Stack gap="lg" p="md">
       {/* EN-TÊTE */}
-      <Paper
+      <Paper className="tk-page-tools"
         p="xl"
-        radius="lg"
-        style={{
-          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            borderBottom: '3px solid #e94560',
-        }}
-      >
+        radius="lg">
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
             <ThemeIcon size={45} radius="md" color="red" variant="filled">

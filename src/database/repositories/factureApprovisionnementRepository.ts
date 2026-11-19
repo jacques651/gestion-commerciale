@@ -1,5 +1,12 @@
 // src/database/repositories/factureApprovisionnementRepository.ts
 import { getDb } from '../db';
+import { tvaService } from '../../services/tvaService';
+
+/** Coefficient TVA effectif (0 si désactivée dans les paramètres). */
+async function coefTVA(): Promise<number> {
+  const c = await tvaService.get();
+  return c.active ? c.taux / 100 : 0;
+}
 
 export interface FactureApprovisionnement {
   idFactureAppro: number;
@@ -53,7 +60,8 @@ export const factureApprovisionnementRepository = {
         }
       }
       
-      montantTTC = montantHT * 1.18;
+      const kTVA = await coefTVA();
+      montantTTC = montantHT * (1 + kTVA);
 
       // Générer le code facture
       const codeFacture = await this.generateCode();
@@ -101,7 +109,7 @@ export const factureApprovisionnementRepository = {
             detail.prix_achat,
             detail.prix_vente,
             detail.prix_achat * detail.quantiteReapprovisionnee,
-            detail.prix_achat * detail.quantiteReapprovisionnee * 1.18
+            detail.prix_achat * detail.quantiteReapprovisionnee * (1 + kTVA)
           ]);
         }
       }

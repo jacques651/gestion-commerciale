@@ -1,5 +1,6 @@
 // src/pages/revendeurs/DashboardRevendeurs.tsx
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Card,
   Grid,
@@ -12,9 +13,10 @@ import {
   Badge,
   Center,
   Tooltip,
-  ThemeIcon
+  ThemeIcon,
+  Alert
 } from "@mantine/core";
-import { IconInfoCircle, IconBuildingStore, IconTruck, IconCash } from "@tabler/icons-react";
+import { IconInfoCircle, IconBuildingStore, IconTruck, IconCash, IconAlertCircle } from "@tabler/icons-react";
 import { getDb } from "../../../database/db";
 
 interface DashboardRevendeur {
@@ -29,9 +31,12 @@ interface DashboardRevendeur {
   commission_totale: number;      // Commissions dues au revendeur
   ca_genere: number;              // CA généré pour l'entreprise (factures_revendeur)
   taux_commission_moyen: number;  // Commission moyenne en %
+  decomptes_a_traiter: number;
+  stock_bas: number;
 }
 
 export default function DashboardRevendeurs() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardRevendeur[]>([]);
 
@@ -63,7 +68,22 @@ export default function DashboardRevendeurs() {
             SELECT COUNT(*)
             FROM decomptes d
             WHERE d.idClient = c.idClient
+              AND LOWER(COALESCE(d.statut, 'brouillon')) <> 'annule'
           ) AS nb_decomptes,
+
+          (
+            SELECT COUNT(*) FROM decomptes d
+            WHERE d.idClient = c.idClient
+              AND LOWER(COALESCE(d.statut, 'brouillon')) IN ('brouillon', 'en_attente')
+          ) AS decomptes_a_traiter,
+
+          (
+            SELECT COUNT(*) FROM stock_revendeur sr
+            INNER JOIN products p ON p.idProduit = sr.idProduit
+            WHERE sr.idRevendeur = c.idClient
+              AND sr.qte_stock > 0
+              AND sr.qte_stock <= COALESCE(NULLIF(p.seuil_alerte, 0), 5)
+          ) AS stock_bas,
           
           -- Stock total (quantité)
           (
@@ -85,6 +105,7 @@ export default function DashboardRevendeurs() {
             SELECT COALESCE(SUM(d.montant_vente), 0)
             FROM decomptes d
             WHERE d.idClient = c.idClient
+              AND LOWER(COALESCE(d.statut, 'brouillon')) <> 'annule'
           ) AS ventes_revendeur,
           
           -- ✅ Commissions dues au revendeur
@@ -92,6 +113,7 @@ export default function DashboardRevendeurs() {
             SELECT COALESCE(SUM(d.montant_commission), 0)
             FROM decomptes d
             WHERE d.idClient = c.idClient
+              AND LOWER(COALESCE(d.statut, 'brouillon')) <> 'annule'
           ) AS commission_totale,
           
           -- ✅ CA généré pour l'entreprise (factures revendeur)
@@ -110,6 +132,7 @@ export default function DashboardRevendeurs() {
             END
             FROM decomptes d
             WHERE d.idClient = c.idClient
+              AND LOWER(COALESCE(d.statut, 'brouillon')) <> 'annule'
           ) AS taux_commission_moyen
 
         FROM clients c
@@ -132,6 +155,8 @@ export default function DashboardRevendeurs() {
   const totalVentesRevendeur = stats.reduce((sum, item) => sum + Number(item.ventes_revendeur || 0), 0);
   const totalCommission = stats.reduce((sum, item) => sum + Number(item.commission_totale || 0), 0);
   const totalCAGenere = stats.reduce((sum, item) => sum + Number(item.ca_genere || 0), 0);
+  const totalDecomptesATraiter = stats.reduce((sum, item) => sum + Number(item.decomptes_a_traiter || 0), 0);
+  const totalStocksBas = stats.reduce((sum, item) => sum + Number(item.stock_bas || 0), 0);
 
   if (loading) {
     return (
@@ -235,21 +260,31 @@ export default function DashboardRevendeurs() {
         </Grid.Col>
 
         <Grid.Col span={4}>
-          <Card withBorder radius="md" shadow="sm">
-            <Group justify="space-between">
-              <div>
-                <Text c="dimmed" size="xs" tt="uppercase" fw={700}>
-                  Commissions Totales
-                </Text>
-                <Title order={3} c="orange">
-                  {totalCommission.toLocaleString()} FCFA
-                </Title>
-              </div>
-              <Tooltip label="Total des commissions à reverser aux revendeurs">
-                <IconInfoCircle size={18} color="gray" />
-              </Tooltip>
-            </Group>
-          </Card>
+          <Tooltip label="Voir le détail des commissions dans les décomptes">
+            <Card
+              component="button"
+              type="button"
+              withBorder
+              radius="md"
+              shadow="sm"
+              onClick={() => navigate('/decomptes')}
+              aria-label="Voir le détail des commissions à payer"
+              style={{ cursor: 'pointer', textAlign: 'left', width: '100%' }}
+            >
+              <Group justify="space-between">
+                <div>
+                  <Text c="dimmed" size="xs" tt="uppercase" fw={700}>
+                    Commissions Totales
+                  </Text>
+                  <Title order={3} c="orange">
+                    {totalCommission.toLocaleString()} FCFA
+                  </Title>
+                  <Text size="xs" c="orange" mt={4}>Voir les décomptes concernés</Text>
+                </div>
+                <IconCash size={22} color="orange" />
+              </Group>
+            </Card>
+          </Tooltip>
         </Grid.Col>
 
         <Grid.Col span={4}>
@@ -271,6 +306,13 @@ export default function DashboardRevendeurs() {
         </Grid.Col>
       </Grid>
 
+      {(totalDecomptesATraiter > 0 || totalStocksBas > 0) && (
+        <Alert color="orange" variant="light" icon={<IconAlertCircle size={18} />} title="Points à suivre">
+          {totalDecomptesATraiter > 0 && <Text size="sm">{totalDecomptesATraiter} décompte(s) à valider ou à régler.</Text>}
+          {totalStocksBas > 0 && <Text size="sm">{totalStocksBas} ligne(s) de stock revendeur sous le seuil d'alerte.</Text>}
+        </Alert>
+      )}
+
       {/* Tableau détaillé */}
       <Card withBorder radius="lg" shadow="sm" p="md">
         <Group mb="md" justify="space-between">
@@ -284,16 +326,16 @@ export default function DashboardRevendeurs() {
 
         <Table striped highlightOnHover horizontalSpacing="md" verticalSpacing="sm">
           <Table.Thead>
-            <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
-              <Table.Th c="white">Revendeur</Table.Th>
-              <Table.Th c="white" ta="center">Commandes</Table.Th>
-              <Table.Th c="white" ta="center">Décomptes</Table.Th>
-              <Table.Th c="white" ta="center">Stock</Table.Th>
-              <Table.Th c="white" ta="right">Valeur Stock</Table.Th>
-              <Table.Th c="white" ta="right">Ventes Revendeur</Table.Th>
-              <Table.Th c="white" ta="right">Commission</Table.Th>
-              <Table.Th c="white" ta="right">CA Généré</Table.Th>
-              <Table.Th c="white" ta="center">Taux Comm.</Table.Th>
+            <Table.Tr>
+              <Table.Th>Revendeur</Table.Th>
+              <Table.Th ta="center">Commandes</Table.Th>
+              <Table.Th ta="center">Décomptes</Table.Th>
+              <Table.Th ta="center">Stock</Table.Th>
+              <Table.Th ta="right">Valeur Stock</Table.Th>
+              <Table.Th ta="right">Ventes Revendeur</Table.Th>
+              <Table.Th ta="right">Commission</Table.Th>
+              <Table.Th ta="right">CA Généré</Table.Th>
+              <Table.Th ta="center">Taux Comm.</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>

@@ -13,13 +13,26 @@ import {
   IconBuildingStore, IconTrash, IconSearch, IconRefresh,
   IconInfoCircle, IconCalendar, IconCash, IconPlus, IconPrinter, IconEye,
   IconShoppingCart, IconTruck, IconReceipt, IconAlertCircle, IconEdit,
-  IconDeviceFloppy, IconX, IconPhone
+  IconDeviceFloppy, IconX, IconPhone, IconDeviceMobile
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import ReçuVente from "./ReçuVente";
+import { configCommerceService } from "../../services/configCommerceService";
+import AttestationOccasion from "./AttestationOccasion";
 import { notifications } from "@mantine/notifications";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../common/PageHeader";
+import { useAuth } from "../../contexts/AuthContext";
+import { journalCaisseService } from "../../services/journalCaisseService";
+import TkFilters from '../TkFilters';
+import { transactionService, type TransactionView, type TransactionRef, type TransactionOrigin } from '../../services/transactionFacade';
+import { transactionTotals, transactionCsv } from '../../services/transactionConsolidation';
+import { useTransactionContext } from '../../hooks/useTransactionSnapshot';
+import { OriginBadge } from './TransactionsSummary';
+import { saveText } from '../../utils/fileExport';
+import PrestationTransactionRow from './PrestationTransactionRow';
+import FormulairePrestation from './FormulairePrestation';
+import { ModaleAnnulationPrestation, ModaleSuppressionPrestation } from './ModalesPrestation';
 
 interface Vente {
   idVente: number;
@@ -51,12 +64,20 @@ interface ProduitVente {
 
 const ListeVentes: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [ventes, setVentes] = useState<Vente[]>([]);
+  const txContext = useTransactionContext();
+  const [transactions, setTransactions] = useState<TransactionView[]>([]);
+  const [origine, setOrigine] = useState<TransactionOrigin | null>(null);
+  const [prestationAction, setPrestationAction] = useState<{mode:'update'|'cancel'|'delete';ref:TransactionRef}|null>(null);
+  const [prestationBusy, setPrestationBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [recherche, setRecherche] = useState("");
   const [typeFiltre, setTypeFiltre] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showReçu, setShowReçu] = useState(false);
+  const [attestationOpen, setAttestationOpen] = useState(false);
+  const [venteForAttestation, setVenteForAttestation] = useState<Vente | null>(null);
   const [selectedVente, setSelectedVente] = useState<Vente | null>(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedVenteDetails, setSelectedVenteDetails] = useState<any>(null);
@@ -69,37 +90,40 @@ const ListeVentes: React.FC = () => {
   const [editProduits, setEditProduits] = useState<ProduitVente[]>([]);
   const [editLoading, setEditLoading] = useState(false);
   const [editQuantites, setEditQuantites] = useState<Record<number, number>>({});
+  const [editPrix, setEditPrix] = useState<Record<number, number>>({});
+  const [tvaActif, setTvaActif] = useState<boolean>(false);
+  const [tauxTVA, setTauxTVA] = useState<number>(18);
+
+  // Charger la configuration TVA (activée ou non, et taux)
+  useEffect(() => {
+    configCommerceService.getTVAConfig()
+      .then((cfg) => { setTvaActif(cfg.active); setTauxTVA(cfg.taux); })
+      .catch(() => { setTvaActif(false); setTauxTVA(18); });
+  }, []);
   
   const itemsPerPage = 10;
 
   const chargerVentes = async () => {
     setLoading(true);
     try {
-      const db = await getDb();
-      const result = await db.select<any[]>(`
-        SELECT 
-          v.*,
-          cl.NomComplet as client_nom,
-          cl.Societe as client_societe,
-          cl.Tel as client_tel
-        FROM ventes v
-        LEFT JOIN clients cl ON v.idClient = cl.idClient
-        ORDER BY v.date_vente DESC
-      `);
-      
-      // Transformer les données pour gérer les cas où le client n'existe pas
-      const ventesFormatted = result.map((v: any) => ({
-        ...v,
-        client_nom: v.client_nom || v.nom_prenom || null,
-        client_tel: v.client_tel || v.contact || null
+      if (!txContext) { setTransactions([]); setVentes([]); return; }
+      const rows = await transactionService.listAll({}, txContext);
+      setTransactions(rows);
+      setVentes(rows.filter((row):row is Extract<TransactionView,{origin:'vente'}>=>row.origin==='vente').map(row=>{
+        const source='sourceVente' in row && row.sourceVente && typeof row.sourceVente==='object'?row.sourceVente:{};
+        const type='typeVente' in row && typeof row.typeVente==='string'?row.typeVente:'';
+        return {...source,idVente:row.ref.id,code_vente:row.code,idClient:row.client.idClient,client_nom:row.client.nom,
+          client_societe:'client_societe' in source?String(source.client_societe??''):null,client_tel:row.client.contact,
+          nom_prenom:row.client.nom,contact:row.client.contact,Tel:row.client.contact,date_vente:row.dates.creation,
+          montant_ht:'montant_ht' in source?Number(source.montant_ht):0,montant_ttc:row.montantFacture,
+          montant_total:row.montantFacture,type_vente:type,statut:row.etatCommercial,est_annule:row.etatCommercial==='ANNULEE'?1:0};
       }));
-      
-      setVentes(ventesFormatted || []);
     } catch (error) {
+      setTransactions([]); setVentes([]);
       console.error("Erreur chargement ventes:", error);
       notifications.show({
         title: 'Erreur',
-        message: 'Erreur lors du chargement des ventes',
+        message: error instanceof Error ? error.message : 'Erreur lors du chargement des ventes',
         color: 'red',
       });
     } finally {
@@ -109,7 +133,7 @@ const ListeVentes: React.FC = () => {
 
   useEffect(() => {
     chargerVentes();
-  }, []);
+  }, [txContext]);
 
   // ✅ Vérifier si une vente peut être supprimée
   const peutSupprimerVente = async (idVente: number): Promise<{ peut: boolean; raison: string }> => {
@@ -118,7 +142,7 @@ const ListeVentes: React.FC = () => {
     const reglements = await db.select<any[]>(`
       SELECT COUNT(*) as count
       FROM reglements
-      WHERE idVente = ?
+      WHERE idVente = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
     `, [idVente]);
 
     if (reglements[0]?.count > 0) {
@@ -196,10 +220,13 @@ const ListeVentes: React.FC = () => {
       
       setEditProduits(produits);
       const quantitesInit: Record<number, number> = {};
+      const prixInit: Record<number, number> = {};
       produits.forEach(p => {
         quantitesInit[p.idProduit] = p.quantite;
+        prixInit[p.idProduit] = p.prix_unitaire_ht;
       });
       setEditQuantites(quantitesInit);
+      setEditPrix(prixInit);
       setEditModalOpen(true);
     } catch (error) {
       console.error("Erreur chargement produits:", error);
@@ -226,6 +253,11 @@ const ListeVentes: React.FC = () => {
     setEditQuantites(prev => ({ ...prev, [idProduit]: newQuantite }));
   };
 
+  const handleUpdatePrix = (idProduit: number, newPrix: number) => {
+    if (newPrix < 0) return;
+    setEditPrix(prev => ({ ...prev, [idProduit]: newPrix }));
+  };
+
   const handleSaveEdit = async () => {
     if (!venteToEdit) return;
     
@@ -236,28 +268,34 @@ const ListeVentes: React.FC = () => {
       let nouveauMontantHT = 0;
       for (const produit of editProduits) {
         const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
-        nouveauMontantHT += nouvelleQuantite * produit.prix_unitaire_ht;
+        const nouveauPrix = editPrix[produit.idProduit] ?? produit.prix_unitaire_ht;
+        nouveauMontantHT += nouvelleQuantite * nouveauPrix;
       }
-      const nouveauMontantTTC = nouveauMontantHT * 1.18;
-      
+      // TVA dynamique : appliquée seulement si activée dans la configuration
+      const facteurTVA = tvaActif ? (1 + tauxTVA / 100) : 1;
+      const nouveauMontantTVA = tvaActif ? nouveauMontantHT * (tauxTVA / 100) : 0;
+      const nouveauMontantTTC = nouveauMontantHT * facteurTVA;
+
       await db.execute(`
         UPDATE ventes 
-        SET montant_ht = ?, montant_ttc = ?
+        SET montant_ht = ?, montant_tva = ?, montant_ttc = ?
         WHERE idVente = ?
-      `, [nouveauMontantHT, nouveauMontantTTC, venteToEdit.idVente]);
-      
+      `, [nouveauMontantHT, nouveauMontantTVA, nouveauMontantTTC, venteToEdit.idVente]);
+
       for (const produit of editProduits) {
         const ancienneQuantite = produit.quantite;
         const nouvelleQuantite = editQuantites[produit.idProduit] || 0;
+        const nouveauPrix = editPrix[produit.idProduit] ?? produit.prix_unitaire_ht;
         const difference = nouvelleQuantite - ancienneQuantite;
-        
+
+        // Mettre à jour quantité + prix unitaire (HT et TTC) de la ligne
+        await db.execute(`
+          UPDATE vente_details 
+          SET quantite = ?, prix_unitaire_ht = ?, prix_unitaire_ttc = ?, tva_taux = ?
+          WHERE idDetail = ?
+        `, [nouvelleQuantite, nouveauPrix, nouveauPrix * facteurTVA, tvaActif ? tauxTVA : 0, produit.idDetail]);
+
         if (difference !== 0) {
-          await db.execute(`
-            UPDATE vente_details 
-            SET quantite = ?
-            WHERE idDetail = ?
-          `, [nouvelleQuantite, produit.idDetail]);
-          
           await db.execute(`
             UPDATE products 
             SET qte_stock = qte_stock - ?
@@ -276,6 +314,7 @@ const ListeVentes: React.FC = () => {
       setVenteToEdit(null);
       setEditProduits([]);
       setEditQuantites({});
+      setEditPrix({});
       chargerVentes();
       
     } catch (error) {
@@ -367,28 +406,34 @@ const supprimerVente = async () => {
       }
     }
 
-    // 3. Supprimer les détails de la vente
+    // 3. Annuler la vente (au lieu de la supprimer) : elle reste visible et tracée,
+    //    le stock a déjà été réintégré ci-dessus.
     await db.execute(`
-      DELETE FROM vente_details 
+      UPDATE ventes
+      SET est_annule = 1,
+          date_annulation = datetime('now'),
+          annule_par = ?
       WHERE idVente = ?
-    `, [venteToDelete.idVente]);
+    `, [user?.nom || null, venteToDelete.idVente]);
 
-    // 4. Supprimer la vente
-    await db.execute(`
-      DELETE FROM ventes 
-      WHERE idVente = ?
-    `, [venteToDelete.idVente]);
-
-    // 5. Supprimer les règlements associés (s'il y en a)
-    await db.execute(`
-      DELETE FROM reglements 
-      WHERE idVente = ?
-    `, [venteToDelete.idVente]);
+    // 4. Contrepassation en caisse : retirer le montant du journal de caisse
+    //    ET du rapport de vente (tous deux calculés à partir du journal).
+    let impactCaisse = '';
+    try {
+      const idJournal = await journalCaisseService.annulerVenteComptoir({
+        idVente: venteToDelete.idVente,
+        codeVente: venteToDelete.code_vente,
+        annulePar: user?.nom || undefined,
+      });
+      if (idJournal) impactCaisse = ' - Montant retiré de la caisse';
+    } catch (caisseErr) {
+      console.error('Erreur contrepassation caisse:', caisseErr);
+    }
 
     notifications.show({
-      title: '✅ Succès',
-      message: `Vente ${venteToDelete.code_vente} supprimée avec succès - Stock restauré (${details.length} produit(s))`,
-      color: 'green',
+      title: '✅ Vente annulée',
+      message: `Vente ${venteToDelete.code_vente} annulée - Stock réintégré (${details.length} produit(s))${impactCaisse}`,
+      color: 'orange',
       autoClose: 5000
     });
     
@@ -444,22 +489,17 @@ const supprimerVente = async () => {
     }
   };
 
-  const ventesFiltrees = ventes.filter(v => {
-    if (!v) return false;
-    const clientDisplay = getClientDisplay(v);
-    const matchRecherche =
-      v.code_vente?.toLowerCase().includes(recherche.toLowerCase()) ||
-      clientDisplay.toLowerCase().includes(recherche.toLowerCase());
-
-    const matchType = typeFiltre ? v.type_vente === typeFiltre : true;
-
-    return matchRecherche && matchType;
+  const ventesFiltrees = transactions.filter(row => {
+    const type=row.origin==='vente'&&'typeVente' in row?row.typeVente:null;
+    const text=[row.code,row.client.nom,...row.lines.map(line=>line.designation)].join(' ').toLocaleLowerCase();
+    return (!origine||row.origin===origine)&&(!typeFiltre||type===typeFiltre)&&text.includes(recherche.toLocaleLowerCase());
   });
 
   const totalPages = Math.ceil(ventesFiltrees.length / itemsPerPage);
   const paginatedData = ventesFiltrees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const totalMontant = ventesFiltrees.reduce((sum, v) => sum + (v.montant_ttc || 0), 0);
-  const ventesAujourdhui = ventes.filter(v => v && new Date(v.date_vente).toDateString() === new Date().toDateString()).length;
+  const totalMontant = transactionTotals(ventesFiltrees).facture;
+  const legacyById = new Map(ventes.map(row => [row.idVente, row]));
+  const ventesAujourdhui = transactions.filter(row => new Date(row.dates.creation).toDateString() === new Date().toDateString()).length;
 
   const formatMontant = (value: any): string => {
     if (value === undefined || value === null) return '0';
@@ -501,7 +541,7 @@ const supprimerVente = async () => {
           color="teal"
           action={{ label: 'Nouvelle vente', onClick: () => navigate('/ventes/nouvelle'), color: 'teal' }}
           stats={[
-            { label: 'Total ventes', value: ventes.length, icon: <IconShoppingCart size={13} /> },
+            { label: 'Total transactions', value: transactions.length, icon: <IconShoppingCart size={13} /> },
             { label: "Chiffre d'affaires", value: `${formatMontant(totalMontant)} FCFA`, icon: <IconCash size={13} />, color: '#40c057' },
             { label: 'Ventes comptoir', value: ventes.filter(v => v && v.type_vente === 'COMPTOIR').length, icon: <IconBuildingStore size={13} /> },
             { label: "Aujourd'hui", value: ventesAujourdhui, icon: <IconCalendar size={13} />, color: '#f59f00' },
@@ -509,7 +549,8 @@ const supprimerVente = async () => {
         />
 
         {/* Barre d'outils */}
-        <Card withBorder radius="lg" shadow="sm" p="lg">
+        <TkFilters>
+        <Card withBorder radius="lg" shadow="sm" p="sm">
           <Flex justify="space-between" align="flex-end" wrap="wrap" gap="md">
             <Group grow>
               <TextInput
@@ -520,6 +561,9 @@ const supprimerVente = async () => {
                 size="md"
                 style={{ width: 300 }}
               />
+              <Select label="Origine" placeholder="Toutes" clearable size="sm"
+                data={[{value:'vente',label:'Vente'},{value:'prestation',label:'Prestation'}]} value={origine}
+                onChange={value=>{setOrigine(value as TransactionOrigin|null);setTypeFiltre(null);setCurrentPage(1);}} />
               <Select
                 placeholder="Type de vente"
                 data={[
@@ -532,9 +576,11 @@ const supprimerVente = async () => {
                 size="md"
                 style={{ width: 180 }}
                 clearable
+                searchable
               />
             </Group>
             <Group>
+              <Button variant="default" size="sm" onClick={()=>{void saveText('\ufeff'+transactionCsv(ventesFiltrees),'ventes-prestations.csv').catch(reason=>notifications.show({title:'Export impossible',message:String(reason),color:'red'}));}}>CSV consolidé</Button>
               <Tooltip label="Actualiser">
                 <ActionIcon variant="light" onClick={() => chargerVentes()} size="lg" color="blue">
                   <IconRefresh size={18} />
@@ -543,6 +589,7 @@ const supprimerVente = async () => {
             </Group>
           </Flex>
         </Card>
+        </TkFilters>
 
         {/* Tableau des ventes */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
@@ -557,12 +604,13 @@ const supprimerVente = async () => {
           </Paper>
 
           <Box style={{ overflowX: "auto" }}>
-            <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
+            <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="sm">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+                <Table.Tr>
                   <Table.Th w={60}>N°</Table.Th>
                   <Table.Th>Code</Table.Th>
                   <Table.Th>Client</Table.Th>
+                  <Table.Th>Origine</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Date</Table.Th>
                   <Table.Th ta="right">Montant</Table.Th>
@@ -570,12 +618,15 @@ const supprimerVente = async () => {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedData.map((v, idx) => {
+                {paginatedData.map((transaction, idx) => {
+                  if(transaction.origin==='prestation')return <PrestationTransactionRow key={'prestation:'+transaction.ref.id} row={transaction}
+                    index={(currentPage-1)*itemsPerPage+idx+1} onAction={(mode,ref)=>setPrestationAction({mode,ref})}/>;
+                  const v=legacyById.get(transaction.ref.id);
                   // Vérification de sécurité
                   if (!v) {
                     return (
                       <Table.Tr key={`empty-${idx}`}>
-                        <Table.Td colSpan={7} ta="center">
+                        <Table.Td colSpan={8} ta="center">
                           <Text c="dimmed" size="sm">Données invalides</Text>
                         </Table.Td>
                       </Table.Tr>
@@ -587,11 +638,15 @@ const supprimerVente = async () => {
                   const isDirect = isDirectClient(v);
                   const hasContact = clientContact && clientContact !== '-';
                   
+                  const estAnnulee = !!(v as any).est_annule;
                   return (
-                    <Table.Tr key={v.idVente || idx}>
+                    <Table.Tr key={'vente:'+(v.idVente || idx)} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                       <Table.Td fw={500}>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
                       <Table.Td>
-                        <Text fw={600} size="sm">{v.code_vente || '-'}</Text>
+                        <Group gap={6}>
+                          <Text fw={600} size="sm">{v.code_vente || '-'}</Text>
+                          {estAnnulee && <Badge color="orange" variant="filled" size="xs">Annulé</Badge>}
+                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Group gap="sm">
@@ -612,6 +667,7 @@ const supprimerVente = async () => {
                           )}
                         </Group>
                       </Table.Td>
+                      <Table.Td><OriginBadge origin="vente"/></Table.Td>
                       <Table.Td>
                         <Badge 
                           size="sm" 
@@ -648,8 +704,13 @@ const supprimerVente = async () => {
                               <IconPrinter size={16} />
                             </ActionIcon>
                           </Tooltip>
-                          <Tooltip label="Supprimer">
-                            <ActionIcon size="md" color="red" variant="light" onClick={() => {
+                          <Tooltip label="Attestation (téléphone d'occasion)">
+                            <ActionIcon size="md" color="grape" variant="light" onClick={() => { setVenteForAttestation(v); setAttestationOpen(true); }}>
+                              <IconDeviceMobile size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label={estAnnulee ? 'Vente déjà annulée' : 'Annuler la vente'}>
+                            <ActionIcon size="md" color="red" variant="light" disabled={estAnnulee} onClick={() => {
                               setVenteToDelete(v);
                               setDeleteModalOpen(true);
                             }}>
@@ -687,6 +748,15 @@ const supprimerVente = async () => {
           )}
         </Card>
 
+        {prestationAction?.mode==='update'&&<Modal opened centered size="xl" title="Modifier la prestation"
+          onClose={()=>{if(!prestationBusy)setPrestationAction(null);}} closeOnClickOutside={!prestationBusy} closeOnEscape={!prestationBusy} withCloseButton={!prestationBusy}>
+          <FormulairePrestation mode="update" transactionRef={prestationAction.ref} ctx={txContext} onBusyChange={setPrestationBusy}
+            onCancel={()=>setPrestationAction(null)} onSuccess={()=>{setPrestationAction(null);void chargerVentes();}}/>
+        </Modal>}
+        {prestationAction?.mode==='cancel'&&<ModaleAnnulationPrestation transactionRef={prestationAction.ref} ctx={txContext}
+          onClose={()=>setPrestationAction(null)} onSuccess={()=>{setPrestationAction(null);void chargerVentes();}}/>}
+        {prestationAction?.mode==='delete'&&<ModaleSuppressionPrestation transactionRef={prestationAction.ref} ctx={txContext}
+          onClose={()=>setPrestationAction(null)} onSuccess={()=>{setPrestationAction(null);void chargerVentes();}}/>}
         {/* Modal d'édition */}
         <Modal
           opened={editModalOpen}
@@ -750,12 +820,23 @@ const supprimerVente = async () => {
                 <Table.Tbody>
                   {editProduits.map((produit) => {
                     const quantite = editQuantites[produit.idProduit] || 0;
-                    const total = quantite * produit.prix_unitaire_ht;
+                    const prix = editPrix[produit.idProduit] ?? produit.prix_unitaire_ht;
+                    const total = quantite * prix;
                     return (
                       <Table.Tr key={produit.idProduit}>
                         <Table.Td>{produit.code_produit || '-'}</Table.Td>
                         <Table.Td fw={500}>{produit.designation}</Table.Td>
-                        <Table.Td>{formatMontant(produit.prix_unitaire_ht)} FCFA</Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            size="xs"
+                            min={0}
+                            step={100}
+                            value={prix}
+                            onChange={(val) => handleUpdatePrix(produit.idProduit, Number(val) || 0)}
+                            style={{ width: 120 }}
+                            thousandSeparator=" "
+                          />
+                        </Table.Td>
                         <Table.Td>
                           <NumberInput
                             size="xs"
@@ -776,7 +857,10 @@ const supprimerVente = async () => {
 
               <Group justify="space-between">
                 <Text fw={700} size="lg">
-                  Total: {formatMontant(editProduits.reduce((sum, p) => sum + ((editQuantites[p.idProduit] || 0) * p.prix_unitaire_ht), 0) * 1.18)} FCFA
+                  Total {tvaActif ? 'TTC' : 'HT'}: {formatMontant(
+                    editProduits.reduce((sum, p) => sum + ((editQuantites[p.idProduit] || 0) * (editPrix[p.idProduit] ?? p.prix_unitaire_ht)), 0)
+                    * (tvaActif ? (1 + tauxTVA / 100) : 1)
+                  )} FCFA
                 </Text>
                 <Group>
                   <Button variant="outline" onClick={() => setEditModalOpen(false)} leftSection={<IconX size={16} />}>
@@ -876,7 +960,7 @@ const supprimerVente = async () => {
         <Modal
           opened={deleteModalOpen}
           onClose={() => setDeleteModalOpen(false)}
-          title="Supprimer la vente"
+          title="Annuler la vente"
           centered
           styles={{
             header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
@@ -885,17 +969,14 @@ const supprimerVente = async () => {
           }}
         >
           <Stack>
-            <Alert icon={<IconAlertCircle size={16} />} color="red" title="⚠️ Attention !">
+            <Alert icon={<IconAlertCircle size={16} />} color="orange" title="Annulation de la vente">
               <Text size="sm">
-                Êtes-vous sûr de vouloir supprimer cette vente ?
-              </Text>
-              <Text size="sm" mt="md" c="red">
-                <strong>Action irréversible !</strong>
+                Êtes-vous sûr de vouloir annuler cette vente ?
               </Text>
               <ul style={{ marginTop: 8, paddingLeft: 20 }}>
-                <li>La vente sera définitivement supprimée</li>
-                <li>Les stocks seront automatiquement restaurés</li>
-                <li>Les règlements associés seront supprimés</li>
+                <li>La vente reste visible et tracée (marquée « Annulé »)</li>
+                <li>Les stocks sont automatiquement réintégrés</li>
+                <li>La vente est exclue des totaux et statistiques</li>
               </ul>
             </Alert>
 
@@ -907,15 +988,15 @@ const supprimerVente = async () => {
 
             <Group justify="flex-end">
               <Button variant="outline" onClick={() => setDeleteModalOpen(false)} disabled={deleteLoading}>
-                Annuler
+                Fermer
               </Button>
-              <Button 
-                color="red" 
-                onClick={supprimerVente} 
+              <Button
+                color="orange"
+                onClick={supprimerVente}
                 loading={deleteLoading}
                 leftSection={<IconTrash size={16} />}
               >
-                Supprimer
+                Confirmer l'annulation
               </Button>
             </Group>
           </Stack>
@@ -944,6 +1025,12 @@ const supprimerVente = async () => {
             <Text size="xs" c="dimmed" ta="center">Version 1.0.0 - Gestion Commerciale Pro</Text>
           </Stack>
         </Modal>
+
+        <AttestationOccasion
+          opened={attestationOpen}
+          onClose={() => { setAttestationOpen(false); setVenteForAttestation(null); }}
+          vente={venteForAttestation}
+        />
       </Stack>
     </Box>
   );

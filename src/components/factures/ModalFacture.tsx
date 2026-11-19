@@ -27,7 +27,9 @@ const ModalFacture: React.FC<ModalFactureProps> = ({ facture, onClose }) => {
 
   const montantHT = facture.montant_ht || facture.MontantHT || 0;
   const montantTTC = facture.montant_ttc || facture.MontantTTC || 0;
-  const tva = montantHT * 0.18;
+  // TVA réelle = TTC − HT (0 si la TVA était désactivée à l'émission).
+  const tva = facture.montant_tva || facture.MontantTVA ||
+    (montantTTC && montantHT ? Math.max(0, montantTTC - montantHT) : 0);
 
   return (
     <Modal 

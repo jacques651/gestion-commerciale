@@ -10,22 +10,28 @@ import {
   IconSearch, IconPlus, IconEdit, IconTrash, IconPhone,
   IconUsers, IconBuildingStore, IconUserCheck,
   IconUserPlus, IconMapPin, IconX, IconAlertCircle,
-  IconMail, IconBuilding, IconFilter
+  IconMail, IconBuilding, IconFilter, IconEye
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { FormulaireClient } from './FormulaireClient';
+import { FicheClient } from './FicheClient';
 import { PageHeader } from '../common/PageHeader';
 import { Client } from '../../database/repositories/clientRepository';
 import { notifications } from '@mantine/notifications';
+import { useAuth } from '../../contexts/AuthContext';
+import TkFilters from '../TkFilters';
 
 export const ListeClients: React.FC = () => {
-  const { clients, loading, deleteClient, searchClients, refresh } = useClients();
+  const { user } = useAuth();
+  const { clients, loading, annulerClient, restaurerClient, searchClients, refresh } = useClients();
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFiltre, setTypeFiltre] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [deleteModalOpened, setDeleteModalOpened] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [ficheClient, setFicheClient] = useState<Client | null>(null);
+  const [ficheOpened, setFicheOpened] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -39,16 +45,14 @@ export const ListeClients: React.FC = () => {
 
   const confirmDelete = async () => {
     if (selectedClient) {
-      const nom = selectedClient.NomComplet || selectedClient.Societe || 'Client';
-      await deleteClient(selectedClient.idClient);
-      notifications.show({
-        title: 'Succès',
-        message: `Client "${nom}" supprimé avec succès`,
-        color: 'green',
-      });
+      await annulerClient(selectedClient.idClient, user?.nom);
       setDeleteModalOpened(false);
       setSelectedClient(null);
     }
+  };
+
+  const handleRestaurer = async (client: Client) => {
+    await restaurerClient(client.idClient);
   };
 
   const handleEdit = (client: Client) => {
@@ -156,6 +160,7 @@ export const ListeClients: React.FC = () => {
         />
 
         {/* SECTION RECHERCHE ET FILTRE - SUR UNE SEULE LIGNE */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Grid  align="flex-end">
             {/* Recherche */}
@@ -205,32 +210,36 @@ export const ListeClients: React.FC = () => {
             </Grid.Col>
           </Grid>
         </Card>
+        </TkFilters>
 
         {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="md" shadow="sm" p={0}>
           <ScrollArea style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                  <Table.Th c="white" w={200}>Nom / Société</Table.Th>
-                  <Table.Th c="white" w={100}>Type</Table.Th>
-                  <Table.Th c="white" w={150}>Téléphone</Table.Th>
-                  <Table.Th c="white" w={180}>Email</Table.Th>
-                  <Table.Th c="white" w={150}>Adresse</Table.Th>
-                  <Table.Th c="white" w={100}>Ville</Table.Th>
-                  <Table.Th c="white" ta="center" w={100}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th w={200}>Nom / Société</Table.Th>
+                  <Table.Th w={100}>Type</Table.Th>
+                  <Table.Th w={150}>Téléphone</Table.Th>
+                  <Table.Th w={180}>Email</Table.Th>
+                  <Table.Th w={150}>Adresse</Table.Th>
+                  <Table.Th w={100}>Ville</Table.Th>
+                  <Table.Th ta="center" w={100}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {paginatedClients.map((client) => (
-                  <Table.Tr key={client.idClient}>
+                  <Table.Tr key={client.idClient} style={(client as any).est_annule ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                     <Table.Td>
                       <Group gap="sm" wrap="nowrap">
                         <Avatar size="md" radius="xl" color="blue">
                           {getNomAffichage(client).charAt(0).toUpperCase()}
                         </Avatar>
                         <div>
-                          <Text fw={600} size="sm">{client.NomComplet || '-'}</Text>
+                          <Group gap={6}>
+                            <Text fw={600} size="sm">{client.NomComplet || '-'}</Text>
+                            {(client as any).est_annule ? <Badge color="orange" variant="filled" size="xs">Annulé</Badge> : null}
+                          </Group>
                           {client.Societe && (
                             <Group gap={4}>
                               <IconBuilding size={12} color="#adb5bd" />
@@ -280,26 +289,39 @@ export const ListeClients: React.FC = () => {
                     </Table.Td>
                     <Table.Td ta="center">
                       <Group gap={4} justify="center" wrap="nowrap">
+                        <Tooltip label="Fiche / Paiements">
+                          <ActionIcon
+                            variant="light"
+                            color="teal"
+                            size="md"
+                            onClick={() => { setFicheClient(client); setFicheOpened(true); }}
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Tooltip>
                         <Tooltip label="Modifier">
-                          <ActionIcon 
-                            variant="light" 
-                            color="blue" 
-                            size="md" 
+                          <ActionIcon
+                            variant="light"
+                            color="blue"
+                            size="md"
                             onClick={() => handleEdit(client)}
                           >
                             <IconEdit size={16} />
                           </ActionIcon>
                         </Tooltip>
-                        <Tooltip label="Supprimer">
-                          <ActionIcon 
-                            variant="light" 
-                            color="red" 
-                            size="md" 
-                            onClick={() => handleDeleteClick(client)}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
+                        {(client as any).est_annule ? (
+                          <Tooltip label="Rétablir le client">
+                            <ActionIcon variant="light" color="green" size="md" onClick={() => handleRestaurer(client)}>
+                              <IconUserCheck size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip label="Annuler le client">
+                            <ActionIcon variant="light" color="red" size="md" onClick={() => handleDeleteClick(client)}>
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
                       </Group>
                     </Table.Td>
                   </Table.Tr>
@@ -346,26 +368,30 @@ export const ListeClients: React.FC = () => {
         </Card>
       </Stack>
 
+      {/* FICHE CLIENT (Informations + Paiements) */}
+      <FicheClient
+        client={ficheClient}
+        opened={ficheOpened}
+        onClose={() => { setFicheOpened(false); setFicheClient(null); }}
+      />
+
       {/* MODAL CONFIRMATION SUPPRESSION */}
       <Modal
         opened={deleteModalOpened}
         onClose={() => setDeleteModalOpened(false)}
-        title="Supprimer le client"
+        title="Annuler le client"
         centered
       >
         <Stack>
-          <Alert icon={<IconAlertCircle size={16} />} color="red" title="Attention !">
-            Êtes-vous sûr de vouloir supprimer ce client ?
-            <Text size="sm" mt="md" c="red">
-              Cette action est irréversible !
-            </Text>
+          <Alert icon={<IconAlertCircle size={16} />} color="orange" title="Annulation du client">
+            Annuler ce client ? Il restera visible et tracé (marqué « Annulé »), mais ne sera plus proposé à la sélection.
           </Alert>
           <Group justify="flex-end" mt="md">
             <Button variant="outline" onClick={() => setDeleteModalOpened(false)}>
-              Annuler
+              Fermer
             </Button>
-            <Button color="red" onClick={confirmDelete}>
-              Supprimer
+            <Button color="orange" onClick={confirmDelete}>
+              Confirmer l'annulation
             </Button>
           </Group>
         </Stack>

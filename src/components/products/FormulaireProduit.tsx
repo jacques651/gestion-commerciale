@@ -95,14 +95,16 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
   
   const [formData, setFormData] = useState<any>({
     code_produit: '',
+    reference: '',
     designation: '',
     categorie: '',
     unite_base: 'pièce',
+    contenu_unite: 1,
     prix_achat_base: 0,
     prix_vente_detail: 0,
     prix_vente_gros: 0,
     qte_stock: 0,
-    seuil_alerte: 10,
+    seuil_alerte: 5,
     prix_moyen_pondere: 0,
     methode_gestion_stock: 'PMP'
   });
@@ -131,28 +133,32 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
     if (editProduct) {
       setFormData({
         code_produit: editProduct.code_produit || '',
+        reference: editProduct.reference || '',
         designation: editProduct.designation || '',
         categorie: editProduct.categorie || '',
         unite_base: editProduct.unite_base || 'pièce',
+        contenu_unite: editProduct.contenu_unite || 1,
         prix_achat_base: editProduct.prix_achat_base || 0,
         prix_vente_detail: editProduct.prix_vente_detail || 0,
         prix_vente_gros: editProduct.prix_vente_gros || 0,
         qte_stock: editProduct.qte_stock || 0,
-        seuil_alerte: editProduct.seuil_alerte || 10,
+        seuil_alerte: editProduct.seuil_alerte ?? 5,
         prix_moyen_pondere: editProduct.prix_moyen_pondere || 0,
         methode_gestion_stock: editProduct.methode_gestion_stock || 'PMP'
       });
     } else if (opened) {
       setFormData({
         code_produit: '',
+        reference: '',
         designation: '',
         categorie: '',
         unite_base: 'pièce',
+        contenu_unite: 1,
         prix_achat_base: 0,
         prix_vente_detail: 0,
         prix_vente_gros: 0,
         qte_stock: 0,
-        seuil_alerte: 10,
+        seuil_alerte: 5,
         prix_moyen_pondere: 0,
         methode_gestion_stock: 'PMP'
       });
@@ -264,15 +270,15 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
         <LoadingOverlay visible={generatingCode} />
         
         <form onSubmit={handleSubmit}>
-          <Stack gap="sm">
-            {/* Ligne 1: Catégorie + Désignation + Unité */}
+          <Stack className="tk-form-section" gap="sm">
+            {/* Ligne 1: Catégorie + Désignation + Référence + Unité */}
             <Grid align="flex-end">
-              <Grid.Col span={4}>
+              <Grid.Col span={2}>
                 <Group align="flex-end" gap="xs">
                   <Select
                     label="Catégorie"
                     placeholder="Sélectionner"
-                    data={categories}
+                    data={[...new Set([...categories, formData.categorie].filter(Boolean))]}
                     value={formData.categorie}
                     onChange={(value) => setFormData({ ...formData, categorie: value || '' })}
                     size="sm"
@@ -287,7 +293,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   </Tooltip>
                 </Group>
               </Grid.Col>
-              <Grid.Col span={5}>
+              <Grid.Col span={3}>
                 <TextInput
                   label="Désignation"
                   placeholder="Nom du produit"
@@ -298,11 +304,22 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   leftSection={<IconPackage size={16} />}
                 />
               </Grid.Col>
+              <Grid.Col span={2}>
+                {/* Référence de l'article — champ optionnel, utilisable pour la recherche */}
+                <TextInput
+                  label="Référence"
+                  placeholder="Optionnel"
+                  value={formData.reference}
+                  onChange={(e) => setFormData({ ...formData, reference: e.target.value })}
+                  size="sm"
+                  leftSection={<IconTag size={16} />}
+                />
+              </Grid.Col>
               <Grid.Col span={3}>
                 <Group align="flex-end" gap="xs">
                   <Select
                     label="Unité de base"
-                    data={unites}
+                    data={[...new Set([...unites, formData.unite_base].filter(Boolean))]}
                     value={formData.unite_base}
                     onChange={(value) => setFormData({ ...formData, unite_base: value || 'pièce' })}
                     size="sm"
@@ -316,11 +333,21 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   </Tooltip>
                 </Group>
               </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label="Contenu"
+                  description="Ex. carton : 12 pièces"
+                  value={formData.contenu_unite}
+                  onChange={(value) => setFormData({ ...formData, contenu_unite: Math.max(1, Number(value) || 1) })}
+                  min={1}
+                  size="sm"
+                />
+              </Grid.Col>
             </Grid>
 
-            {/* Ligne 2: Stock + Seuil + Méthode */}
+            {/* Ligne 2: Stock + Seuil (méthode gestion et PMP sont automatiques) */}
             <Grid>
-              <Grid.Col span={4}>
+              <Grid.Col span={6}>
                 <NumberInput
                   label="Quantité en stock"
                   value={formData.qte_stock}
@@ -330,22 +357,12 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   leftSection={<IconBuildingStore size={16} />}
                 />
               </Grid.Col>
-              <Grid.Col span={4}>
+              <Grid.Col span={6}>
                 <NumberInput
-                  label="Seuil d'alerte"
+                  label="Seuil d'alerte stock"
                   value={formData.seuil_alerte}
                   onChange={(value) => setFormData({ ...formData, seuil_alerte: Number(value) || 0 })}
                   min={0}
-                  size="sm"
-                  leftSection={<IconChartBar size={16} />}
-                />
-              </Grid.Col>
-              <Grid.Col span={4}>
-                <Select
-                  label="Méthode de gestion"
-                  data={methodesGestion}
-                  value={formData.methode_gestion_stock}
-                  onChange={(value) => setFormData({ ...formData, methode_gestion_stock: value || 'PMP' })}
                   size="sm"
                   leftSection={<IconChartBar size={16} />}
                 />
@@ -354,9 +371,9 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
 
             <Divider size="xs" />
 
-            {/* Ligne 3: Prix */}
+            {/* Ligne 3: Prix (PMP calculé automatiquement) */}
             <Grid>
-              <Grid.Col span={3}>
+              <Grid.Col span={4}>
                 <NumberInput
                   label="Prix d'achat (FCFA)"
                   value={formData.prix_achat_base}
@@ -369,7 +386,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   styles={{ input: { backgroundColor: '#f5f5f5' } }}
                 />
               </Grid.Col>
-              <Grid.Col span={3}>
+              <Grid.Col span={4}>
                 <NumberInput
                   label="Prix vente détail (FCFA)"
                   value={formData.prix_vente_detail}
@@ -382,7 +399,7 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   styles={{ input: { fontWeight: 600, color: '#2e7d32' } }}
                 />
               </Grid.Col>
-              <Grid.Col span={3}>
+              <Grid.Col span={4}>
                 <NumberInput
                   label="Prix vente gros (FCFA)"
                   value={formData.prix_vente_gros}
@@ -393,18 +410,6 @@ export const FormulaireProduit: React.FC<FormulaireProduitProps> = ({ opened, on
                   leftSection={<IconBuildingStore size={16} />}
                   required
                   styles={{ input: { fontWeight: 600, color: '#1565c0' } }}
-                />
-              </Grid.Col>
-              <Grid.Col span={3}>
-                <NumberInput
-                  label="Prix moyen pondéré"
-                  value={formData.prix_moyen_pondere}
-                  onChange={(value) => setFormData({ ...formData, prix_moyen_pondere: Number(value) || 0 })}
-                  min={0}
-                  size="sm"
-                  leftSection={<IconCash size={16} />}
-                  disabled
-                  styles={{ input: { backgroundColor: '#f5f5f5', fontWeight: 500 } }}
                 />
               </Grid.Col>
             </Grid>

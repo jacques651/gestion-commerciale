@@ -12,8 +12,10 @@ import {
   IconList, IconListDetails
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
+import { tvaService } from '../../services/tvaService';
 import { notifications } from '@mantine/notifications';
 import NouveauDecompte from '../decomptes/NouveauDecompte';
+import TkFilters from '../TkFilters';
 
 interface FactureRevendeur {
   idFactureRevendeur: number;
@@ -104,7 +106,8 @@ export const ListeFacturesRevendeur: React.FC = () => {
           const benefice = montantHT - totalAchat;
           const tauxCommission = f.taux_commission || 60;
           const commission = benefice > 0 ? (benefice * tauxCommission) / 100 : 0;
-          const montantTTC = montantHT * 1.18;
+          const _cfg = await tvaService.get();
+          const montantTTC = montantHT * (1 + (_cfg.active ? _cfg.taux / 100 : 0));
           
           await db.execute(`
             UPDATE factures_revendeur 
@@ -272,7 +275,8 @@ export const ListeFacturesRevendeur: React.FC = () => {
           const benefice = montantHT - totalAchat;
           const tauxCommission = 60;
           const commission = benefice > 0 ? (benefice * tauxCommission) / 100 : 0;
-          const montantTTC = montantHT * 1.18;
+          const _cfg = await tvaService.get();
+          const montantTTC = montantHT * (1 + (_cfg.active ? _cfg.taux / 100 : 0));
           
           await db.execute(`
             UPDATE factures_revendeur 
@@ -351,7 +355,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+        <Paper className="tk-page-tools" p="xl" radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
@@ -413,6 +417,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
           )}
         </Paper>
 
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group justify="space-between">
             <TextInput
@@ -432,6 +437,7 @@ export const ListeFacturesRevendeur: React.FC = () => {
             </Button>
           </Group>
         </Card>
+        </TkFilters>
 
         <Card withBorder radius="lg" shadow="sm" p="md">
           <Group justify="center" gap="md">
@@ -466,14 +472,14 @@ export const ListeFacturesRevendeur: React.FC = () => {
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                  <Table.Th c="white" style={{ width: 150 }}>Code facture</Table.Th>
-                  <Table.Th c="white">Revendeur</Table.Th>
-                  <Table.Th c="white" style={{ width: 120 }}>Date</Table.Th>
-                  <Table.Th c="white" ta="right" style={{ width: 150 }}>Montant TTC</Table.Th>
-                  <Table.Th c="white" ta="right" style={{ width: 150 }}>Commission</Table.Th>
-                  <Table.Th c="white" ta="center" style={{ width: 100 }}>Statut</Table.Th>
-                  <Table.Th c="white" ta="center" style={{ width: 250 }}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th style={{ width: 150 }}>Code facture</Table.Th>
+                  <Table.Th>Revendeur</Table.Th>
+                  <Table.Th style={{ width: 120 }}>Date</Table.Th>
+                  <Table.Th ta="right" style={{ width: 150 }}>Montant TTC</Table.Th>
+                  <Table.Th ta="right" style={{ width: 150 }}>Commission</Table.Th>
+                  <Table.Th ta="center" style={{ width: 100 }}>Statut</Table.Th>
+                  <Table.Th ta="center" style={{ width: 250 }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

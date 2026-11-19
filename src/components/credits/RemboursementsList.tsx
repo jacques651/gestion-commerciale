@@ -45,6 +45,7 @@ import {
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { creditRepository, Credit, Remboursement } from '../../database/repositories/creditRepository';
+import TkFilters from '../TkFilters';
 
 interface RemboursementsListProps {
   creditId?: number;
@@ -291,7 +292,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+      <Paper className="tk-page-tools" p="xl" radius="lg">
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
             <ThemeIcon size={45} radius="md" color="lime" variant="filled">
@@ -401,7 +402,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
                 value: c.idCredit.toString(),
                 label: `${c.code_credit} - ${c.designation} (${c.beneficiaire}) - ${formatMontant(c.montant_restant)} FCFA restant`,
               }))}
-            value={selectedCreditId?.toString() || null}
+            value={selectedCreditId?.toString() ?? undefined}
             onChange={(value) => {
               if (value) {
                 setSelectedCreditId(Number(value));
@@ -418,6 +419,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
 
       {/* Filtres */}
       {selectedCreditId && (
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Flex align="flex-end" gap="sm" wrap="wrap">
             <TextInput
@@ -432,6 +434,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
             <Select
               placeholder="Mode de paiement"
               clearable
+              searchable
               data={[
                 { value: 'ESPECES', label: 'Espèces' },
                 { value: 'VIREMENT', label: 'Virement' },
@@ -467,6 +470,7 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
             </Text>
           )}
         </Card>
+        </TkFilters>
       )}
 
       {/* Liste des remboursements */}
@@ -512,15 +516,15 @@ export default function RemboursementsList({ creditId }: RemboursementsListProps
             <ScrollArea h={450}>
               <Table striped highlightOnHover verticalSpacing="sm">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                    <Table.Th c="white" w={50}>N°</Table.Th>
-                    <Table.Th c="white">Code</Table.Th>
-                    <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white" ta="right">Montant</Table.Th>
-                    <Table.Th c="white">Mode de paiement</Table.Th>
-                    <Table.Th c="white">Référence</Table.Th>
-                    <Table.Th c="white">Notes</Table.Th>
-                    <Table.Th c="white" ta="center">Actions</Table.Th>
+                  <Table.Tr>
+                    <Table.Th w={50}>N°</Table.Th>
+                    <Table.Th>Code</Table.Th>
+                    <Table.Th>Date</Table.Th>
+                    <Table.Th ta="right">Montant</Table.Th>
+                    <Table.Th>Mode de paiement</Table.Th>
+                    <Table.Th>Référence</Table.Th>
+                    <Table.Th>Notes</Table.Th>
+                    <Table.Th ta="center">Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>

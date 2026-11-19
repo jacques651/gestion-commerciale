@@ -3,19 +3,22 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Stack, Card, Title, Text, Group, Button, Table, ActionIcon,
   Box, Pagination, Tooltip, Modal, Divider, ThemeIcon,
-  SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper, 
-  Loader, Center
+  SimpleGrid, Select, TextInput, Avatar, Badge, Flex, Paper,
+  Loader, Center, Textarea, Alert
 } from '@mantine/core';
 import {
   IconSearch, IconRefresh,
   IconCalendar, IconCash, IconPrinter, IconEye,
-  IconPlus, IconX
+  IconPlus, IconX, IconBan, IconAlertTriangle
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
+import { annulationService } from '../../services/annulationService';
+import { useAuth } from '../../contexts/AuthContext';
 import { useReactToPrint } from 'react-to-print';
 import { FormulaireReglement } from './FormulaireReglement';
 import { ReçuReglement } from './ReçuReglement';
+import TkFilters from '../TkFilters';
 
 interface Reglement {
   idReglement: number;
@@ -75,6 +78,7 @@ const formatDateTimeCustom = (dateStr: string): string => {
 };
 
 const ListeReglements: React.FC = () => {
+  const { user } = useAuth();
   const printRef = useRef<HTMLDivElement>(null);
   const [reglements, setReglements] = useState<ReglementWithCumul[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +89,10 @@ const ListeReglements: React.FC = () => {
   const [dateFin, setDateFin] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [reglementToCancel, setReglementToCancel] = useState<any>(null);
+  const [cancelMotif, setCancelMotif] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
   const [selectedReglement, setSelectedReglement] = useState<ReglementWithCumul | null>(null);
   const [clients, setClients] = useState<{ value: string; label: string }[]>([]);
   const [reglementModalOpened, setReglementModalOpened] = useState(false);
@@ -121,6 +129,7 @@ const ListeReglements: React.FC = () => {
           r.mode_reglement,
           r.reference,
           r.observation,
+          COALESCE(r.statut, 'VALIDE') as statut,
           c.NomComplet as client_nom,
           c.Societe as client_societe,
           f.code_facture,
@@ -139,16 +148,20 @@ const ListeReglements: React.FC = () => {
         }
         const entry = factureMap.get(reg.idFacture)!;
         entry.reglements.push(reg);
-        entry.total += reg.montant;
+        if (reg.statut !== 'ANNULE') entry.total += reg.montant;
       }
-      
+
       const reglementsWithCumul = result.map(reg => {
         const factureRegs = factureMap.get(reg.idFacture)?.reglements || [];
         const index = factureRegs.findIndex(r => r.idReglement === reg.idReglement);
-        const cumul = factureRegs.slice(0, index + 1).reduce((sum, r) => sum + r.montant, 0);
+        // Cumul des règlements VALIDES jusqu'à celui-ci (les annulés ne comptent pas).
+        const cumul = factureRegs
+          .slice(0, index + 1)
+          .filter(r => r.statut !== 'ANNULE')
+          .reduce((sum, r) => sum + r.montant, 0);
         const totalFacture = reg.montant_total_facture || cumul;
         const reste = totalFacture - cumul;
-        
+
         let statut: 'payee' | 'partielle' | 'non_payee' = 'non_payee';
         if (reste <= 0) statut = 'payee';
         else if (cumul > 0 && reste > 0) statut = 'partielle';
@@ -266,6 +279,39 @@ const ListeReglements: React.FC = () => {
     documentTitle: `Liste_Reglements_${new Date().toISOString().split('T')[0]}`,
   });
 
+  const handleOpenCancel = (reglement: any) => {
+    setReglementToCancel(reglement);
+    setCancelMotif('');
+    setCancelModalOpen(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!reglementToCancel) return;
+    setCancelLoading(true);
+    try {
+      const res = await annulationService.annulerReglement(
+        reglementToCancel.idReglement,
+        user?.nom,
+        cancelMotif || undefined
+      );
+      notifications.show({
+        title: 'Règlement annulé',
+        message: `Contrepassation de ${formatMontant(res.montant)} F enregistrée en caisse.`,
+        color: 'teal',
+      });
+      if (res.avertissements?.length) {
+        notifications.show({ title: 'Attention', message: res.avertissements.join(' '), color: 'yellow' });
+      }
+      setCancelModalOpen(false);
+      setReglementToCancel(null);
+      await chargerReglements();
+    } catch (e: any) {
+      notifications.show({ title: 'Erreur', message: e?.message || 'Annulation impossible', color: 'red' });
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
   const handleViewDetails = (reglement: ReglementWithCumul) => {
     setSelectedReglement(reglement);
     setDetailsModalOpen(true);
@@ -308,7 +354,7 @@ const ListeReglements: React.FC = () => {
       const reglementsTotal = await db.select<any[]>(`
         SELECT COALESCE(SUM(montant), 0) as total
         FROM reglements 
-        WHERE idFacture = ?
+        WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
       `, [factureId]);
       
       const montantTotal = facture[0].montant_ttc;
@@ -377,15 +423,10 @@ const ListeReglements: React.FC = () => {
     <Box p="md">
       <Stack gap="lg">
         {/* EN-TÊTE */}
-        <Paper
+        <Paper className="tk-page-tools"
           p="xl"
           radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            borderBottom: '3px solid #e94560',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
+          style={{ position: 'relative', overflow: 'hidden' }}
         >
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
@@ -449,6 +490,7 @@ const ListeReglements: React.FC = () => {
         </Paper>
 
         {/* Filtres + Recherche sur une seule ligne */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="xs">
           <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
             {/* Recherche */}
@@ -490,6 +532,7 @@ const ListeReglements: React.FC = () => {
                 ]}
                 size="xs"
                 clearable
+                searchable
                 styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
             </Box>
@@ -546,6 +589,7 @@ const ListeReglements: React.FC = () => {
             </Group>
           </Group>
         </Card>
+        </TkFilters>
 
         {/* Zone imprimable */}
         <div ref={printRef}>
@@ -563,16 +607,16 @@ const ListeReglements: React.FC = () => {
             <Box style={{ overflowX: "auto" }}>
               <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                    <Table.Th c="white" w={50}>N°</Table.Th>
-                    <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white">Client</Table.Th>
-                    <Table.Th c="white" ta="right">Total</Table.Th>
-                    <Table.Th c="white" ta="right">Versé</Table.Th>
-                    <Table.Th c="white" ta="right">Cumul</Table.Th>
-                    <Table.Th c="white" ta="right">Reste</Table.Th>
-                    <Table.Th c="white" ta="center">Statut</Table.Th>
-                    <Table.Th c="white" ta="center" className="no-print">Actions</Table.Th>
+                  <Table.Tr>
+                    <Table.Th w={50}>N°</Table.Th>
+                    <Table.Th>Date</Table.Th>
+                    <Table.Th>Client</Table.Th>
+                    <Table.Th ta="right">Total</Table.Th>
+                    <Table.Th ta="right">Versé</Table.Th>
+                    <Table.Th ta="right">Cumul</Table.Th>
+                    <Table.Th ta="right">Reste</Table.Th>
+                    <Table.Th ta="center">Statut</Table.Th>
+                    <Table.Th ta="center" className="no-print">Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -627,7 +671,9 @@ const ListeReglements: React.FC = () => {
                             </Text>
                           </Table.Td>
                           <Table.Td ta="center">
-                            {getStatutBadge(reg.statut_paiement)}
+                            {(reg as any).statut === 'ANNULE'
+                              ? <Badge color="red" variant="filled" size="sm">Annulé</Badge>
+                              : getStatutBadge(reg.statut_paiement)}
                           </Table.Td>
                           <Table.Td ta="center" className="no-print">
                             <Group gap={4} justify="center">
@@ -641,8 +687,21 @@ const ListeReglements: React.FC = () => {
                                   <IconEye size={16} />
                                 </ActionIcon>
                               </Tooltip>
-                              
-                              {reg.statut_paiement !== 'payee' && (
+
+                              {(reg as any).statut !== 'ANNULE' && (
+                                <Tooltip label="Annuler ce règlement">
+                                  <ActionIcon
+                                    size="md"
+                                    color="red"
+                                    variant="light"
+                                    onClick={() => handleOpenCancel(reg)}
+                                  >
+                                    <IconBan size={16} />
+                                  </ActionIcon>
+                                </Tooltip>
+                              )}
+
+                              {(reg as any).statut !== 'ANNULE' && reg.statut_paiement !== 'payee' && (
                                 <Tooltip label="Régler">
                                   <ActionIcon
                                     size="md"
@@ -691,6 +750,42 @@ const ListeReglements: React.FC = () => {
             )}
           </Card>
         </div>
+
+        {/* Modal Annulation d'un règlement */}
+        <Modal
+          opened={cancelModalOpen}
+          onClose={() => setCancelModalOpen(false)}
+          title={<Group gap="xs"><IconBan size={18} color="var(--mantine-color-red-6)" /><Text fw={700}>Annuler le règlement</Text></Group>}
+          size="md"
+          centered
+        >
+          {reglementToCancel && (
+            <Stack gap="md">
+              <Alert color="orange" variant="light" icon={<IconAlertTriangle size={16} />}>
+                Le règlement <b>{reglementToCancel.code_reglement}</b> de{' '}
+                <b>{formatMontant(reglementToCancel.montant)} F</b> sera marqué « Annulé ».
+                Une <b>sortie de caisse</b> de contrepassation sera enregistrée : l'encaissement
+                d'origine reste visible dans le journal, mais n'est plus compté dans le solde.
+              </Alert>
+              <Textarea
+                label="Motif de l'annulation (recommandé)"
+                placeholder="Ex. erreur de saisie, mauvais client…"
+                value={cancelMotif}
+                onChange={(e) => setCancelMotif(e.target.value)}
+                autosize
+                minRows={2}
+              />
+              <Group justify="flex-end">
+                <Button variant="outline" color="gray" onClick={() => setCancelModalOpen(false)}>
+                  Retour
+                </Button>
+                <Button color="red" loading={cancelLoading} leftSection={<IconBan size={16} />} onClick={handleConfirmCancel}>
+                  Confirmer l'annulation
+                </Button>
+              </Group>
+            </Stack>
+          )}
+        </Modal>
 
         {/* Modal Détails */}
         <Modal

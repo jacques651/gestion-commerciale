@@ -12,7 +12,9 @@ import {
   IconCash, IconFileInvoice
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
-import { journalCaisseService } from '../../services/journalCaisseService';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
+import { journalCaisseService, MoyenPaiement } from '../../services/journalCaisseService';
+import SelecteurModePaiement from '../common/SelecteurModePaiement';
 
 interface FormulaireReglementProps {
   opened: boolean;
@@ -43,6 +45,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
   opened, onClose, idFacture: propIdFacture, idClient: propIdClient
 }) => {
   const { createReglement } = useReglements();
+  const { tvaActive } = useTVAConfig();
   const [loading, setLoading] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [codeReglement, setCodeReglement] = useState<string>('');
@@ -53,6 +56,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
   const [selectedFacture, setSelectedFacture] = useState<Facture | null>(null);
   const [montantAPayer, setMontantAPayer] = useState<number>(0);
   const [modeReglement, setModeReglement] = useState<string | null>(null);
+  const [moyenReglement, setMoyenReglement] = useState<MoyenPaiement | null>(null);
   const [reference, setReference] = useState('');
   const [observation, setObservation] = useState('');
   const [typePaiement, setTypePaiement] = useState<'total' | 'partiel'>('total');
@@ -71,6 +75,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       const result = await db.select<Client[]>(`
         SELECT idClient, NomComplet, Societe, Tel
         FROM clients
+        WHERE TypeClient = 'client' AND COALESCE(est_annule, 0) = 0
         ORDER BY NomComplet
       `);
       setClients(result);
@@ -84,7 +89,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
     const result = await db.select<any[]>(`
       SELECT COALESCE(SUM(montant), 0) as total
       FROM reglements
-      WHERE idFacture = ?
+      WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
     `, [idFacture]);
     return result[0]?.total || 0;
   };
@@ -94,11 +99,12 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
       const db = await getDb();
 
       const facturesData = await db.select<any[]>(`
-        SELECT 
+        SELECT
           idFacture,
           code_facture,
           date_facture,
           montant_ttc,
+          montant_ht,
           COALESCE(montant_regle, 0) as montant_regle,
           statut
         FROM factures
@@ -110,14 +116,18 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
 
       for (const facture of facturesData) {
         const totalRegle = await getTotalRegleFacture(facture.idFacture);
-        const montantRestant = facture.montant_ttc - totalRegle;
+        // Sans TVA, le montant à payer est le HT (le TTC stocké peut être gonflé).
+        const montantBase = tvaActive
+          ? (facture.montant_ttc || 0)
+          : (facture.montant_ht ?? facture.montant_ttc ?? 0);
+        const montantRestant = montantBase - totalRegle;
 
         if (montantRestant > 0) {
           facturesAvecReste.push({
             idFacture: facture.idFacture,
             code_facture: facture.code_facture,
             date_facture: facture.date_facture,
-            montant_ttc: facture.montant_ttc,
+            montant_ttc: montantBase,
             montant_regle: totalRegle,
             montant_restant: montantRestant,
             statut: facture.statut
@@ -158,11 +168,12 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         const db = await getDb();
 
         const factureData = await db.select<any[]>(`
-          SELECT 
+          SELECT
             f.idFacture,
             f.code_facture,
             f.date_facture,
             f.montant_ttc,
+            f.montant_ht,
             COALESCE(f.montant_regle, 0) as montant_regle,
             f.statut,
             c.idClient,
@@ -177,7 +188,10 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         if (factureData.length > 0) {
           const row = factureData[0];
           const totalRegle = await getTotalRegleFacture(propIdFacture);
-          const montantRestant = row.montant_ttc - totalRegle;
+          const montantBase = tvaActive
+            ? (row.montant_ttc || 0)
+            : (row.montant_ht ?? row.montant_ttc ?? 0);
+          const montantRestant = montantBase - totalRegle;
 
           setSelectedClient({
             idClient: row.idClient,
@@ -191,7 +205,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
             idFacture: row.idFacture,
             code_facture: row.code_facture,
             date_facture: row.date_facture,
-            montant_ttc: row.montant_ttc,
+            montant_ttc: montantBase,
             montant_regle: totalRegle,
             montant_restant: montantRestant > 0 ? montantRestant : 0,
             statut: row.statut
@@ -297,7 +311,11 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           montant: montantAPayer,
           idFacture: selectedFacture.idFacture,
           codeFacture: selectedFacture.code_facture,
-          clientNom: selectedClient.NomComplet
+          clientNom: selectedClient.NomComplet,
+          // Mode de paiement saisi par l'opérateur : il alimente la
+          // ventilation espèces / transferts du point de caisse.
+          modePaiement: (moyenReglement?.categorie || 'ESPECES'),
+          modePaiementDetail: moyenReglement?.libelle,
         });
         console.log('✅ Journal de caisse mis à jour pour le règlement', codeReglement);
       } catch (journalError) {
@@ -365,7 +383,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
           </SimpleGrid>
         </Paper>
 
-        <Card withBorder>
+        <Card className="tk-form-section" withBorder>
           <Select
             label="Client"
             placeholder="Sélectionner un client"
@@ -394,7 +412,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         </Card>
 
         {selectedClient && factures.length > 0 && (
-          <Card withBorder shadow="sm" p="md">
+          <Card className="tk-form-section" withBorder shadow="sm" p="md">
             <Group gap="xs" mb="md">
               <IconFileInvoice size={18} color="#1b365d" />
               <Text fw={600}>Liste des factures</Text>
@@ -407,7 +425,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
                     <Table.Th w={50}>Sélection</Table.Th>
                     <Table.Th>Réf facture</Table.Th>
                     <Table.Th>Date</Table.Th>
-                    <Table.Th ta="right">Montant TTC</Table.Th>
+                    <Table.Th ta="right">{tvaActive ? 'Montant TTC' : 'Montant'}</Table.Th>
                     <Table.Th ta="right">Déjà réglé</Table.Th>
                     <Table.Th ta="right">Solde restant</Table.Th>
                   </Table.Tr>
@@ -462,7 +480,7 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
         )}
 
         {selectedFacture && (
-          <Card withBorder>
+          <Card className="tk-form-section" withBorder>
             <Stack gap="md">
               <Paper p="sm" withBorder>
                 <SimpleGrid cols={2} spacing="md">
@@ -477,12 +495,10 @@ export const FormulaireReglement: React.FC<FormulaireReglementProps> = ({
                 </SimpleGrid>
               </Paper>
 
-              <Select
+              <SelecteurModePaiement
                 label="Mode de règlement"
-                placeholder="Choisissez un mode"
-                data={modesReglement}
-                value={modeReglement}
-                onChange={setModeReglement}
+                value={moyenReglement?.code}
+                onChange={(m) => { setMoyenReglement(m); setModeReglement(m?.categorie || null); }}
                 required
               />
 

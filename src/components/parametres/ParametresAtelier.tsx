@@ -24,6 +24,7 @@ import {
   Tooltip,
   ActionIcon,
   Grid,
+  Switch,
 } from "@mantine/core";
 import {
   IconBuildingStore,
@@ -43,29 +44,52 @@ import {
 } from "@tabler/icons-react";
 import { getDb } from "../../database/db";
 import { notifications } from "@mantine/notifications";
+import { tvaService } from "../../services/tvaService";
+import ParametresImpression from "./ParametresImpression";
+import RestaurationAncienneBase from "./RestaurationAncienneBase";
 
 interface ConfigAtelier {
   id: number;
   nom_atelier: string;
+  forme_juridique: string;
   telephone: string;
   adresse: string;
+  adresse_postale: string;
+  adresse_cadastrale: string;
   email: string;
-  nif: string;
+  ifu: string;
+  rccm: string;
+  compte_bancaire: string;
+  regime_fiscal: string;
+  service_impots: string;
   message_facture: string;
   logo_base64: string;
+  tva_active: number;
 }
 
+const EMPTY_CONFIG: ConfigAtelier = {
+  id: 1,
+  nom_atelier: "",
+  forme_juridique: "",
+  telephone: "",
+  adresse: "",
+  adresse_postale: "",
+  adresse_cadastrale: "",
+  email: "",
+  ifu: "",
+  rccm: "",
+  compte_bancaire: "",
+  regime_fiscal: "",
+  service_impots: "",
+  message_facture: "",
+  logo_base64: "",
+  tva_active: 0,
+};
+
 const ParametresAtelier: React.FC = () => {
-  const [config, setConfig] = useState<ConfigAtelier>({
-    id: 1,
-    nom_atelier: "",
-    telephone: "",
-    adresse: "",
-    email: "",
-    nif: "",
-    message_facture: "",
-    logo_base64: "",
-  });
+  const [config, setConfig] = useState<ConfigAtelier>(EMPTY_CONFIG);
+  // Taux de TVA réellement configuré : plus de 18 % codé en dur dans les libellés.
+  const [tauxTVA, setTauxTVA] = useState<number>(18);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -78,10 +102,13 @@ const ParametresAtelier: React.FC = () => {
     const charger = async () => {
       try {
         const db = await getDb();
-        const data = await db.select<ConfigAtelier[]>(
+        const data = await db.select<any[]>(
           "SELECT * FROM configuration_atelier WHERE id = 1"
         );
-        if (data.length) setConfig(data[0]);
+        if (data.length) setConfig({ ...EMPTY_CONFIG, ...data[0] });
+        // Lecture du taux réellement configuré pour l'affichage des libellés
+        const cfgTva = await tvaService.get(true);
+        setTauxTVA(cfgTva.taux);
       } catch (error) {
         notifications.show({
           title: "Erreur",
@@ -118,7 +145,7 @@ const ParametresAtelier: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleChange = (field: keyof ConfigAtelier, value: string) => {
+  const handleChange = (field: keyof ConfigAtelier, value: string | number) => {
     setConfig(prev => ({ ...prev, [field]: value }));
     setIsDirty(true);
   };
@@ -139,19 +166,36 @@ const ParametresAtelier: React.FC = () => {
     try {
       const db = await getDb();
       await db.execute(
-        `INSERT OR REPLACE INTO configuration_atelier 
-         (id, nom_atelier, telephone, adresse, email, nif, message_facture, logo_base64, updated_at) 
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        `INSERT OR REPLACE INTO configuration_atelier
+         (id, nom_atelier, forme_juridique, telephone, adresse, adresse_postale, adresse_cadastrale,
+          email, ifu, rccm, compte_bancaire, regime_fiscal, service_impots,
+          message_facture, logo_base64, tva_active, updated_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
         [
           config.nom_atelier,
+          config.forme_juridique,
           config.telephone,
           config.adresse,
+          config.adresse_postale,
+          config.adresse_cadastrale,
           config.email,
-          config.nif,
+          config.ifu,
+          config.rccm,
+          config.compte_bancaire,
+          config.regime_fiscal,
+          config.service_impots,
           config.message_facture,
           config.logo_base64,
+          config.tva_active,
         ]
       );
+      
+      // Synchroniser la TVA via la source de vérité unique (tvaService).
+      // Important : on ne transmet PAS de taux ici. L'ancien code écrivait
+      // un taux de 0 lorsque la TVA était désactivée, ce qui effaçait
+      // définitivement le taux configuré. Le taux se règle dans l'écran
+      // dédié à la TVA ; ici on ne change que l'activation.
+      await tvaService.set(config.tva_active === 1);
       
       notifications.show({
         title: "✅ Succès",
@@ -178,11 +222,11 @@ const ParametresAtelier: React.FC = () => {
     
     try {
       const db = await getDb();
-      const data = await db.select<ConfigAtelier[]>(
+      const data = await db.select<any[]>(
         "SELECT * FROM configuration_atelier WHERE id = 1"
       );
       if (data.length) {
-        setConfig(data[0]);
+        setConfig({ ...EMPTY_CONFIG, ...data[0] });
         setIsDirty(false);
         notifications.show({
           title: "✅ Succès",
@@ -211,16 +255,11 @@ const ParametresAtelier: React.FC = () => {
   return (
     <Box p="md">
       <Stack gap="md">
-        {/* EN-TÊTE - Version compacte */}
-        <Paper
+        {/* EN-TÊTE */}
+        <Paper className="tk-page-tools tk-page-tools--fiche"
           p="md"
           radius="lg"
-          style={{
-            background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-            borderBottom: "3px solid #e94560",
-            position: "relative",
-            overflow: "hidden",
-          }}
+          style={{ position: "relative", overflow: "hidden" }}
         >
           <Flex justify="space-between" align="center" wrap="wrap" style={{ position: "relative", zIndex: 1 }}>
             <Group gap="sm">
@@ -268,7 +307,7 @@ const ParametresAtelier: React.FC = () => {
           </Flex>
         </Paper>
 
-        {/* FORMULAIRE - Version compacte */}
+        {/* FORMULAIRE */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <form onSubmit={handleSave}>
             <Stack gap="md">
@@ -319,70 +358,147 @@ const ParametresAtelier: React.FC = () => {
 
               <Divider />
 
-              {/* Informations - Grille compacte */}
+              {/* Identification */}
               <Box>
                 <Group gap="xs" mb="xs">
                   <IconBuildingStore size={16} color="#1b365d" />
-                  <Title order={5} size="h5">
-                    Informations de l'entreprise
-                  </Title>
-                  <Badge size="xs" variant="light" color="red">
-                    Obligatoire
-                  </Badge>
+                  <Title order={5} size="h5">Identification de l'entreprise</Title>
+                  <Badge size="xs" variant="light" color="red">Obligatoire</Badge>
                 </Group>
-
-                <Grid >
-                  <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="Nom"
+                <Grid>
+                  <Grid.Col span={{ base: 12, sm: 8 }}>
+                    <TextInput 
+                      label="Nom / Raison sociale" 
                       placeholder="Nom de l'entreprise"
-                      value={config.nom_atelier}
+                      value={config.nom_atelier} 
                       onChange={(e) => handleChange("nom_atelier", e.target.value)}
-                      leftSection={<IconBuildingStore size={14} />}
-                      required
-                      size="xs"
+                      leftSection={<IconBuildingStore size={14} />} 
+                      required 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 4 }}>
+                    <TextInput 
+                      label="Forme juridique" 
+                      placeholder="SARL, SA, EI..."
+                      value={config.forme_juridique} 
+                      onChange={(e) => handleChange("forme_juridique", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
                     />
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="NIF"
-                      placeholder="Identifiant fiscal"
-                      value={config.nif}
-                      onChange={(e) => handleChange("nif", e.target.value)}
-                      leftSection={<IconId size={14} />}
-                      size="xs"
+                    <TextInput 
+                      label="IFU (Identifiant Financier Unique)" 
+                      placeholder="N° IFU"
+                      value={config.ifu} 
+                      onChange={(e) => handleChange("ifu", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
                     />
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="Téléphone"
+                    <TextInput 
+                      label="N° RCCM" 
+                      placeholder="Registre du Commerce"
+                      value={config.rccm} 
+                      onChange={(e) => handleChange("rccm", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput 
+                      label="Téléphone" 
                       placeholder="Numéro de téléphone"
-                      value={config.telephone}
+                      value={config.telephone} 
                       onChange={(e) => handleChange("telephone", e.target.value)}
-                      leftSection={<IconPhone size={14} />}
-                      size="xs"
+                      leftSection={<IconPhone size={14} />} 
+                      size="xs" 
                     />
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <TextInput
-                      label="Email"
+                    <TextInput 
+                      label="Email" 
                       placeholder="Adresse email"
-                      value={config.email}
+                      value={config.email} 
                       onChange={(e) => handleChange("email", e.target.value)}
-                      leftSection={<IconMail size={14} />}
-                      type="email"
-                      size="xs"
+                      leftSection={<IconMail size={14} />} 
+                      type="email" 
+                      size="xs" 
                     />
                   </Grid.Col>
                   <Grid.Col span={12}>
-                    <Textarea
-                      label="Adresse"
-                      placeholder="Adresse complète"
-                      value={config.adresse}
+                    <Textarea 
+                      label="Adresse géographique" 
+                      placeholder="Quartier, rue, ville..."
+                      value={config.adresse} 
                       onChange={(e) => handleChange("adresse", e.target.value)}
-                      leftSection={<IconMapPin size={14} />}
-                      minRows={2}
-                      size="xs"
+                      minRows={2} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput 
+                      label="Adresse postale (BP)" 
+                      placeholder="Ex : BP 1234 Ouagadougou"
+                      value={config.adresse_postale} 
+                      onChange={(e) => handleChange("adresse_postale", e.target.value)}
+                      leftSection={<IconMapPin size={14} />} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput 
+                      label="Adresse cadastrale" 
+                      placeholder="N° ilot / lot"
+                      value={config.adresse_cadastrale} 
+                      onChange={(e) => handleChange("adresse_cadastrale", e.target.value)}
+                      leftSection={<IconMapPin size={14} />} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Box>
+
+              <Divider />
+
+              {/* Informations fiscales */}
+              <Box>
+                <Group gap="xs" mb="xs">
+                  <IconId size={16} color="#1b365d" />
+                  <Title order={5} size="h5">Informations fiscales</Title>
+                  <Badge size="xs" variant="light" color="orange">Facture normalisée</Badge>
+                </Group>
+                <Grid>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput 
+                      label="Régime d'imposition" 
+                      placeholder="Ex : RSI, RNI, Forfait..."
+                      value={config.regime_fiscal} 
+                      onChange={(e) => handleChange("regime_fiscal", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, sm: 6 }}>
+                    <TextInput 
+                      label="Service des impôts de rattachement" 
+                      placeholder="Ex : DGE, CIME Ouaga 1..."
+                      value={config.service_impots} 
+                      onChange={(e) => handleChange("service_impots", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={12}>
+                    <TextInput 
+                      label="Références bancaires (compte)" 
+                      placeholder="Ex : Coris Bank – 01234567890"
+                      value={config.compte_bancaire} 
+                      onChange={(e) => handleChange("compte_bancaire", e.target.value)}
+                      leftSection={<IconId size={14} />} 
+                      size="xs" 
                     />
                   </Grid.Col>
                 </Grid>
@@ -411,6 +527,38 @@ const ParametresAtelier: React.FC = () => {
                 />
               </Box>
 
+              {/* ✅ TVA - Section mise en évidence */}
+              <Box p="md" style={{ backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6' }}>
+                <Group justify="space-between" align="center">
+                  <Box>
+                    <Group gap="xs">
+                      <Text size="sm" fw={600}>TVA (Taxe sur la Valeur Ajoutée)</Text>
+                      <Badge 
+                        size="xs" 
+                        color={config.tva_active ? 'green' : 'gray'}
+                        variant="filled"
+                      >
+                        {config.tva_active ? `Activée (${tauxTVA}%)` : 'Désactivée'}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed" mt={2}>
+                      {config.tva_active
+                        ? `✅ La TVA ${tauxTVA}% sera appliquée sur toutes les factures et ventes`
+                        : '⛔ Les prix seront affichés et facturés hors taxe (HT)'
+                      }
+                    </Text>
+                  </Box>
+                  <Switch
+                    checked={config.tva_active === 1}
+                    onChange={(e) => handleChange("tva_active", e.currentTarget.checked ? 1 : 0)}
+                    color={config.tva_active ? 'green' : 'gray'}
+                    size="md"
+                    label={config.tva_active ? 'TVA ON' : 'TVA OFF'}
+                    labelPosition="left"
+                  />
+                </Group>
+              </Box>
+
               <Divider />
 
               {/* Actions */}
@@ -437,7 +585,7 @@ const ParametresAtelier: React.FC = () => {
               </Group>
 
               {success && (
-                <Alert icon={<IconCheck size={14} />} color="green" variant="light" withCloseButton onClose={() => setSuccess(false)} >
+                <Alert icon={<IconCheck size={14} />} color="green" variant="light" withCloseButton onClose={() => setSuccess(false)}>
                   <Text size="sm" fw={500}>Configuration enregistrée avec succès !</Text>
                 </Alert>
               )}
@@ -445,7 +593,11 @@ const ParametresAtelier: React.FC = () => {
           </form>
         </Card>
 
-        {/* MODAL INSTRUCTIONS - Version compacte */}
+        {/* Paramètres d'impression : format papier par défaut appliqué
+            à tous les documents (factures, reçus, journaux, rapports). */}
+        <ParametresImpression />
+
+        {/* MODAL INSTRUCTIONS */}
         <Modal
           opened={infoModalOpen}
           onClose={() => setInfoModalOpen(false)}
@@ -493,6 +645,14 @@ const ParametresAtelier: React.FC = () => {
                 <Text size="xs" fw={500}>Message sur les factures</Text>
               </Group>
             </Paper>
+            <Paper withBorder p="sm" radius="md" bg="gray.0">
+              <Group gap="sm">
+                <ThemeIcon color="green" size="xs" radius="xl">
+                  <IconCheck size={10} />
+                </ThemeIcon>
+                <Text size="xs" fw={500}>Activer/Désactiver la TVA</Text>
+              </Group>
+            </Paper>
             <Divider />
             <Text size="xs" c="dimmed" ta="center">
               Version 3.0.0
@@ -500,7 +660,7 @@ const ParametresAtelier: React.FC = () => {
           </Stack>
         </Modal>
 
-        {/* MODAL APERÇU - Version compacte */}
+        {/* MODAL APERÇU */}
         <Modal
           opened={previewModalOpen}
           onClose={() => setPreviewModalOpen(false)}
@@ -533,32 +693,21 @@ const ParametresAtelier: React.FC = () => {
                     <IconBuildingStore size={24} />
                   </ThemeIcon>
                 )}
-                <Box>
-                  <Text fw={600} size="sm">{config.nom_atelier || "Nom de l'entreprise"}</Text>
-                  <Text size="xs" c="dimmed">{config.adresse || "Adresse"}</Text>
-                  <Group gap="xs">
-                    {config.telephone && <Text size="xs" c="dimmed">📞 {config.telephone}</Text>}
-                  </Group>
+                <Box ml="sm">
+                  <Text fw={700} size="sm">{config.nom_atelier || "Nom de l'atelier"}</Text>
+                  {config.adresse && <Text size="xs" c="dimmed">{config.adresse}</Text>}
+                  {config.telephone && <Text size="xs" c="dimmed">Tél : {config.telephone}</Text>}
                 </Box>
               </Group>
-
-              <Divider my="xs" />
-
-              <Box>
-                <Text size="xs" fw={500}>Message</Text>
-                <Text size="xs" c="dimmed" style={{ fontStyle: "italic" }}>
-                  {config.message_facture || "Aucun message défini"}
-                </Text>
-              </Box>
             </Paper>
-
-            <Group justify="flex-end">
-              <Button variant="light" onClick={() => setPreviewModalOpen(false)} size="xs">
-                Fermer
-              </Button>
-            </Group>
+            {config.ifu && <Text size="xs">IFU : {config.ifu}</Text>}
+            {config.rccm && <Text size="xs">RCCM : {config.rccm}</Text>}
+            <Text size="xs" c="dimmed">
+              TVA : {config.tva_active ? `✅ Activée (${tauxTVA}%)` : '⛔ Désactivée'}
+            </Text>
           </Stack>
         </Modal>
+        <RestaurationAncienneBase />
       </Stack>
     </Box>
   );

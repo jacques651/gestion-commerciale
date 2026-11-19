@@ -18,6 +18,7 @@ import {
 import { getDb } from "../../database/db";
 import bcrypt from "bcryptjs";
 import { notifications } from "@mantine/notifications";
+import TkFilters from '../TkFilters';
 
 interface Utilisateur {
   id: number;
@@ -642,15 +643,10 @@ const ListeUtilisateurs: React.FC = () => {
     <>
       <Stack gap="lg" p="md">
         {/* EN-TÊTE */}
-        <Paper
+        <Paper className="tk-page-tools"
           p="xl"
           radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            borderBottom: '3px solid #e94560',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
+          style={{ position: 'relative', overflow: 'hidden' }}
         >
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
@@ -736,6 +732,7 @@ const ListeUtilisateurs: React.FC = () => {
         </Paper>
 
         {/* Barre d'outils */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Flex justify="space-between" align="flex-end" wrap="wrap" gap="md">
             <Group grow style={{ flex: 2 }}>
@@ -791,6 +788,7 @@ const ListeUtilisateurs: React.FC = () => {
             </Group>
           </Flex>
         </Card>
+        </TkFilters>
 
         {/* Tableau des utilisateurs */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
@@ -810,11 +808,11 @@ const ListeUtilisateurs: React.FC = () => {
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="md" horizontalSpacing="md">
               <Table.Thead>
-                <Table.Tr style={{background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', }}>
-                  <Table.Th c="white">Utilisateur</Table.Th>
-                  <Table.Th c="white">Login</Table.Th>
-                  <Table.Th c="white">Rôle</Table.Th>
-                  <Table.Th c="white" ta="center" w={120}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th>Utilisateur</Table.Th>
+                  <Table.Th>Login</Table.Th>
+                  <Table.Th>Rôle</Table.Th>
+                  <Table.Th ta="center" w={120}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

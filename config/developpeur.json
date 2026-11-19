@@ -1,0 +1,5 @@
+{
+  "commentaire": "Empreinte du mot de passe developpeur (jamais le mot de passe en clair). Modifier avec Changer-mot-de-passe-developpeur.bat puis recompiler avec build.bat.",
+  "sel": "74169fec40e8912237527da5161564cb",
+  "empreinte": "3d934c2590553b7257b1da45d50032758120aa2e8f54ee45cf3cd7a9637e2ff3"
+}

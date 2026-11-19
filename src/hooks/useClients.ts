@@ -84,6 +84,29 @@ export const useClients = () => {
     }
   }, [loadClients]);
 
+  const annulerClient = useCallback(async (id: number, par?: string) => {
+    try {
+      await clientRepository.annuler(id, par);
+      notifications.show({ title: 'Client annulé', message: 'Client annulé (conservé et exclu des sélections)', color: 'orange' });
+      await loadClients();
+    } catch (err) {
+      console.error(err);
+      notifications.show({ title: 'Erreur', message: "Erreur lors de l'annulation", color: 'red' });
+      throw err;
+    }
+  }, [loadClients]);
+
+  const restaurerClient = useCallback(async (id: number) => {
+    try {
+      await clientRepository.restaurer(id);
+      notifications.show({ title: 'Client rétabli', message: 'Client rétabli', color: 'green' });
+      await loadClients();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  }, [loadClients]);
+
   const searchClients = useCallback(async (term: string) => {
     if (!term) {
       await loadClients();
@@ -111,6 +134,8 @@ export const useClients = () => {
     createClient,
     updateClient,
     deleteClient,
+    annulerClient,
+    restaurerClient,
     searchClients,
     refresh: loadClients,
   };

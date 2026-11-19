@@ -3,18 +3,26 @@ import React, { useEffect, useState } from 'react';
 import {
   Stack, Card, Title, Text, Group, SimpleGrid, ThemeIcon, Badge,
   LoadingOverlay, Button, Box, Paper, Avatar, Alert, ActionIcon,
-  Divider, Progress, Tooltip
+  Divider, Progress, Tooltip, UnstyledButton
 } from '@mantine/core';
 import {
   IconUsers, IconShoppingBag, IconBuildingStore, IconPackage,
   IconReceipt, IconCash, IconTruck, IconFileInvoice,
   IconTrendingUp, IconTrendingDown, IconAlertCircle, IconRefresh,
   IconPlus, IconChartBar, IconShoppingCart, IconUserPlus,
-  IconReceipt2, IconArrowRight
+  IconReceipt2, IconArrowRight,
+  IconDeviceMobile, IconBuildingWarehouse, IconMoneybag,
+  IconCreditCard, IconPercentage, IconUserCog, IconSettings,
+  IconKey, IconDatabase
 } from '@tabler/icons-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
+import { transactionService, type TransactionView } from '../../services/transactionFacade';
+import { transactionTotals } from '../../services/transactionConsolidation';
+import { useTransactionContext } from '../../hooks/useTransactionSnapshot';
+import TransactionsSummary from '../ventes/TransactionsSummary';
 
 type PageKey =
   | 'dashboard' | 'clients' | 'commandes' | 'factures' | 'ventes'
@@ -37,6 +45,11 @@ const formatDate = () => {
 
 const Dashboard: React.FC<DashboardProps> = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const txContext = useTransactionContext();
+  const [transactionRows, setTransactionRows] = useState<TransactionView[]>([]);
+  const [transactionError, setTransactionError] = useState<string | null>(null);
+  const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +84,14 @@ const Dashboard: React.FC<DashboardProps> = () => {
     setError(null);
     try {
       const db = await getDb();
+      let consolidatedRows: TransactionView[] = [];
+      try {
+        if (!txContext) throw new Error('Connectez-vous pour consulter les ventes et prestations.');
+        consolidatedRows = await transactionService.listAll({}, txContext);
+        setTransactionError(null);
+      } catch (reason: unknown) { setTransactionError(reason instanceof Error ? reason.message : 'Consolidation indisponible.'); }
+      setTransactionRows(consolidatedRows);
+      const consolidated = transactionTotals(consolidatedRows);
       const hasMontantVente = await columnExists(db, 'decomptes', 'montant_vente');
       const hasMontantCommission = await columnExists(db, 'decomptes', 'montant_commission');
       const hasTauxCommission = await columnExists(db, 'decomptes', 'taux_commission');
@@ -78,24 +99,19 @@ const Dashboard: React.FC<DashboardProps> = () => {
       const [clients, revendeurs, produits, commandes, ventes, decomptes, factures] = await Promise.all([
         safeQuery(db, `SELECT COUNT(*) as total FROM clients`),
         safeQuery(db, `SELECT COUNT(*) as total FROM clients WHERE TypeClient = 'revendeur'`),
-        safeQuery(db, `SELECT COUNT(*) as total FROM products WHERE est_supprime = 0`),
+        safeQuery(db, `SELECT COUNT(*) as total FROM products WHERE est_supprime = 0 AND COALESCE(est_annule, 0) = 0`),
         safeQuery(db, `SELECT COUNT(*) as total FROM commandes WHERE statut != 'ANNULEE'`),
         safeQuery(db, `SELECT COUNT(*) as total FROM ventes`),
         safeQuery(db, `SELECT COUNT(*) as total FROM decomptes`),
         safeQuery(db, `SELECT COUNT(*) as total FROM factures`),
       ]);
 
-      const [commandesCA, ventesCA, encaissements, facturesImpayees,
-             commandesRevendeur, commandesEnAttente, facturesEnAttente,
+      const [commandesRevendeur, commandesEnAttente, facturesEnAttente,
              stockCentral, stockRevendeur] = await Promise.all([
-        safeQuery(db, `SELECT COALESCE(SUM(montant_ttc), 0) as total FROM commandes WHERE statut != 'ANNULEE'`),
-        safeQuery(db, `SELECT COALESCE(SUM(montant_ttc), 0) as total FROM ventes`),
-        safeQuery(db, `SELECT COALESCE(SUM(montant), 0) as total FROM reglements`),
-        safeQuery(db, `SELECT COALESCE(SUM(montant_ttc), 0) as total FROM factures WHERE statut IN ('EN_ATTENTE', 'PARTIELLEMENT_REGLEE')`),
         safeQuery(db, `SELECT COUNT(*) as total FROM commandes WHERE UPPER(type_commande) = 'REVENDEUR' AND statut != 'ANNULEE'`),
         safeQuery(db, `SELECT COUNT(*) as total FROM commandes WHERE statut NOT IN ('LIVREE','ANNULEE')`),
         safeQuery(db, `SELECT COUNT(*) as total FROM factures WHERE statut = 'EN_ATTENTE'`),
-        safeQuery(db, `SELECT COALESCE(SUM(qte_stock), 0) as total FROM products WHERE est_supprime = 0`),
+        safeQuery(db, `SELECT COALESCE(SUM(qte_stock), 0) as total FROM products WHERE est_supprime = 0 AND COALESCE(est_annule, 0) = 0`),
         safeQuery(db, `SELECT COALESCE(SUM(qte_stock), 0) as total FROM stock_revendeur`),
       ]);
 
@@ -120,7 +136,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
         }
       } catch { /* silencieux */ }
 
-      const chiffreAffaires = Number(commandesCA[0]?.total || 0) + Number(ventesCA[0]?.total || 0);
+      const chiffreAffaires = consolidated.facture;
 
       setStats({
         clients: Number(clients[0]?.total || 0),
@@ -133,8 +149,8 @@ const Dashboard: React.FC<DashboardProps> = () => {
         chiffreAffaires,
         commissions: totalCommissions,
         netAReverser,
-        encaissements: Number(encaissements[0]?.total || 0),
-        resteARecouvrer: Number(facturesImpayees[0]?.total || 0),
+        encaissements: consolidated.encaisseNet,
+        resteARecouvrer: consolidated.restantDu,
         commandesRevendeur: Number(commandesRevendeur[0]?.total || 0),
         stockCentral: Number(stockCentral[0]?.total || 0),
         stockRevendeur: Number(stockRevendeur[0]?.total || 0),
@@ -185,11 +201,9 @@ const Dashboard: React.FC<DashboardProps> = () => {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [txContext]);
 
-  const tauxRecouvrement = stats.chiffreAffaires > 0
-    ? Math.min((stats.encaissements / stats.chiffreAffaires) * 100, 100)
-    : 0;
+  const tauxRecouvrement = transactionTotals(transactionRows).recouvrement;
 
   const getStatusBadge = (statut: string) => {
     const map: Record<string, { color: string; label: string }> = {
@@ -202,6 +216,43 @@ const Dashboard: React.FC<DashboardProps> = () => {
     const s = map[statut] || { color: 'gray', label: statut };
     return <Badge size="xs" color={s.color} variant="light">{s.label}</Badge>;
   };
+
+  // Raccourcis vers les fonctionnalités NON déjà présentes dans les indicateurs métier
+  // (Produits, Clients, Commandes, Ventes, Factures, Décomptes sont déjà des cartes ci-dessous)
+  const raccourcisGroups: { titre: string; items: { label: string; to: string; icon: React.ReactNode; color: string }[] }[] = [
+    {
+      titre: 'Ventes', items: [
+        { label: 'Seconde main', to: '/seconde-main', icon: <IconDeviceMobile size={16} />, color: 'grape' },
+      ],
+    },
+    ...(isAdmin ? [{
+      titre: 'Revendeurs', items: [
+        { label: 'Cmd. revendeur', to: '/commandes-revendeur', icon: <IconShoppingCart size={16} />, color: 'indigo' },
+        { label: 'Fact. revendeur', to: '/factures-revendeur', icon: <IconFileInvoice size={16} />, color: 'indigo' },
+        { label: 'Stock rev.', to: '/stock-revendeurs', icon: <IconBuildingWarehouse size={16} />, color: 'violet' },
+        { label: 'Ponctuels', to: '/revendeurs/ponctuels', icon: <IconUserPlus size={16} />, color: 'pink' },
+      ],
+    }] : []),
+    {
+      titre: 'Finances', items: [
+        { label: 'Tableau financier', to: '/finances/tableau-de-bord', icon: <IconChartBar size={16} />, color: 'blue' },
+        { label: 'Caisse', to: '/caisse', icon: <IconCash size={16} />, color: 'green' },
+        { label: 'Charges', to: '/charges', icon: <IconMoneybag size={16} />, color: 'red' },
+        { label: 'Règlements', to: '/reglements', icon: <IconReceipt2 size={16} />, color: 'teal' },
+        { label: 'Crédits', to: '/credits', icon: <IconCreditCard size={16} />, color: 'orange' },
+        { label: 'Remboursements', to: '/remboursements', icon: <IconPercentage size={16} />, color: 'grape' },
+      ],
+    },
+    ...(isAdmin ? [{
+      titre: 'Administration', items: [
+        { label: 'Utilisateurs', to: '/utilisateurs', icon: <IconUserCog size={16} />, color: 'blue' },
+        { label: 'Paramètres', to: '/parametres', icon: <IconSettings size={16} />, color: 'gray' },
+        { label: 'Licence', to: '/licence', icon: <IconKey size={16} />, color: 'yellow' },
+        { label: 'Diagnostic', to: '/diagnostic', icon: <IconDatabase size={16} />, color: 'red' },
+      ],
+    }] : []),
+  ];
+
 
   if (loading) {
     return (
@@ -229,14 +280,9 @@ const Dashboard: React.FC<DashboardProps> = () => {
       <Stack gap="md">
 
         {/* ── BANDEAU HAUT ───────────────────────────────── */}
-        <Paper
+        <Paper className="tk-page-tools tk-page-tools--fiche"
           p="md"
-          radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #0a1628 0%, #122040 60%, #1b365d 100%)',
-            border: 'none',
-          }}
-        >
+          radius="lg">
           <Group justify="space-between" mb="md" wrap="wrap">
             <Box>
               <Text size="xs" c="rgba(255,255,255,0.5)" tt="uppercase" style={{ letterSpacing: 1 }}>
@@ -261,32 +307,34 @@ const Dashboard: React.FC<DashboardProps> = () => {
           {/* 4 métriques clés inline */}
           <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
             {[
-              { label: "Chiffre d'affaires", value: formatCurrency(stats.chiffreAffaires), icon: <IconChartBar size={16} />, color: '#f4b400' },
-              { label: 'Encaissements', value: formatCurrency(stats.encaissements), icon: <IconCash size={16} />, color: '#40c057' },
-              { label: 'Impayés', value: formatCurrency(stats.resteARecouvrer), icon: <IconAlertCircle size={16} />, color: stats.resteARecouvrer > 0 ? '#f97316' : '#40c057' },
-              { label: 'Recouvrement', value: `${tauxRecouvrement.toFixed(0)}%`, icon: tauxRecouvrement >= 80 ? <IconTrendingUp size={16} /> : <IconTrendingDown size={16} />, color: tauxRecouvrement >= 80 ? '#40c057' : '#f97316' },
+              { label: "Chiffre d'affaires", value: transactionError ? '·' : formatCurrency(stats.chiffreAffaires), icon: <IconChartBar size={16} />, color: '#0f766e' },
+              { label: 'Encaissements', value: transactionError ? '·' : formatCurrency(stats.encaissements), icon: <IconCash size={16} />, color: '#0f766e' },
+              { label: 'Impayés', value: transactionError ? '·' : formatCurrency(stats.resteARecouvrer), icon: <IconAlertCircle size={16} />, color: stats.resteARecouvrer > 0 ? '#b45309' : '#0f766e' },
+              { label: 'Recouvrement', value: `${tauxRecouvrement.toFixed(0)}%`, icon: tauxRecouvrement >= 80 ? <IconTrendingUp size={16} /> : <IconTrendingDown size={16} />, color: tauxRecouvrement >= 80 ? '#0f766e' : '#b45309' },
             ].map((m, i) => (
-              <Box key={i} p="xs" style={{ borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
-                <Group gap={6} mb={4}>
-                  <Box style={{ color: m.color }}>{m.icon}</Box>
-                  <Text size="xs" c="rgba(255,255,255,0.5)">{m.label}</Text>
+              <Box key={i} p="sm" className="tk-kpi">
+                <Group gap="sm" wrap="nowrap">
+                  <span className="tk-kpi-icon" style={{ color: m.color }}>{m.icon}</span>
+                  <Box style={{ minWidth: 0 }}>
+                    <Text className="tk-kpi-label">{m.label}</Text>
+                    <Text className="tk-kpi-value" fw={700} style={{ fontSize: 15 }}>{m.value}</Text>
+                  </Box>
                 </Group>
-                <Text fw={700} c="white" size="sm" style={{ fontSize: 15 }}>{m.value}</Text>
               </Box>
             ))}
           </SimpleGrid>
         </Paper>
+        <TransactionsSummary rows={transactionRows} loading={loading} error={transactionError} charts metrics={false} />
+
 
         {/* ── ACTIONS RAPIDES ─────────────────────────────── */}
-        <Card withBorder radius="lg" p="md">
+        <Card withBorder radius="lg" p="md" className="tk-quick-actions">
           <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb="sm" style={{ letterSpacing: 0.8 }}>
             Actions rapides
           </Text>
           <Group gap="sm" wrap="wrap">
             <Button
               leftSection={<IconPlus size={15} />}
-              variant="gradient"
-              gradient={{ from: 'teal', to: 'cyan' }}
               size="sm"
               onClick={() => navigate('/ventes')}
             >
@@ -294,8 +342,6 @@ const Dashboard: React.FC<DashboardProps> = () => {
             </Button>
             <Button
               leftSection={<IconShoppingCart size={15} />}
-              variant="gradient"
-              gradient={{ from: 'blue', to: 'indigo' }}
               size="sm"
               onClick={() => navigate('/commandes/nouveau')}
             >
@@ -303,8 +349,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
             </Button>
             <Button
               leftSection={<IconUserPlus size={15} />}
-              variant="light"
-              color="violet"
+              variant="default"
               size="sm"
               onClick={() => navigate('/clients')}
             >
@@ -312,8 +357,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
             </Button>
             <Button
               leftSection={<IconReceipt2 size={15} />}
-              variant="light"
-              color="orange"
+              variant="default"
               size="sm"
               onClick={() => navigate('/decomptes/nouveau')}
             >
@@ -321,14 +365,32 @@ const Dashboard: React.FC<DashboardProps> = () => {
             </Button>
             <Button
               leftSection={<IconCash size={15} />}
-              variant="light"
-              color="green"
+              variant="default"
               size="sm"
               onClick={() => navigate('/caisse')}
             >
               Journal de caisse
             </Button>
           </Group>
+        </Card>
+
+        {/* ── ACCÈS RAPIDES (toutes les fonctionnalités, grille uniforme) ─── */}
+        <Card withBorder radius="lg" p="md">
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb="sm" style={{ letterSpacing: 0.8 }}>
+            Accès rapides
+          </Text>
+          <SimpleGrid cols={{ base: 3, xs: 4, sm: 5, md: 7, lg: 8 }} spacing="xs" verticalSpacing="xs">
+            {raccourcisGroups.flatMap((g) => g.items).map((it) => (
+              <UnstyledButton
+                key={it.to}
+                className="tk-quick-tile"
+                onClick={() => navigate(it.to)}
+              >
+                <span className="tk-quick-tile-icon">{it.icon}</span>
+                <Text className="tk-quick-tile-label" ta="center" lh={1.1} lineClamp={2}>{it.label}</Text>
+              </UnstyledButton>
+            ))}
+          </SimpleGrid>
         </Card>
 
         {/* ── INDICATEURS MÉTIER (compacts) ───────────────── */}
@@ -343,30 +405,20 @@ const Dashboard: React.FC<DashboardProps> = () => {
           ].map((item, i) => (
             <Card
               key={i}
-              withBorder
-              p="sm"
-              radius="md"
-              style={{ cursor: 'pointer', transition: 'all 0.15s' }}
+              className="tk-kpi"
+              p="md"
+              radius="lg"
+              style={{ cursor: 'pointer' }}
               onClick={() => navigate(item.to)}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-                (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-              }}
             >
-              <Group justify="space-between" mb={4}>
-                <ThemeIcon size={28} color={item.color} variant="light" radius="md">
-                  {item.icon}
-                </ThemeIcon>
+              <Group justify="space-between" mb={6}>
+                <span className="tk-kpi-icon">{item.icon}</span>
                 {item.alert !== undefined && (
                   <Badge size="xs" color="red" variant="filled" circle>{item.alert}</Badge>
                 )}
               </Group>
-              <Text fw={700} size="xl" lh={1}>{item.value}</Text>
-              <Text size="xs" c="dimmed" mt={2}>{item.label}</Text>
+              <Text className="tk-kpi-value" fw={800} size="xl" lh={1}>{item.value}</Text>
+              <Text className="tk-kpi-label" mt={4}>{item.label}</Text>
             </Card>
           ))}
         </SimpleGrid>
@@ -564,9 +616,9 @@ const Dashboard: React.FC<DashboardProps> = () => {
             </Group>
             <Stack gap="xs">
               {[
-                { label: "CA total (commandes + ventes)", value: stats.chiffreAffaires, color: 'blue' },
-                { label: "Encaissements reçus", value: stats.encaissements, color: 'green' },
-                { label: "Factures impayées", value: stats.resteARecouvrer, color: 'orange' },
+                { label: "CA facturé (ventes + prestations)", value: stats.chiffreAffaires, color: 'blue' },
+                { label: "Encaissements nets", value: stats.encaissements, color: 'green' },
+                { label: "Impayés ventes/prestations", value: stats.resteARecouvrer, color: 'orange' },
               ].map((row, i) => (
                 <Group key={i} justify="space-between">
                   <Text size="xs" c="dimmed">{row.label}</Text>

@@ -5,14 +5,14 @@ import {
   NumberInput, Table, ActionIcon, Text, Card,
   Divider, Grid, Badge,
   Tooltip, Pagination, ScrollArea, ThemeIcon, Paper, Center,
-  Alert, SegmentedControl
+  Alert
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
   IconTrash, IconPlus, IconSearch,
   IconRefresh, IconUserPlus, IconShoppingBag, IconPhone, IconUser,
   IconPackage, IconBuildingStore, IconShoppingCart, IconTruck,
-  IconPercentage, IconEdit, IconCheck
+  IconPercentage, IconEdit, IconCheck, IconX
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
@@ -20,11 +20,24 @@ import { useCommandes } from '../../hooks/useCommandes';
 import FormulaireProduit from '../products/FormulaireProduit';
 import { FormulaireClient } from '../clients/FormulaireClient';
 import { getDb } from '../../database/db';
+import { tvaService } from '../../services/tvaService';
+import StockRevendeurService from '../../services/StockRevendeurService';
 import { useDebug } from '../../hooks/useDebug';
+import { configCommerceService } from '../../services/configCommerceService';
 
 interface FormulaireCommandeProps {
   opened: boolean;
   onClose: () => void;
+  /**
+   * Restreint le formulaire à un circuit précis.
+   * 'REVENDEUR' : seuls les revendeurs sont proposés et le type de commande
+   * est verrouillé, conformément au circuit décrit dans le guide
+   * (Revendeurs → Commandes → Nouvelle commande).
+   * Non renseigné : comportement d'origine (tous clients, type libre).
+   */
+  restrictionType?: 'REVENDEUR' | 'STANDARD';
+  /** Appelé après un enregistrement réussi (pour rafraîchir la liste appelante) */
+  onSaved?: () => void;
 }
 
 interface CartItem {
@@ -40,6 +53,7 @@ interface CartItem {
   total: number;
   prix_original?: number;
   type_prix?: 'DETAIL' | 'GROS';
+  prix_modifie?: boolean;
 }
 
 type PrixType = 'DETAIL' | 'GROS';
@@ -49,7 +63,9 @@ type Db = {
   execute: (query: string, params?: any[]) => Promise<{ lastInsertId?: number | string }>;
 };
 
-export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, onClose }) => {
+export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({
+  opened, onClose, restrictionType, onSaved
+}) => {
   const debug = useDebug('FormulaireCommande');
 
   const { clients, refresh: refreshClients } = useClients();
@@ -66,14 +82,18 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   const [clientModalOpened, setClientModalOpened] = useState(false);
   const [produitModalOpen, setProduitModalOpen] = useState(false);
   const [codeCommande, setCodeCommande] = useState('');
-  const [typeCommande, setTypeCommande] = useState<string>('STANDARD');
-  const [commissionPourcentage, setCommissionPourcentage] = useState<number>(0);
+  // Le type est pré-positionné par le circuit d'appel quand il est imposé.
+  const [typeCommande, setTypeCommande] = useState<string>(restrictionType || 'STANDARD');
+  const [commissionPourcentage, setCommissionPourcentage] = useState<number>(60);
+  const [commissionDefaut, setCommissionDefaut] = useState<number>(60);
   const [quantiteInput, setQuantiteInput] = useState<Record<number, number>>({});
   const [, setDbError] = useState<string | null>(null);
+  const [isCommissionInitialized, setIsCommissionInitialized] = useState<boolean>(false);
 
-  const [prixType, setPrixType] = useState<PrixType>('DETAIL');
+  const [prixType, setPrixType] = useState<PrixType>('GROS');
   const [editingPrix, setEditingPrix] = useState<Record<number, boolean>>({});
   const [prixModifies, setPrixModifies] = useState<Record<number, boolean>>({});
+  const [tempPrix, setTempPrix] = useState<Record<number, number>>({});
 
   const itemsPerPage = 5;
 
@@ -104,6 +124,16 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     return `CMD-${Date.now()}`;
   };
 
+  // Charger le taux de commission par défaut configuré (dynamique)
+  useEffect(() => {
+    configCommerceService.getCommissionDefaut()
+      .then((taux) => {
+        setCommissionDefaut(taux);
+        if (!isCommissionInitialized) setCommissionPourcentage(taux);
+      })
+      .catch(() => setCommissionDefaut(60));
+  }, [opened]);
+
   useEffect(() => {
     const generateCode = async () => {
       if (opened) {
@@ -120,6 +150,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     generateCode();
   }, [opened]);
 
+  // ✅ useEffect pour la sélection du client - Commission dynamique
   useEffect(() => {
     debug.logMount();
     debug.logInfo('Formulaire initialisé', { opened });
@@ -132,22 +163,26 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         const newType = client.TypeClient === 'revendeur' ? 'REVENDEUR' : 'STANDARD';
         setTypeCommande(newType);
         
-        // ✅ Si c'est un revendeur, mettre la commission par défaut à 60%
-        if (newType === 'REVENDEUR') {
-          setCommissionPourcentage(60);
-        } else {
-          setCommissionPourcentage(0);
+        // ✅ CORRECTION : Commission dynamique - 0% possible
+        if (!isCommissionInitialized) {
+          if (newType === 'REVENDEUR') {
+            setCommissionPourcentage(commissionDefaut);
+          } else {
+            setCommissionPourcentage(0);
+          }
+          setIsCommissionInitialized(true);
         }
         
         debug.logInfo('Client sélectionné', {
           clientId: selectedClientId,
           clientName: client.NomComplet,
           type: newType,
-          commission: newType === 'REVENDEUR' ? 60 : 0
+          commission: commissionPourcentage
         });
       }
     } else {
       setSelectedClientDetails(null);
+      setIsCommissionInitialized(false);
     }
 
     return () => {
@@ -165,17 +200,22 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       setSelectedCategory(null);
       setCurrentPage(1);
       setCodeCommande('');
-      setTypeCommande('STANDARD');
-      setCommissionPourcentage(0);
+      // On revient au type du circuit d'appel, pas systématiquement à STANDARD :
+      // sinon la réouverture depuis « Commandes revendeur » repartait en standard.
+      setTypeCommande(restrictionType || 'STANDARD');
+      setCommissionPourcentage(commissionDefaut);
+      setIsCommissionInitialized(false);
       setQuantiteInput({});
       setDbError(null);
-      setPrixType('DETAIL');
+      setPrixType('GROS');
       setPrixModifies({});
       setEditingPrix({});
+      setTempPrix({});
       debug.logInfo('Formulaire réinitialisé');
     }
   }, [opened]);
 
+  // ✅ Effet pour mettre à jour les prix lors du changement de type de prix
   useEffect(() => {
     if (cart.length > 0 && prixType) {
       const updatedCart = cart.map(item => {
@@ -192,7 +232,8 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             prix_vente: newPrix,
             total: newPrix * item.quantite_commande,
             prix_original: newPrix,
-            type_prix: prixType
+            type_prix: prixType,
+            prix_modifie: false
           };
         }
         return item;
@@ -203,10 +244,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   }, [prixType, products, prixModifies]);
 
   const filteredProducts = products.filter(product => {
+    const t = searchTerm.toLowerCase();
     const matchesSearch =
       searchTerm === '' ||
-      product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+      product.designation?.toLowerCase().includes(t) ||
+      product.code_produit?.toLowerCase().includes(t) ||
+      (product as any).reference?.toLowerCase().includes(t);
     const matchesCategory = selectedCategory ? product.categorie === selectedCategory : true;
     const inStock = (product.qte_stock || 0) > 0;
     return matchesSearch && matchesCategory && inStock;
@@ -293,7 +336,8 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
           quantite_commande: quantite,
           total: quantite * prix,
           prix_original: prix,
-          type_prix: prixType
+          type_prix: prixType,
+          prix_modifie: false
         }
       ]);
     }
@@ -302,6 +346,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
   };
 
   const updateQuantity = (index: number, newQuantite: number) => {
+    if (newQuantite < 1) return;
     const item = cart[index];
     if (newQuantite > item.quantite_stock) {
       notifications.show({
@@ -318,17 +363,78 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     setCart(newCart);
   };
 
-  const updatePrix = (index: number, newPrix: number) => {
-    if (newPrix < 0) return;
+  const startEditPrix = (index: number) => {
+    const item = cart[index];
+    setTempPrix({ ...tempPrix, [item.idProduit]: item.prix_vente });
+    setEditingPrix({ ...editingPrix, [item.idProduit]: true });
+  };
+
+  const confirmEditPrix = (index: number) => {
+    const item = cart[index];
+    const newPrix = tempPrix[item.idProduit] !== undefined ? tempPrix[item.idProduit] : item.prix_vente;
+    
+    if (newPrix < 0) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Le prix ne peut pas être négatif',
+        color: 'red',
+      });
+      return;
+    }
+
     const newCart = [...cart];
     newCart[index].prix_vente = newPrix;
     newCart[index].total = newPrix * newCart[index].quantite_commande;
-    setPrixModifies(prev => ({ ...prev, [newCart[index].idProduit]: true }));
+    newCart[index].prix_modifie = true;
+    
+    setPrixModifies({ ...prixModifies, [item.idProduit]: true });
     setCart(newCart);
+    setEditingPrix({ ...editingPrix, [item.idProduit]: false });
+    
+    notifications.show({
+      title: '✅ Prix modifié',
+      message: `Nouveau prix: ${formatPrice(newPrix)} FCFA`,
+      color: 'green',
+      autoClose: 2000
+    });
   };
 
-  const toggleEditPrix = (idProduit: number) => {
-    setEditingPrix(prev => ({ ...prev, [idProduit]: !prev[idProduit] }));
+  const cancelEditPrix = (index: number) => {
+    const item = cart[index];
+    setEditingPrix({ ...editingPrix, [item.idProduit]: false });
+    setTempPrix({ ...tempPrix, [item.idProduit]: undefined as any });
+  };
+
+  const resetPrix = (index: number) => {
+    const item = cart[index];
+    const product = products.find(p => p.idProduit === item.idProduit);
+    if (product) {
+      const defaultPrix = prixType === 'DETAIL'
+        ? (product.prix_vente_detail || 0)
+        : (product.prix_vente_gros || 0);
+      
+      const newCart = [...cart];
+      newCart[index].prix_vente = defaultPrix;
+      newCart[index].total = defaultPrix * newCart[index].quantite_commande;
+      newCart[index].prix_modifie = false;
+      
+      setPrixModifies({ ...prixModifies, [item.idProduit]: false });
+      setCart(newCart);
+      
+      notifications.show({
+        title: '✅ Prix réinitialisé',
+        message: `Prix par défaut: ${formatPrice(defaultPrix)} FCFA`,
+        color: 'blue',
+        autoClose: 2000
+      });
+    }
+  };
+
+  const handlePrixChange = (idProduit: number, value: number | string) => {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    if (!isNaN(numValue) && numValue >= 0) {
+      setTempPrix({ ...tempPrix, [idProduit]: numValue });
+    }
   };
 
   const removeFromCart = (index: number) => {
@@ -337,6 +443,16 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       const newPrixModifies = { ...prev };
       delete newPrixModifies[item.idProduit];
       return newPrixModifies;
+    });
+    setEditingPrix(prev => {
+      const newEditing = { ...prev };
+      delete newEditing[item.idProduit];
+      return newEditing;
+    });
+    setTempPrix(prev => {
+      const newTemp = { ...prev };
+      delete newTemp[item.idProduit];
+      return newTemp;
     });
     setCart(cart.filter((_, i) => i !== index));
   };
@@ -353,7 +469,8 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
           ...item,
           prix_vente: newPrix,
           total: newPrix * item.quantite_commande,
-          prix_original: newPrix
+          prix_original: newPrix,
+          prix_modifie: false
         };
       }
       return item;
@@ -367,7 +484,6 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
 
   const handleProduitModalClose = () => {
     setProduitModalOpen(false);
-    // setProduitToEdit(null);
     refreshProducts();
   };
 
@@ -381,6 +497,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     return sum + (beneficeUnitaire * item.quantite_commande);
   }, 0);
 
+  // ✅ Commission calculée avec le pourcentage (peut être 0)
   const commissionTotale = typeCommande === 'REVENDEUR'
     ? beneficeTotal * (commissionPourcentage / 100)
     : 0;
@@ -461,7 +578,10 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         setCodeCommande(finalCode);
       }
 
-      const montantHT = montantTotal / 1.18;
+      // TVA selon le réglage (source de vérité unique) : 0 si désactivée.
+      const _tvaCfg = await tvaService.get(true);
+      const _coefTVA = _tvaCfg.active ? _tvaCfg.taux / 100 : 0;
+      const montantHT = montantTotal / (1 + _coefTVA);
       const dateCommande = new Date().toISOString();
 
       const clientCheck = await executeWithRetry(async () => {
@@ -476,31 +596,32 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       }
 
       // 1. Insertion de la commande
-      const result = await executeWithRetry(async () => {
-        return await db!.execute(
-          `
-          INSERT INTO commandes (
-            code_commande,
-            idClient,
-            type_commande,
-            date_commande,
-            montant_ht,
-            montant_ttc,
-            statut
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          `,
-          [
-            finalCode,
-            parseInt(selectedClientId),
-            typeCommande,
-            dateCommande,
-            montantHT,
-            typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
-            'CONFIRMEE'
-          ]
-        );
-      });
+    // Dans handleSubmit, section insertion de la commande
+
+const result = await executeWithRetry(async () => {
+  return await db!.execute(`
+    INSERT INTO commandes (
+      code_commande,
+      idClient,
+      type_commande,
+      date_commande,
+      montant_ht,
+      montant_ttc,
+      statut,
+      taux_commission  -- ✅ AJOUTER CETTE COLONNE
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    finalCode,
+    parseInt(selectedClientId),
+    typeCommande,
+    dateCommande,
+    montantHT,
+    typeCommande === 'REVENDEUR' ? montantApresCommission : montantTotal,
+    'CONFIRMEE',
+    typeCommande === 'REVENDEUR' ? commissionPourcentage : 0  // ✅ AJOUTER
+  ]);
+});
 
       idCommande = Number(result.lastInsertId);
 
@@ -610,8 +731,8 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         });
 
       } else {
-        // ✅ Type REVENDEUR - avec commission par défaut à 60%
-        const commissionParDefaut = commissionPourcentage > 0 ? commissionPourcentage : 60;
+        // Type REVENDEUR - Utilise le pourcentage saisi (peut être 0)
+        const commissionParDefaut = commissionPourcentage;
         
         for (const item of cart) {
           await executeWithRetry(async () => {
@@ -628,7 +749,6 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             const stockAvant = stockDisponible;
             const stockApres = stockDisponible - item.quantite_commande;
 
-            // Mettre à jour le stock principal
             await db!.execute(
               `
               UPDATE products
@@ -638,63 +758,20 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               [item.quantite_commande, item.idProduit, item.quantite_commande]
             );
 
-            // ✅ Mettre à jour le stock du revendeur avec commission par défaut
-            await db!.execute(
-              `
-              INSERT INTO stock_revendeur (
-                idRevendeur,
-                idProduit,
-                qte_stock,
-                prix_achat,
-                prix_vente,
-                commission_pourcentage
-              )
-              VALUES (?, ?, ?, ?, ?, ?)
-              ON CONFLICT(idRevendeur, idProduit)
-              DO UPDATE SET 
-                qte_stock = qte_stock + ?,
-                prix_achat = ?,
-                prix_vente = ?,
-                commission_pourcentage = ?
-              `,
-              [
-                parseInt(selectedClientId),
-                item.idProduit,
-                item.quantite_commande,
-                item.prix_achat_base || 0,
-                item.prix_vente,
-                commissionParDefaut,
-                item.quantite_commande,
-                item.prix_achat_base || 0,
-                item.prix_vente,
-                commissionParDefaut
-              ]
+            // Stock revendeur via le SERVICE unique (stock + mouvement 'ENTREE' + audit).
+            await StockRevendeurService.increaseStock(
+              parseInt(selectedClientId), item.idProduit, item.quantite_commande,
+              { typeMouvement: 'ENTREE', idCommande, prixUnitaire: item.prix_achat_base || 0, prixVente: item.prix_vente }
             );
 
-            // Enregistrer le mouvement du revendeur
+            // Rafraîchir les prix / commission du revendeur pour ce produit.
             await db!.execute(
-              `
-              INSERT INTO mouvements_revendeur (
-                idProduit,
-                idRevendeur,
-                idCommande,
-                type_mouvement,
-                qte_mouvement,
-                date_mouvement
-              )
-              VALUES (?, ?, ?, ?, ?, ?)
-              `,
-              [
-                item.idProduit,
-                parseInt(selectedClientId),
-                idCommande,
-                'ENTREE',
-                item.quantite_commande,
-                new Date().toISOString()
-              ]
+              `UPDATE stock_revendeur
+               SET prix_achat = ?, prix_vente = ?, commission_pourcentage = ?
+               WHERE idRevendeur = ? AND idProduit = ?`,
+              [item.prix_achat_base || 0, item.prix_vente, commissionParDefaut, parseInt(selectedClientId), item.idProduit]
             );
 
-            // Enregistrer le mouvement de stock
             await db!.execute(
               `
               INSERT INTO mouvements_stock (
@@ -739,21 +816,25 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
         });
       }
 
-      // Auto-génération de la facture
-      try {
-        if (typeCommande === 'STANDARD') {
-          const { factureRepository } = await import('../../database/repositories/factureRepository');
-          await factureRepository.createFromCommande(idCommande);
-        } else {
-          const { factureRevendeurRepository } = await import('../../database/repositories/factureRevendeurRepository');
-          await factureRevendeurRepository.createFromCommande(idCommande);
-        }
-      } catch (factureError) {
-        // Non bloquant — la commande est créée, la facture peut être générée manuellement
-        console.error('Erreur génération facture auto:', factureError);
-      }
+     // Auto-génération de la facture
+try {
+  if (typeCommande === 'STANDARD') {
+    const { factureRepository } = await import('../../database/repositories/factureRepository');
+    await factureRepository.createFromCommande(idCommande);
+  } else {
+    const { factureRevendeurRepository } = await import('../../database/repositories/factureRevendeurRepository');
+    // ✅ Passer explicitement le taux
+    await factureRevendeurRepository.createFromCommande(idCommande, {
+      taux_commission: commissionPourcentage
+    });
+  }
+} catch (factureError) {
+  console.error('Erreur génération facture auto:', factureError);
+}
 
       await refreshProducts();
+      // Permet à la liste appelante (ex. Commandes revendeur) de se rafraîchir
+      onSaved?.();
       onClose();
 
     } catch (error: any) {
@@ -788,7 +869,15 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
     }
   };
 
-  const clientData = clients.map(c => ({
+  // Lorsqu'un circuit est imposé (ex. commandes revendeur), on ne propose
+  // que les clients du bon type : impossible de sortir du circuit par erreur.
+  const clientsDuCircuit = restrictionType === 'REVENDEUR'
+    ? clients.filter(c => c.TypeClient === 'revendeur')
+    : restrictionType === 'STANDARD'
+      ? clients.filter(c => c.TypeClient !== 'revendeur')
+      : clients;
+
+  const clientData = clientsDuCircuit.map(c => ({
     value: c.idClient.toString(),
     label: c.NomComplet || c.Societe || 'Client sans nom'
   }));
@@ -820,7 +909,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
       >
         <ScrollArea h="calc(100vh - 180px)" type="auto" p="lg">
           <Stack gap="md">
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Grid align="flex-end">
                 <Grid.Col span={3}>
                   <Group gap={4} align="flex-end" wrap="nowrap">
@@ -899,23 +988,10 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                   />
                 </Grid.Col>
 
-                <Grid.Col span={2}>
-                  <SegmentedControl
-                    size="xs"
-                    value={prixType}
-                    onChange={(value) => setPrixType(value as PrixType)}
-                    data={[
-                      { label: 'Détail', value: 'DETAIL' },
-                      { label: 'Gros', value: 'GROS' }
-                    ]}
-                    fullWidth
-                    color={prixType === 'DETAIL' ? 'blue' : 'green'}
-                  />
-                </Grid.Col>
               </Grid>
             </Card>
 
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Grid align="center">
                 <Grid.Col span={3}>
                   <Group gap="xs" grow>
@@ -924,12 +1000,13 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                       withBorder
                       radius="md"
                       style={{
-                        cursor: 'pointer',
+                        cursor: restrictionType ? 'not-allowed' : 'pointer',
+                        opacity: restrictionType && restrictionType !== 'STANDARD' ? 0.45 : 1,
                         backgroundColor: typeCommande === 'STANDARD' ? '#eef3f9' : 'white',
                         borderColor: typeCommande === 'STANDARD' ? '#4a6cf7' : '#e5e7eb',
                         textAlign: 'center'
                       }}
-                      onClick={() => setTypeCommande('STANDARD')}
+                      onClick={() => { if (!restrictionType) setTypeCommande('STANDARD'); }}
                     >
                       <Group gap="xs" justify="center">
                         <ThemeIcon color="blue" variant={typeCommande === 'STANDARD' ? 'filled' : 'light'} size="xs" radius="xl">
@@ -944,12 +1021,13 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                       withBorder
                       radius="md"
                       style={{
-                        cursor: 'pointer',
+                        cursor: restrictionType ? 'not-allowed' : 'pointer',
+                        opacity: restrictionType && restrictionType !== 'REVENDEUR' ? 0.45 : 1,
                         backgroundColor: typeCommande === 'REVENDEUR' ? '#e8f5e9' : 'white',
                         borderColor: typeCommande === 'REVENDEUR' ? '#2e7d32' : '#e5e7eb',
                         textAlign: 'center'
                       }}
-                      onClick={() => setTypeCommande('REVENDEUR')}
+                      onClick={() => { if (!restrictionType) setTypeCommande('REVENDEUR'); }}
                     >
                       <Group gap="xs" justify="center">
                         <ThemeIcon color="green" variant={typeCommande === 'REVENDEUR' ? 'filled' : 'light'} size="xs" radius="xl">
@@ -1016,21 +1094,24 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 </Grid.Col>
               </Grid>
 
-              {typeCommande === 'REVENDEUR' && commissionPourcentage > 0 && cart.length > 0 && (
-                <Alert color="green" variant="light" mt="xs" p="xs">
+              {/* ✅ Alert avec commission - même à 0% */}
+              {typeCommande === 'REVENDEUR' && cart.length > 0 && (
+                <Alert color={commissionPourcentage > 0 ? 'green' : 'blue'} variant="light" mt="xs" p="xs">
                   <Group justify="space-between" gap="xs">
                     <Text size="xs">💰 Total: {montantTotal.toLocaleString()} FCFA</Text>
                     <Text size="xs" c="dimmed">📊 Bénéfice: {beneficeTotal.toLocaleString()} FCFA</Text>
                     <Divider orientation="vertical" />
                     <Text size="xs" c="orange">📊 Comm. {commissionPourcentage}%: {commissionTotale.toLocaleString()} FCFA</Text>
                     <Divider orientation="vertical" />
-                    <Text size="xs" fw={700} c="green">💵 Net: {montantApresCommission.toLocaleString()} FCFA</Text>
+                    <Text size="xs" fw={700} c={commissionPourcentage > 0 ? 'green' : 'blue'}>
+                      💵 Net: {montantApresCommission.toLocaleString()} FCFA
+                    </Text>
                   </Group>
                 </Alert>
               )}
             </Card>
 
-            <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
+            <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#ffffff' }}>
               <Group gap="xs" mb="xs" justify="space-between">
                 <Group gap="xs">
                   <ThemeIcon color="grape" variant="light" radius="md" size="sm">
@@ -1063,7 +1144,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
               <Grid>
                 <Grid.Col span={5}>
                   <TextInput
-                    placeholder="Rechercher par code, désignation..."
+                    placeholder="Rechercher (nom, code, référence)..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
@@ -1078,11 +1159,12 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                     placeholder="Catégorie"
                     data={categories.map(c => ({ value: c, label: c }))}
                     value={selectedCategory}
+                    searchable
+                    clearable
                     onChange={(value) => {
                       setSelectedCategory(value);
                       setCurrentPage(1);
                     }}
-                    clearable
                     size="xs"
                   />
                 </Grid.Col>
@@ -1114,14 +1196,14 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                   <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                     <Table.Thead>
                       <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
-                        <Table.Th c="white" style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }}>Catégorie</Table.Th>
-                        <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Unité</Table.Th>
-                        <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Stock</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '90px' }} ta="right">Prix</Table.Th>
-                        <Table.Th c="white" style={{ width: '13%', minWidth: '100px' }} ta="center">Qté</Table.Th>
-                        <Table.Th c="white" style={{ width: '10%', minWidth: '60px' }} ta="center">Action</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
+                        <Table.Th style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '80px' }}>Catégorie</Table.Th>
+                        <Table.Th style={{ width: '8%', minWidth: '60px' }} ta="center">Unité</Table.Th>
+                        <Table.Th style={{ width: '8%', minWidth: '60px' }} ta="center">Stock</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '90px' }} ta="right">Prix</Table.Th>
+                        <Table.Th style={{ width: '13%', minWidth: '100px' }} ta="center">Qté</Table.Th>
+                        <Table.Th style={{ width: '10%', minWidth: '60px' }} ta="center">Action</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -1137,7 +1219,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                             <Table.Td ta="center"><Text size="xs">{product.unite_base || 'pc'}</Text></Table.Td>
                             <Table.Td ta="center">
                               <Badge
-                                color={isRupture ? 'red' : (product.qte_stock || 0) < (product.seuil_alerte || 10) ? 'orange' : 'green'}
+                                color={isRupture ? 'red' : (product.qte_stock || 0) < (product.seuil_alerte ?? 5) ? 'orange' : 'green'}
                                 variant={isRupture ? 'filled' : 'light'}
                                 size="xs"
                               >
@@ -1202,7 +1284,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
             </Card>
 
             {cart.length > 0 && (
-              <Card withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
+              <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="sm" style={{ backgroundColor: '#fafafa' }}>
                 <Group gap="xs" mb="xs" justify="space-between">
                   <Group gap="xs">
                     <ThemeIcon color="orange" variant="light" radius="md" size="sm">
@@ -1233,14 +1315,14 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                   <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                     <Table.Thead>
                       <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
-                        <Table.Th c="white" style={{ width: '25%', minWidth: '150px' }}>Désignation</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '80px' }}>Catégorie</Table.Th>
-                        <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Unité</Table.Th>
-                        <Table.Th c="white" style={{ width: '8%', minWidth: '60px' }} ta="center">Qté</Table.Th>
-                        <Table.Th c="white" style={{ width: '12%', minWidth: '90px' }} ta="right">Prix unit.</Table.Th>
-                        <Table.Th c="white" style={{ width: '13%', minWidth: '100px' }} ta="right">Total</Table.Th>
-                        <Table.Th c="white" style={{ width: '10%', minWidth: '60px' }} ta="center">Actions</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '100px' }}>Code</Table.Th>
+                        <Table.Th style={{ width: '22%', minWidth: '130px' }}>Désignation</Table.Th>
+                        <Table.Th style={{ width: '10%', minWidth: '70px' }}>Catégorie</Table.Th>
+                        <Table.Th style={{ width: '6%', minWidth: '50px' }} ta="center">Unité</Table.Th>
+                        <Table.Th style={{ width: '8%', minWidth: '60px' }} ta="center">Qté</Table.Th>
+                        <Table.Th style={{ width: '18%', minWidth: '130px' }} ta="right">Prix unit.</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '90px' }} ta="right">Total</Table.Th>
+                        <Table.Th style={{ width: '12%', minWidth: '80px' }} ta="center">Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -1249,7 +1331,7 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                           <Table.Td><Text fw={500} size="xs">{item.code_produit}</Text></Table.Td>
                           <Table.Td>
                             <Text fw={500} size="xs" lineClamp={1}>{item.designation}</Text>
-                            {prixModifies[item.idProduit] && (
+                            {item.prix_modifie && (
                               <Badge size="xs" color="orange" variant="light" mt={2}>Modifié</Badge>
                             )}
                           </Table.Td>
@@ -1267,28 +1349,59 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                             />
                           </Table.Td>
                           <Table.Td ta="right">
-                            <Group gap="4px" justify="flex-end" wrap="nowrap">
-                              {editingPrix[item.idProduit] ? (
+                            {editingPrix[item.idProduit] ? (
+                              <Group gap="4px" justify="flex-end" wrap="nowrap">
                                 <NumberInput
-                                  value={item.prix_vente}
-                                  onChange={(val) => updatePrix(index, Number(val) || 0)}
+                                  value={tempPrix[item.idProduit] ?? item.prix_vente}
+                                  onChange={(val) => handlePrixChange(item.idProduit, val ?? 0)}
                                   size="xs"
-                                  w={80}
+                                  w={100}
                                   min={0}
                                   step={100}
+                                  autoFocus
                                 />
-                              ) : (
-                                <Text fw={600} c="blue" size="xs">{formatPrice(item.prix_vente)}</Text>
-                              )}
-                              <ActionIcon
-                                size="sm"
-                                variant="subtle"
-                                color={editingPrix[item.idProduit] ? 'green' : 'blue'}
-                                onClick={() => toggleEditPrix(item.idProduit)}
-                              >
-                                <IconEdit size={12} />
-                              </ActionIcon>
-                            </Group>
+                                <ActionIcon
+                                  size="sm"
+                                  variant="filled"
+                                  color="green"
+                                  onClick={() => confirmEditPrix(index)}
+                                >
+                                  <IconCheck size={12} />
+                                </ActionIcon>
+                                <ActionIcon
+                                  size="sm"
+                                  variant="subtle"
+                                  color="red"
+                                  onClick={() => cancelEditPrix(index)}
+                                >
+                                  <IconX size={12} />
+                                </ActionIcon>
+                              </Group>
+                            ) : (
+                              <Group gap="4px" justify="flex-end" wrap="nowrap">
+                                <Text fw={600} c={item.prix_modifie ? 'orange' : 'blue'} size="xs">
+                                  {formatPrice(item.prix_vente)}
+                                </Text>
+                                <ActionIcon
+                                  size="sm"
+                                  variant="subtle"
+                                  color="blue"
+                                  onClick={() => startEditPrix(index)}
+                                >
+                                  <IconEdit size={12} />
+                                </ActionIcon>
+                                {item.prix_modifie && (
+                                  <ActionIcon
+                                    size="sm"
+                                    variant="subtle"
+                                    color="gray"
+                                    onClick={() => resetPrix(index)}
+                                  >
+                                    <IconRefresh size={12} />
+                                  </ActionIcon>
+                                )}
+                              </Group>
+                            )}
                           </Table.Td>
                           <Table.Td ta="right">
                             <Text fw={700} c="blue" size="xs">{formatPrice(item.total)} FCFA</Text>
@@ -1306,15 +1419,20 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
 
                 <Divider my="xs" />
 
+                {/* ✅ Badges avec commission affichée même à 0% */}
                 <Group justify="space-between" gap="xs">
                   <Group gap="xs">
                     <Badge size="sm" variant="light" color="blue">Articles: {totalArticles}</Badge>
                     <Badge size="sm" variant="light" color="gray">Pièces: {totalPieces}</Badge>
+                    {typeCommande === 'REVENDEUR' && (
+                      <Badge size="sm" variant="light" color="orange">
+                        Comm.: {commissionPourcentage}%
+                      </Badge>
+                    )}
                     {typeCommande === 'REVENDEUR' && commissionPourcentage > 0 && (
-                      <>
-                        <Badge size="sm" variant="light" color="orange">Comm.: {commissionPourcentage}%</Badge>
-                        <Badge size="sm" variant="light" color="green">Net: {formatPrice(montantApresCommission)}</Badge>
-                      </>
+                      <Badge size="sm" variant="light" color="green">
+                        Net: {formatPrice(montantApresCommission)}
+                      </Badge>
                     )}
                   </Group>
                   <Text fw={700} size="md" c="#1b365d">
@@ -1339,28 +1457,28 @@ export const FormulaireCommande: React.FC<FormulaireCommandeProps> = ({ opened, 
                 disabled={cart.length === 0 || !selectedClientId}
                 size="xs"
                 color="blue"
-                      leftSection={<IconCheck size={14} />}
+                leftSection={<IconCheck size={14} />}
               >
                 Enregistrer la commande
               </Button>
             </Group>
           </Stack>
         </ScrollArea>
-        </Modal>
+      </Modal>
 
-        {/* Modal Nouveau Client */}
-        <FormulaireClient
-          opened={clientModalOpened}
-          onClose={() => { setClientModalOpened(false); refreshClients(); }}
-        />
+      {/* Modal Nouveau Client */}
+      <FormulaireClient
+        opened={clientModalOpened}
+        onClose={() => { setClientModalOpened(false); refreshClients(); }}
+      />
 
-        {/* Modal Nouveau Produit */}
-        <FormulaireProduit
-          opened={produitModalOpen}
-          onClose={handleProduitModalClose}
-        />
-      </>
-    );
+      {/* Modal Nouveau Produit */}
+      <FormulaireProduit
+        opened={produitModalOpen}
+        onClose={handleProduitModalClose}
+      />
+    </>
+  );
 };
 
 export default FormulaireCommande;

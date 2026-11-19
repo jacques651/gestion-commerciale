@@ -1,7 +1,9 @@
 // src/services/commandeRevendeurService.ts
 import { getDb } from '../database/db';
+import StockRevendeurService from './StockRevendeurService';
 import { generateCommandeCode, generateFactureCode } from '../utils/codeGenerator';
 import { confirm } from '../utils/confirm';
+import { revendeurAuditService } from './revendeurAuditService';
 
 export interface PanierItem {
   idProduit: number;
@@ -61,66 +63,26 @@ export const enregistrerCommandeRevendeur = async (
       throw new Error('Impossible de récupérer l\'ID de la commande');
     }
 
-    // 3. Pour chaque produit, mettre à jour le stock revendeur
+    // 3. Pour chaque produit : entrée de stock revendeur via le SERVICE unique
+    //    transactionnel (stock + mouvement + audit, atomiques).
     for (const item of panier) {
-      // Vérifier si le produit existe déjà dans le stock du revendeur
-      const existing = await db.select<any[]>(`
-        SELECT idProduitRevendeur, qte_stock 
-        FROM produits_revendeur 
-        WHERE idProduit = ? AND idRevendeur = ?
-      `, [item.idProduit, idClient]);
+      await StockRevendeurService.increaseStock(idClient, item.idProduit, item.quantite, {
+        typeMouvement: 'ENTREE',
+        idCommande,
+        prixUnitaire: item.prix_achat,
+        prixVente: item.prix_vente,
+      });
 
-      const dateEntree = dateCommande.toISOString().split('T')[0];
+      // Le transfert n'est validé que si le stock central couvre la quantité demandée.
+      const stockGeneral = await db.execute(`
+        UPDATE products
+        SET qte_stock = qte_stock - ?
+        WHERE idProduit = ? AND qte_stock >= ?
+      `, [item.quantite, item.idProduit, item.quantite]);
 
-      if (existing.length === 0) {
-        // Insertion d'un nouveau produit revendeur
-        await db.execute(`
-          INSERT INTO produits_revendeur (
-            idCommande, idProduit, code_produit, categorie, 
-            designation, unite_mesure, qte_stock, prix_achat, 
-            prix_vente, idRevendeur, date_entree
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          idCommande,
-          item.idProduit,
-          item.code_produit,
-          item.categorie || '',
-          item.designation,
-          item.unite_mesure || 'pièce',
-          item.quantite,
-          item.prix_achat,
-          item.prix_vente,
-          idClient,
-          dateEntree
-        ]);
-      } else {
-        // Mise à jour du stock existant
-        await db.execute(`
-          UPDATE produits_revendeur 
-          SET qte_stock = qte_stock + ?, idCommande = ?
-          WHERE idProduit = ? AND idRevendeur = ?
-        `, [item.quantite, idCommande, item.idProduit, idClient]);
+      if (stockGeneral.rowsAffected !== 1) {
+        throw new Error(`Stock général insuffisant pour « ${item.designation} ».`);
       }
-
-      // Enregistrer le mouvement d'entrée
-      await db.execute(`
-        INSERT INTO mouvements_revendeur (
-          date_mouvement, idProduit, idRevendeur, 
-          type_mouvement, qte_mouvement, prix_unitaire, idCommande
-        ) VALUES (?, ?, ?, 'ENTREE', ?, ?, ?)
-      `, [
-        dateEntree,
-        item.idProduit,
-        idClient,
-        item.quantite,
-        item.prix_achat,
-        idCommande
-      ]);
-
-      // Mettre à jour le stock général
-      await db.execute(`
-        UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?
-      `, [item.quantite, item.idProduit]);
     }
 
     // 4. Proposition de génération de facture
@@ -136,18 +98,27 @@ export const enregistrerCommandeRevendeur = async (
         WHERE idCommande = ?
       `, [codeFacture, idCommande]);
       
-      // Mettre à jour produits_revendeur
-      await db.execute(`
-        UPDATE produits_revendeur SET code_facture = ?
-        WHERE idCommande = ?
-      `, [codeFacture, idCommande]);
-      
-      // Mettre à jour mouvements_revendeur
+      // Le code facture est porté par la commande et les mouvements
+      // (stock_revendeur ne stocke pas de code_facture : source unique de solde).
       await db.execute(`
         UPDATE mouvements_revendeur SET code_facture = ?
         WHERE idCommande = ?
       `, [codeFacture, idCommande]);
     }
+
+    await revendeurAuditService.tracer({
+      action: 'CREATION_COMMANDE',
+      entite: 'STOCK',
+      idRevendeur: idClient,
+      idReference: idCommande,
+      details: {
+        codeCommande,
+        codeFacture,
+        lignes: panier.length,
+        montantTTC,
+        typeCommande,
+      },
+    });
 
     await db.execute('COMMIT');
     transactionStarted = false;

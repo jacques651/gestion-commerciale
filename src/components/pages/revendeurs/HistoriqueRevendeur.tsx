@@ -14,6 +14,8 @@ import {
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { getDb } from '../../../database/db';
+import { revendeurAuditService } from '../../../services/revendeurAuditService';
+import TkFilters from '../../TkFilters';
 
 interface HistoriqueItem {
   id: number;
@@ -283,36 +285,25 @@ export const HistoriqueRevendeur: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // ✅ Fonction pour vider l'historique
+  // L'historique est une piste d'audit : on ne le supprime jamais depuis l'interface.
   const handleClearHistorique = async () => {
     setClearing(true);
     try {
-      const db = await getDb();
-      
-      // Vider les tables d'historique
-      await db.execute('DELETE FROM mouvements_revendeur');
-      
-      // Si vous voulez aussi vider les autres tables liées
-      // await db.execute('DELETE FROM commandes WHERE type_commande = "REVENDEUR"');
-      // await db.execute('DELETE FROM decomptes');
-      
-      notifications.show({
-        title: '✅ Succès',
-        message: 'Historique vidé avec succès !',
-        color: 'green',
-        autoClose: 5000
+      await revendeurAuditService.tracer({
+        action: 'DEMANDE_PURGE_HISTORIQUE_REFUSEE',
+        entite: 'HISTORIQUE',
+        details: { raison: 'La piste d audit revendeur est conservee.' },
       });
-      
+      notifications.show({
+        title: 'Historique protégé',
+        message: 'Aucun mouvement n a été supprimé. Utilisez les annulations tracées pour corriger une opération.',
+        color: 'blue',
+        autoClose: 5000,
+      });
       setClearModalOpened(false);
-      await chargerHistorique();
-      
     } catch (error: any) {
-      console.error('Erreur lors du vidage:', error);
-      notifications.show({
-        title: '❌ Erreur',
-        message: error?.message || 'Impossible de vider l\'historique',
-        color: 'red'
-      });
+      console.error('Erreur protection historique:', error);
+      notifications.show({ title: 'Erreur', message: error?.message || 'Impossible de protéger l historique', color: 'red' });
     } finally {
       setClearing(false);
     }
@@ -356,7 +347,7 @@ export const HistoriqueRevendeur: React.FC = () => {
     <>
       <Stack gap="lg" p="md">
         {/* EN-TÊTE */}
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+        <Paper className="tk-page-tools" p="xl" radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Group gap="md">
               <ThemeIcon size={45} radius="md" color="indigo" variant="filled">
@@ -439,6 +430,7 @@ export const HistoriqueRevendeur: React.FC = () => {
         </Paper>
 
         {/* FILTRES */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="sm">
           <Tabs value={activeTab} onChange={setActiveTab}>
             <Tabs.List grow>
@@ -482,6 +474,7 @@ export const HistoriqueRevendeur: React.FC = () => {
                 value={typeFilter}
                 onChange={setTypeFilter}
                 clearable
+                searchable
                 size="xs"
               />
             </Grid.Col>
@@ -518,6 +511,7 @@ export const HistoriqueRevendeur: React.FC = () => {
             </Grid.Col>
           </Grid>
         </Card>
+        </TkFilters>
 
         {/* TABLEAU */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
@@ -538,15 +532,15 @@ export const HistoriqueRevendeur: React.FC = () => {
               <ScrollArea h={500}>
                 <Table striped highlightOnHover verticalSpacing="xs">
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                      <Table.Th c="white" w={40}>N°</Table.Th>
-                      <Table.Th c="white">Date</Table.Th>
-                      <Table.Th c="white">Type</Table.Th>
-                      <Table.Th c="white">Référence</Table.Th>
-                      <Table.Th c="white">Désignation</Table.Th>
-                      <Table.Th c="white">Revendeur</Table.Th>
-                      <Table.Th c="white" ta="right">Montant</Table.Th>
-                      <Table.Th c="white" ta="center">Statut</Table.Th>
+                    <Table.Tr>
+                      <Table.Th w={40}>N°</Table.Th>
+                      <Table.Th>Date</Table.Th>
+                      <Table.Th>Type</Table.Th>
+                      <Table.Th>Référence</Table.Th>
+                      <Table.Th>Désignation</Table.Th>
+                      <Table.Th>Revendeur</Table.Th>
+                      <Table.Th ta="right">Montant</Table.Th>
+                      <Table.Th ta="center">Statut</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>

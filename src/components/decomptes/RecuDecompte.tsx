@@ -62,12 +62,13 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
   // Récupérer le taux de commission
   const tauxCommissionUnique = useMemo(() => {
     const taux = factureOriginale?.taux_commission_revendeur
-      || factureOriginale?.taux_commission
-      || factureOriginale?.commission_pourcentage
-      || (details && details.length > 0 ? details[0]?.commission_pourcentage : null)
-      || 60;
+      ?? factureOriginale?.taux_commission
+      ?? factureOriginale?.commission_pourcentage
+      ?? (details && details.length > 0 ? details[0]?.commission_pourcentage : null)
+      ?? 60;
 
-    return Number(taux) || 60;
+    const n = Number(taux);
+    return Number.isFinite(n) ? n : 60;
   }, [factureOriginale, details]);
 
   const { detailsWithCalculs, totalVente, totalCommission, totalBenefice } = useMemo(() => {
@@ -237,7 +238,7 @@ export const RecuDecompte: React.FC<RecuDecompteProps> = ({
         </Button>
       </Group>
 
-      <div ref={printRef}>
+      <div ref={printRef} className="tk-print">
         <Paper p="xs" style={{ maxWidth: '1300px', margin: '0 auto', backgroundColor: 'white' }}>
 
           {/* En-tête compact */}

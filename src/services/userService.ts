@@ -1,5 +1,6 @@
 // src/services/userService.ts
 import { getDb } from '../database/db';
+import bcrypt from 'bcryptjs';
 
 export interface UserProfile {
   id: number;
@@ -86,26 +87,28 @@ class UserService {
     }
   }
 
-  // Changer le mot de passe
+  // Changer le mot de passe (table users, bcrypt)
   async changePassword(userId: number, oldPassword: string, newPassword: string): Promise<boolean> {
     try {
       const db = await getDb();
-      // Vérifier l'ancien mot de passe
-      const user = await db.select<any[]>(
-        `SELECT id FROM utilisateurs WHERE id = ? AND mot_de_passe_hash = ?`,
-        [userId, oldPassword]
+      // Lire le hash depuis la table users (celle utilisée par l'authentification)
+      const rows = await db.select<any[]>(
+        `SELECT mot_de_passe FROM users WHERE id = ?`, [userId]
       );
-      
-      if (user.length === 0) {
-        return false;
+      if (!rows[0]) return false;
+
+      // Vérifier l'ancien mot de passe (bcrypt ou fallback texte clair)
+      let valid = false;
+      try {
+        valid = await bcrypt.compare(oldPassword, rows[0].mot_de_passe);
+      } catch {
+        valid = oldPassword === rows[0].mot_de_passe;
       }
-      
-      // Mettre à jour le mot de passe
-      await db.execute(
-        `UPDATE utilisateurs SET mot_de_passe_hash = ? WHERE id = ?`,
-        [newPassword, userId]
-      );
-      
+      if (!valid) return false;
+
+      // Hasher et sauvegarder le nouveau mot de passe
+      const hash = await bcrypt.hash(newPassword, 10);
+      await db.execute(`UPDATE users SET mot_de_passe = ? WHERE id = ?`, [hash, userId]);
       return true;
     } catch (error) {
       console.error('Erreur changement mot de passe:', error);

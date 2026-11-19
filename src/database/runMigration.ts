@@ -1,240 +1,993 @@
 // src/database/runMigration.ts
 import { getDb } from './db';
 
-/**
- * Exécute le schéma SQL complet de la base de données
- */
+// ==================== FONCTION LOG ====================
+const log = (message: string) => {
+  console.log(`[Migration] ${message}`);
+};
+
+// ==================== SCHEMA SQL COMPLET ====================
+const SCHEMA_SQL = `
+  -- ============================================================
+  -- TABLE : config_generale
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS config_generale (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    nom_application TEXT,
+    version TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : clients
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS clients (
+    idClient INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_client TEXT UNIQUE NOT NULL,
+    raison_sociale TEXT NOT NULL,
+    telephone TEXT,
+    email TEXT,
+    adresse TEXT,
+    ifu TEXT,
+    rccm TEXT,
+    adresse_postale TEXT,
+    type_client TEXT DEFAULT 'STANDARD',
+    est_revendeur INTEGER DEFAULT 0,
+    est_actif INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : products
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS products (
+    idProduit INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_produit TEXT UNIQUE NOT NULL,
+    designation TEXT NOT NULL,
+    description TEXT,
+    prix_achat REAL DEFAULT 0,
+    prix_vente REAL DEFAULT 0,
+    prix_vente_ht REAL DEFAULT 0,
+    stock_actuel REAL DEFAULT 0,
+    seuil_alerte REAL DEFAULT 0,
+    unite_mesure TEXT DEFAULT 'UNITE',
+    methode_gestion_stock TEXT DEFAULT 'FIFO',
+    commission_pourcentage REAL DEFAULT 0,
+    est_actif INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : commandes
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS commandes (
+    idCommande INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_commande TEXT UNIQUE NOT NULL,
+    idClient INTEGER NOT NULL,
+    date_commande DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
+    montant_remise REAL DEFAULT 0,
+    montant_net REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    type_commande TEXT DEFAULT 'STANDARD',
+    adresse_livraison TEXT,
+    source TEXT DEFAULT 'DIRECT',
+    notes TEXT,
+    signature_base64 TEXT,
+    date_facture DATE,
+    idUtilisateur INTEGER,
+    taux_commission REAL DEFAULT 60,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idClient) REFERENCES clients(idClient),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : commande_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS commande_details (
+    idDetailCommande INTEGER PRIMARY KEY AUTOINCREMENT,
+    idCommande INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    remise REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    idConditionnement INTEGER,
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : factures
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS factures (
+    idFacture INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_facture TEXT UNIQUE NOT NULL,
+    idClient INTEGER NOT NULL,
+    idCommande INTEGER,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    montant_regle REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idClient) REFERENCES clients(idClient),
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande)
+  );
+
+  -- ============================================================
+  -- TABLE : facture_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS facture_details (
+    idDetailFacture INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFacture INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    qte REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    FOREIGN KEY (idFacture) REFERENCES factures(idFacture) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : reglements
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS reglements (
+    idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFacture INTEGER NOT NULL,
+    idClient INTEGER,
+    idVente INTEGER,
+    montant REAL NOT NULL,
+    mode_reglement TEXT,
+    code_reglement TEXT,
+    reference TEXT,
+    banque TEXT,
+    numero_cheque TEXT,
+    date_valeur DATE,
+    est_lettrage INTEGER DEFAULT 0,
+    observation TEXT,
+    date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    idUtilisateur INTEGER,
+    idDecompte INTEGER,
+    FOREIGN KEY (idFacture) REFERENCES factures(idFacture),
+    FOREIGN KEY (idClient) REFERENCES clients(idClient)
+  );
+
+  -- ============================================================
+  -- TABLE : utilisateurs
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS utilisateurs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL,
+    prenom TEXT,
+    login TEXT NOT NULL UNIQUE,
+    mot_de_passe_hash TEXT NOT NULL,
+    email TEXT,
+    role TEXT NOT NULL DEFAULT 'COMMERCIAL',
+    permissions TEXT DEFAULT '{}',
+    est_actif INTEGER DEFAULT 1,
+    derniere_connexion DATETIME,
+    date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : configuration_atelier
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS configuration_atelier (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    nom_atelier TEXT,
+    telephone TEXT,
+    adresse TEXT,
+    email TEXT,
+    nif TEXT,
+    ifu TEXT,
+    rccm TEXT,
+    adresse_postale TEXT,
+    adresse_cadastrale TEXT,
+    compte_bancaire TEXT,
+    regime_fiscal TEXT,
+    service_impots TEXT,
+    forme_juridique TEXT,
+    tva_active INTEGER DEFAULT 0,
+    message_facture TEXT,
+    logo_base64 TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : config_commerce
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS config_commerce (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    id_type_commerce INTEGER NOT NULL DEFAULT 1,
+    modules_actifs TEXT DEFAULT '[]',
+    parametres TEXT DEFAULT '{}',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : licence_application
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS licence_application (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    first_launch_date TEXT NOT NULL,
+    licence_key TEXT,
+    valid_activation_key TEXT,
+    licence_type TEXT DEFAULT 'BETA' CHECK(licence_type IN ('BETA', 'DEFINITIF')),
+    statut TEXT DEFAULT 'ACTIF' CHECK(statut IN ('ACTIF', 'EXPIRE')),
+    trial_days INTEGER DEFAULT 60,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : mouvements_stock
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS mouvements_stock (
+    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    type_mouvement TEXT NOT NULL,
+    quantite REAL NOT NULL,
+    stock_avant REAL NOT NULL,
+    stock_apres REAL NOT NULL,
+    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    idCommande INTEGER,
+    prix_unitaire REAL,
+    reference TEXT,
+    notes TEXT,
+    idLot INTEGER,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : lots_stock
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS lots_stock (
+    idLot INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    code_lot TEXT UNIQUE NOT NULL,
+    quantite_entree REAL NOT NULL,
+    quantite_restante REAL NOT NULL,
+    prix_achat_unitaire REAL NOT NULL,
+    prix_vente_unitaire REAL NOT NULL,
+    date_entree DATE NOT NULL,
+    date_expiration DATE,
+    reference_facture TEXT,
+    idFournisseur INTEGER,
+    notes TEXT,
+    est_supprime INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : sorties_lots
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS sorties_lots (
+    idSortieLot INTEGER PRIMARY KEY AUTOINCREMENT,
+    idLot INTEGER NOT NULL,
+    idMouvement INTEGER NOT NULL,
+    quantite_sortie REAL NOT NULL,
+    prix_vente_unitaire REAL NOT NULL,
+    FOREIGN KEY (idLot) REFERENCES lots_stock(idLot),
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_stock(idMouvement)
+  );
+
+  -- ============================================================
+  -- TABLE : historique_prix
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS historique_prix (
+    idHistorique INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ancien_prix_achat REAL,
+    nouveau_prix_achat REAL,
+    ancien_prix_vente REAL,
+    nouveau_prix_vente REAL,
+    idLot INTEGER,
+    motif TEXT,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : mouvements_revendeur
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS mouvements_revendeur (
+    idMouvementRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    idCommande INTEGER,
+    idDecompte INTEGER,
+    type_mouvement TEXT NOT NULL,
+    qte_mouvement REAL NOT NULL,
+    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+  );
+
+  -- ============================================================
+  -- TABLE : decomptes
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS decomptes (
+    idDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_decompte TEXT UNIQUE NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    date_decompte DATETIME DEFAULT CURRENT_TIMESTAMP,
+    periode_debut TEXT,
+    periode_fin TEXT,
+    montant_ht REAL DEFAULT 0,
+    montant_commission REAL DEFAULT 0,
+    montant_net REAL DEFAULT 0,
+    taux_commission REAL DEFAULT 60,
+    idFactureRevendeur INTEGER,
+    id_facture_approvisionnement INTEGER,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
+  );
+
+  -- ============================================================
+  -- TABLE : decompte_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS decompte_details (
+    idDetailDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
+    idDecompte INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    designation TEXT,
+    qte_avant_decompte REAL DEFAULT 0,
+    qte_reappro REAL DEFAULT 0,
+    prix_unitaire REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    benefice REAL DEFAULT 0,
+    commission REAL DEFAULT 0,
+    commission_pourcentage REAL DEFAULT 0,
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : factures_revendeur
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS factures_revendeur (
+    idFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+    idCommande INTEGER NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    code_facture TEXT UNIQUE,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    commission REAL DEFAULT 0,
+    taux_commission REAL DEFAULT 60,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
+  );
+
+  -- ============================================================
+  -- TABLE : factures_revendeur_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS factures_revendeur_details (
+    idDetailFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFactureRevendeur INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    qte_commande REAL NOT NULL,
+    prix_achat_base REAL DEFAULT 0,
+    prix_unitaire_vente REAL NOT NULL,
+    FOREIGN KEY (idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : reglements_revendeur
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS reglements_revendeur (
+    idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFactureRevendeur INTEGER NOT NULL,
+    idClient INTEGER NOT NULL,
+    date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant REAL NOT NULL,
+    mode_reglement TEXT,
+    reference TEXT,
+    observation TEXT,
+    FOREIGN KEY (idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur),
+    FOREIGN KEY (idClient) REFERENCES clients(idClient)
+  );
+
+  -- ============================================================
+  -- TABLE : factures_approvisionnement
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS factures_approvisionnement (
+    idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_facture TEXT UNIQUE NOT NULL,
+    idRevendeur INTEGER NOT NULL,
+    idDecompte INTEGER NOT NULL,
+    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    reference_decompte TEXT,
+    notes TEXT,
+    FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+    FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+  );
+
+  -- ============================================================
+  -- TABLE : factures_approvisionnement_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
+    idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+    idFactureAppro INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_achat REAL NOT NULL,
+    prix_vente REAL NOT NULL,
+    total_ht REAL NOT NULL,
+    total_ttc REAL NOT NULL,
+    FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : conditionnements
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS conditionnements (
+    idConditionnement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idProduit INTEGER NOT NULL,
+    libelle TEXT NOT NULL,
+    quantite_par_unite_base REAL DEFAULT 1,
+    prix_vente_ttc REAL DEFAULT 0,
+    prix_vente_ht REAL DEFAULT 0,
+    code_conditionnement TEXT,
+    est_conditionnement_par_defaut INTEGER DEFAULT 0,
+    est_actif INTEGER DEFAULT 1,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : vente_details
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS vente_details (
+    idDetailVente INTEGER PRIMARY KEY AUTOINCREMENT,
+    idVente INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    quantite REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    idConditionnement INTEGER,
+    quantite_pieces REAL DEFAULT 0,
+    libelle_conditionnement TEXT,
+    FOREIGN KEY (idVente) REFERENCES ventes(idVente) ON DELETE CASCADE,
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+  );
+
+  -- ============================================================
+  -- TABLE : ventes
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS ventes (
+    idVente INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_vente TEXT UNIQUE NOT NULL,
+    idClient INTEGER,
+    date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_ht REAL DEFAULT 0,
+    montant_tva REAL DEFAULT 0,
+    montant_ttc REAL DEFAULT 0,
+    statut TEXT DEFAULT 'EN_ATTENTE',
+    type_vente TEXT DEFAULT 'COMPTOIR',
+    idUtilisateur INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idClient) REFERENCES clients(idClient),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : credits
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS credits (
+    idCredit INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_credit TEXT NOT NULL UNIQUE,
+    date_credit TEXT NOT NULL,
+    designation TEXT NOT NULL,
+    montant_total REAL NOT NULL,
+    montant_restant REAL NOT NULL,
+    beneficiaire TEXT NOT NULL,
+    type_credit TEXT NOT NULL CHECK (type_credit IN ('CLIENT', 'FOURNISSEUR', 'AUTRE')),
+    reference TEXT,
+    notes TEXT,
+    date_echeance TEXT,
+    statut TEXT NOT NULL DEFAULT 'EN_COURS' CHECK (statut IN ('EN_COURS', 'TERMINE', 'ANNULE')),
+    idJournal INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
+  );
+
+  -- ============================================================
+  -- TABLE : remboursements
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS remboursements (
+    idRemboursement INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_remboursement TEXT NOT NULL UNIQUE,
+    date_remboursement TEXT NOT NULL,
+    idCredit INTEGER NOT NULL,
+    montant REAL NOT NULL,
+    mode_paiement TEXT NOT NULL CHECK (mode_paiement IN ('ESPECES', 'VIREMENT', 'CHEQUE', 'MOBILE_MONEY', 'AUTRE')),
+    reference_paiement TEXT,
+    notes TEXT,
+    idJournal INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (idCredit) REFERENCES credits(idCredit) ON DELETE CASCADE,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
+  );
+
+  -- ============================================================
+  -- TABLE : journal_caisse
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS journal_caisse (
+    idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_journal TEXT UNIQUE NOT NULL,
+    date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
+    type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
+    categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    solde_apres REAL NOT NULL,
+    reference TEXT,
+    idReference INTEGER,
+    idUtilisateur INTEGER,
+    idSession INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id),
+    FOREIGN KEY (idSession) REFERENCES sessions_caisse(idSession)
+  );
+
+  -- ============================================================
+  -- TABLE : charges_fonctionnement
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS charges_fonctionnement (
+    idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_charge TEXT UNIQUE NOT NULL,
+    date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
+    designation TEXT NOT NULL,
+    montant REAL NOT NULL,
+    beneficiaire TEXT NOT NULL,
+    categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
+    reference_paiement TEXT,
+    idJournal INTEGER,
+    idUtilisateur INTEGER,
+    idSession INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : categories_charges
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS categories_charges (
+    idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_categorie TEXT UNIQUE NOT NULL,
+    libelle TEXT NOT NULL,
+    description TEXT,
+    est_actif INTEGER DEFAULT 1
+  );
+
+  -- ============================================================
+  -- TABLE : recapitulatif_journalier
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
+    idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_recap DATE UNIQUE NOT NULL,
+    solde_initial REAL DEFAULT 0,
+    total_entrees REAL DEFAULT 0,
+    total_sorties REAL DEFAULT 0,
+    solde_final REAL DEFAULT 0,
+    total_ventes_comptoir REAL DEFAULT 0,
+    total_reglements_factures REAL DEFAULT 0,
+    total_decomptes_revendeurs REAL DEFAULT 0,
+    total_charges REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : sessions_caisse
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS sessions_caisse (
+    idSession INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_session TEXT UNIQUE NOT NULL,
+    nom_operateur TEXT NOT NULL,
+    date_ouverture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    solde_initial REAL DEFAULT 0,
+    solde_ouverture REAL DEFAULT 0,
+    date_fermeture DATETIME,
+    solde_calcule REAL,
+    solde_declare REAL,
+    ecart REAL DEFAULT 0,
+    total_entrees REAL DEFAULT 0,
+    total_sorties REAL DEFAULT 0,
+    total_ventes REAL DEFAULT 0,
+    total_reglements REAL DEFAULT 0,
+    total_decomptes REAL DEFAULT 0,
+    total_charges REAL DEFAULT 0,
+    statut TEXT DEFAULT 'OUVERTE' CHECK(statut IN ('OUVERTE', 'FERMEE', 'BLOQUEE')),
+    notes_ouverture TEXT,
+    notes_fermeture TEXT,
+    idUtilisateur INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : debug_logs
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS debug_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    level TEXT NOT NULL,
+    category TEXT NOT NULL,
+    message TEXT NOT NULL,
+    details TEXT,
+    stack TEXT,
+    app_version TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ============================================================
+  -- TABLE : revendeurs_ponctuels
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS revendeurs_ponctuels (
+    idRevendeurPonctuel INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom_complet TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    email TEXT,
+    adresse TEXT,
+    piece_identite TEXT,
+    numero_piece TEXT,
+    date_inscription DATETIME DEFAULT CURRENT_TIMESTAMP,
+    est_actif INTEGER DEFAULT 1,
+    notes TEXT
+  );
+
+  -- ============================================================
+  -- TABLE : mouvements_revendeurs (NOUVEAU - Cycle de vie)
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS mouvements_revendeurs (
+    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_mouvement TEXT UNIQUE NOT NULL,
+    idRevendeurPonctuel INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    date_sortie DATETIME DEFAULT CURRENT_TIMESTAMP,
+    quantite_sortie REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    montant_total REAL NOT NULL,
+    destination TEXT NOT NULL CHECK(destination IN ('PRESENTATION', 'VENTE')),
+    statut TEXT DEFAULT 'EN_COURS' CHECK(statut IN ('EN_COURS', 'RETOURNE', 'VENDU', 'PARTIELLEMENT_RETOURNE', 'PARTIELLEMENT_VENDU', 'CLOTURE')),
+    stock_avant_sortie REAL NOT NULL,
+    stock_apres_sortie REAL NOT NULL,
+    notes TEXT,
+    idUtilisateur INTEGER,
+    date_cloture DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idRevendeurPonctuel) REFERENCES revendeurs_ponctuels(idRevendeurPonctuel),
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : mouvement_evenements
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS mouvement_evenements (
+    idEvenement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idMouvement INTEGER NOT NULL,
+    type_evenement TEXT NOT NULL CHECK(type_evenement IN ('RETOUR', 'VENTE', 'PERTE', 'ECHANGE', 'AJUSTEMENT')),
+    date_evenement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    quantite REAL NOT NULL,
+    prix_unitaire REAL,
+    montant REAL,
+    etat TEXT CHECK(etat IN ('BON', 'ABIME', 'PERDU')),
+    client_nom TEXT,
+    client_contact TEXT,
+    stock_avant REAL NOT NULL,
+    stock_apres REAL NOT NULL,
+    notes TEXT,
+    idUtilisateur INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- TABLE : mouvement_etats
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS mouvement_etats (
+    idEtat INTEGER PRIMARY KEY AUTOINCREMENT,
+    idMouvement INTEGER NOT NULL,
+    ancien_statut TEXT NOT NULL,
+    nouveau_statut TEXT NOT NULL,
+    date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    raison TEXT,
+    idUtilisateur INTEGER,
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+  );
+
+  -- ============================================================
+  -- INDEX
+  -- ============================================================
+  CREATE INDEX IF NOT EXISTS idx_commandes_client ON commandes(idClient);
+  CREATE INDEX IF NOT EXISTS idx_commandes_date ON commandes(date_commande);
+  CREATE INDEX IF NOT EXISTS idx_commandes_statut ON commandes(statut);
+  CREATE INDEX IF NOT EXISTS idx_factures_client ON factures(idClient);
+  CREATE INDEX IF NOT EXISTS idx_factures_date ON factures(date_facture);
+  CREATE INDEX IF NOT EXISTS idx_factures_statut ON factures(statut);
+  CREATE INDEX IF NOT EXISTS idx_reglements_facture ON reglements(idFacture);
+  CREATE INDEX IF NOT EXISTS idx_reglements_date ON reglements(date_reglement);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_stock_produit ON mouvements_stock(idProduit);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_stock_date ON mouvements_stock(date_mouvement);
+  CREATE INDEX IF NOT EXISTS idx_lots_produit ON lots_stock(idProduit);
+  CREATE INDEX IF NOT EXISTS idx_lots_date ON lots_stock(date_entree);
+  CREATE INDEX IF NOT EXISTS idx_sorties_lot ON sorties_lots(idLot);
+  CREATE INDEX IF NOT EXISTS idx_historique_produit ON historique_prix(idProduit);
+  CREATE INDEX IF NOT EXISTS idx_mvt_rev_produit ON mouvements_revendeur(idProduit);
+  CREATE INDEX IF NOT EXISTS idx_mvt_rev_revendeur ON mouvements_revendeur(idRevendeur);
+  CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
+  CREATE INDEX IF NOT EXISTS idx_credits_statut ON credits(statut);
+  CREATE INDEX IF NOT EXISTS idx_credits_date ON credits(date_credit);
+  CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredit);
+  CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
+  CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
+  CREATE INDEX IF NOT EXISTS idx_journal_caisse_type ON journal_caisse(type_mouvement);
+  CREATE INDEX IF NOT EXISTS idx_journal_caisse_categorie ON journal_caisse(categorie);
+  CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charge);
+  CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
+  CREATE INDEX IF NOT EXISTS idx_sessions_statut ON sessions_caisse(statut);
+  CREATE INDEX IF NOT EXISTS idx_debug_logs_timestamp ON debug_logs(timestamp DESC);
+  CREATE INDEX IF NOT EXISTS idx_debug_logs_level ON debug_logs(level);
+  
+  -- Index pour les revendeurs ponctuels
+  CREATE INDEX IF NOT EXISTS idx_mouvements_revendeur ON mouvements_revendeurs(idRevendeurPonctuel);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements_revendeurs(idProduit);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_date_sortie ON mouvements_revendeurs(date_sortie);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_statut ON mouvements_revendeurs(statut);
+  CREATE INDEX IF NOT EXISTS idx_mouvements_code ON mouvements_revendeurs(code_mouvement);
+  CREATE INDEX IF NOT EXISTS idx_evenements_mouvement ON mouvement_evenements(idMouvement);
+  CREATE INDEX IF NOT EXISTS idx_evenements_date ON mouvement_evenements(date_evenement);
+  CREATE INDEX IF NOT EXISTS idx_evenements_type ON mouvement_evenements(type_evenement);
+  CREATE INDEX IF NOT EXISTS idx_etats_mouvement ON mouvement_etats(idMouvement);
+
+  -- ============================================================
+  -- DONNEES INITIALES
+  -- ============================================================
+  INSERT OR IGNORE INTO config_generale (id_config, nom_application, version) 
+  VALUES (1, 'Gestion Commerciale Pro', '1.0.0');
+
+  INSERT OR IGNORE INTO configuration_atelier (id, nom_atelier) 
+  VALUES (1, 'MON COMMERCE');
+
+  INSERT OR IGNORE INTO config_commerce (id, id_type_commerce, modules_actifs, parametres) 
+  VALUES (1, 1, '[]', '{"tva_default":18,"devise":"FCFA"}');
+
+  INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
+  ('EAU', 'Eau'),
+  ('ELECTRICITE', 'Électricité'),
+  ('LOYER', 'Loyer'),
+  ('SALAIRE', 'Salaire'),
+  ('TRANSPORT', 'Transport'),
+  ('COMMUNICATION', 'Communication'),
+  ('AUTRE', 'Autres charges');
+
+  INSERT OR IGNORE INTO licence_application (id, first_launch_date, licence_type, statut, trial_days)
+  VALUES (1, datetime('now'), 'BETA', 'ACTIF', 60);
+`;
+
+// ==================== FONCTION PRINCIPALE ====================
 export const runSchemaMigration = async (): Promise<void> => {
-  console.log('🚀 [runSchemaMigration] Début de l\'exécution...');
-
+  let db: any = null;
+  
   try {
-    console.log('🔄 [runSchemaMigration] Connexion à la base de données...');
-    const db = await getDb();
-    console.log('✅ [runSchemaMigration] Base de données connectée');
+    log('🚀 Début de l\'exécution...');
+    log('🔄 Connexion à la base de données...');
+    
+    db = await getDb();
+    log('✅ Base de données connectée');
 
-    // Vérifier si la table config_generale existe (indique que le schéma est déjà installé)
-    console.log('🔍 [runSchemaMigration] Vérification des tables existantes...');
-    const tables = await db.select<{ name: string }[]>(`
+    // Vérifier si la table config_generale existe
+    log('🔍 Vérification des tables existantes...');
+    const tables = await db.select(`
       SELECT name FROM sqlite_master 
       WHERE type='table' 
       ORDER BY name
-    `);
-    console.log('📊 [runSchemaMigration] Tables existantes:', tables.map(t => t.name));
+    `) as { name: string }[];
+    const tableNames = tables.map(t => t.name);
+    log(`📊 Tables existantes: ${tableNames.join(', ')}`);
 
-    // Vérifier spécifiquement les tables du journal de caisse
-    const hasJournalCaisse = tables.some(t => t.name === 'journal_caisse');
-    const hasCharges = tables.some(t => t.name === 'charges_fonctionnement');
-    const hasRecap = tables.some(t => t.name === 'recapitulatif_journalier');
-    const hasCategoriesCharges = tables.some(t => t.name === 'categories_charges');
-    const hasCredits = tables.some(t => t.name === 'credits');
-    const hasRemboursements = tables.some(t => t.name === 'remboursements');
+    const hasConfigGenerale = tableNames.includes('config_generale');
 
-    console.log(`📋 [runSchemaMigration] Tables de caisse: Journal=${hasJournalCaisse}, Charges=${hasCharges}, Recap=${hasRecap}, Categories=${hasCategoriesCharges}`);
-    console.log(`📋 [runSchemaMigration] Tables de crédits: Credits=${hasCredits}, Remboursements=${hasRemboursements}`);
-
-    // Vérifier si le schéma est déjà installé
-    const hasConfigGenerale = tables.some(t => t.name === 'config_generale');
-
-    if (!hasConfigGenerale || !hasJournalCaisse) {
-      console.log('⚠️ [runSchemaMigration] Schéma incomplet, exécution du schéma complet...');
+    if (!hasConfigGenerale) {
+      log('⚠️ Schéma incomplet, exécution du schéma complet...');
       await db.execute(SCHEMA_SQL);
-      console.log('✅ [runSchemaMigration] Schéma SQL exécuté avec succès');
+      log('✅ Schéma SQL exécuté avec succès');
     }
 
-    // Toujours exécuter les migrations pour garantir toutes les colonnes ALTER TABLE
-    console.log('🔄 [runSchemaMigration] Exécution des migrations complémentaires...');
-    await runMigrations(db);
+    // Vérifier et créer les tables manquantes spécifiquement
+    const tablesToCreate = [
+      'licence_application',
+      'reglements_revendeur',
+      'factures_revendeur_details',
+      'factures_revendeur',
+      'factures_approvisionnement',
+      'factures_approvisionnement_details',
+      'decomptes',
+      'decompte_details',
+      'credits',
+      'remboursements',
+      'journal_caisse',
+      'charges_fonctionnement',
+      'categories_charges',
+      'recapitulatif_journalier',
+      'sessions_caisse',
+      'missions_revendeur',
+      'mission_articles',
+      'revendeurs_ponctuels',
+      'mouvements_revendeurs',
+      'mouvement_evenements',
+      'mouvement_etats'
+    ];
 
-    // Vérifier à nouveau les tables
-    const tablesAfter = await db.select<{ name: string }[]>(`
-      SELECT name FROM sqlite_master 
-      WHERE type='table' 
-      ORDER BY name
-    `);
-    console.log('📊 [runSchemaMigration] Tables après migration:', tablesAfter.map(t => t.name));
-
-    // Vérifier les tables de caisse
-    const hasJournalCaisseAfter = tablesAfter.some(t => t.name === 'journal_caisse');
-    const hasChargesAfter = tablesAfter.some(t => t.name === 'charges_fonctionnement');
-    const hasRecapAfter = tablesAfter.some(t => t.name === 'recapitulatif_journalier');
-    const hasCategoriesChargesAfter = tablesAfter.some(t => t.name === 'categories_charges');
-    const hasCreditsAfter = tablesAfter.some(t => t.name === 'credits');
-    const hasRemboursementsAfter = tablesAfter.some(t => t.name === 'remboursements');
-
-    console.log(`✅ [runSchemaMigration] Tables de caisse après migration: Journal=${hasJournalCaisseAfter}, Charges=${hasChargesAfter}, Recap=${hasRecapAfter}, Categories=${hasCategoriesChargesAfter}`);
-    console.log(`✅ [runSchemaMigration] Tables de crédits après migration: Credits=${hasCreditsAfter}, Remboursements=${hasRemboursementsAfter}`);
-
-    // Créer les tables manuellement si elles n'existent pas
-    if (!hasJournalCaisseAfter) {
-      console.error('❌ [runSchemaMigration] La table journal_caisse n\'a pas été créée !');
-      await createCaisseTables(db);
+    for (const tableName of tablesToCreate) {
+      if (!tableNames.includes(tableName)) {
+        log(`⚠️ Table ${tableName} manquante, création...`);
+        await createMissingTable(db, tableName);
+      }
     }
 
-    if (!hasChargesAfter) {
-      console.error('❌ [runSchemaMigration] La table charges_fonctionnement n\'a pas été créée !');
-      await createCaisseTables(db);
+    // Supprimer les anciennes tables si elles existent
+    try {
+      await db.execute(`DROP TABLE IF EXISTS emprunts_revendeurs`);
+      await db.execute(`DROP TABLE IF EXISTS emprunt_details`);
+      await db.execute(`DROP TABLE IF EXISTS mouvements_revendeurs_ponctuels`);
+      log('✅ Anciennes tables des revendeurs ponctuels supprimées');
+    } catch (e) {
+      log('ℹ️ Les anciennes tables n\'existent pas');
     }
 
-    if (!hasRecapAfter) {
-      console.error('❌ [runSchemaMigration] La table recapitulatif_journalier n\'a pas été créée !');
-      await createCaisseTables(db);
-    }
+    // Exécuter les migrations
+    log('🔄 Exécution des migrations complémentaires...');
+    const migrationCount = await runMigrations(db);
+    log(`✅ ${migrationCount} migration(s) appliquée(s)`);
 
-    if (!hasCategoriesChargesAfter) {
-      console.error('❌ [runSchemaMigration] La table categories_charges n\'a pas été créée !');
-      await createCaisseTables(db);
-    }
-
-    if (!hasCreditsAfter) {
-      console.error('❌ [runSchemaMigration] La table credits n\'a pas été créée !');
-      await createCreditsTables(db);
-    }
-
-    if (!hasRemboursementsAfter) {
-      console.error('❌ [runSchemaMigration] La table remboursements n\'a pas été créée !');
-      await createCreditsTables(db);
-    }
-
-    console.log('✅ [runSchemaMigration] Migration terminée avec succès');
+    log('✅ Migration terminée avec succès');
 
   } catch (error) {
-    console.error('❌ [runSchemaMigration] Erreur:', error);
+    log(`❌ Erreur: ${error}`);
     throw error;
   }
 };
 
-/**
- * Crée les tables du journal de caisse
- */
-const createCaisseTables = async (db: any): Promise<void> => {
-  console.log('🔄 Création des tables de caisse...');
-
-  try {
-    // Journal de caisse
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS journal_caisse (
-        idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
-        code_journal TEXT UNIQUE NOT NULL,
-        date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
-        type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
-        categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
-        designation TEXT NOT NULL,
+// ==================== FONCTION POUR CRÉER LES TABLES MANQUANTES ====================
+const createMissingTable = async (db: any, tableName: string): Promise<void> => {
+  const createQueries: Record<string, string> = {
+    'reglements_revendeur': `
+      CREATE TABLE IF NOT EXISTS reglements_revendeur (
+        idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
+        idFactureRevendeur INTEGER NOT NULL,
+        idClient INTEGER NOT NULL,
+        date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
         montant REAL NOT NULL,
-        solde_apres REAL NOT NULL,
+        mode_reglement TEXT,
         reference TEXT,
-        idReference INTEGER,
-        idUtilisateur INTEGER,
+        observation TEXT,
+        FOREIGN KEY (idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur),
+        FOREIGN KEY (idClient) REFERENCES clients(idClient)
+      )
+    `,
+    'factures_revendeur_details': `
+      CREATE TABLE IF NOT EXISTS factures_revendeur_details (
+        idDetailFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+        idFactureRevendeur INTEGER NOT NULL,
+        idProduit INTEGER NOT NULL,
+        qte_commande REAL NOT NULL,
+        prix_achat_base REAL DEFAULT 0,
+        prix_unitaire_vente REAL NOT NULL,
+        FOREIGN KEY (idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur) ON DELETE CASCADE,
+        FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+      )
+    `,
+    'factures_revendeur': `
+      CREATE TABLE IF NOT EXISTS factures_revendeur (
+        idFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
+        idCommande INTEGER NOT NULL,
+        idRevendeur INTEGER NOT NULL,
+        code_facture TEXT UNIQUE,
+        date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+        montant_ht REAL DEFAULT 0,
+        montant_ttc REAL DEFAULT 0,
+        commission REAL DEFAULT 0,
+        taux_commission REAL DEFAULT 60,
+        statut TEXT DEFAULT 'EN_ATTENTE',
+        FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
+        FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
+      )
+    `,
+    'factures_approvisionnement': `
+      CREATE TABLE IF NOT EXISTS factures_approvisionnement (
+        idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_facture TEXT UNIQUE NOT NULL,
+        idRevendeur INTEGER NOT NULL,
+        idDecompte INTEGER NOT NULL,
+        date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
+        montant_ht REAL DEFAULT 0,
+        montant_ttc REAL DEFAULT 0,
+        statut TEXT DEFAULT 'EN_ATTENTE',
+        reference_decompte TEXT,
+        notes TEXT,
+        FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
+        FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
+      )
+    `,
+    'factures_approvisionnement_details': `
+      CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
+        idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
+        idFactureAppro INTEGER NOT NULL,
+        idProduit INTEGER NOT NULL,
+        quantite REAL NOT NULL,
+        prix_achat REAL NOT NULL,
+        prix_vente REAL NOT NULL,
+        total_ht REAL NOT NULL,
+        total_ttc REAL NOT NULL,
+        FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
+        FOREIGN KEY (idProduit) REFERENCES products(idProduit)
+      )
+    `,
+    'decomptes': `
+      CREATE TABLE IF NOT EXISTS decomptes (
+        idDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_decompte TEXT UNIQUE NOT NULL,
+        idRevendeur INTEGER NOT NULL,
+        date_decompte DATETIME DEFAULT CURRENT_TIMESTAMP,
+        periode_debut TEXT,
+        periode_fin TEXT,
+        montant_ht REAL DEFAULT 0,
+        montant_commission REAL DEFAULT 0,
+        montant_net REAL DEFAULT 0,
+        taux_commission REAL DEFAULT 60,
+        idFactureRevendeur INTEGER,
+        id_facture_approvisionnement INTEGER,
+        statut TEXT DEFAULT 'EN_ATTENTE',
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
       )
-    `);
-    console.log('✅ Table journal_caisse créée');
-
-    // Charges de fonctionnement
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS charges_fonctionnement (
-        idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
-        code_charge TEXT UNIQUE NOT NULL,
-        date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
-        designation TEXT NOT NULL,
-        montant REAL NOT NULL,
-        beneficiaire TEXT NOT NULL,
-        categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
-        reference_paiement TEXT,
-        idJournal INTEGER,
-        idUtilisateur INTEGER,
-        notes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
-        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+    `,
+    'decompte_details': `
+      CREATE TABLE IF NOT EXISTS decompte_details (
+        idDetailDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
+        idDecompte INTEGER NOT NULL,
+        idProduit INTEGER NOT NULL,
+        designation TEXT,
+        qte_avant_decompte REAL DEFAULT 0,
+        qte_reappro REAL DEFAULT 0,
+        prix_unitaire REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        benefice REAL DEFAULT 0,
+        commission REAL DEFAULT 0,
+        commission_pourcentage REAL DEFAULT 0,
+        FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
+        FOREIGN KEY (idProduit) REFERENCES products(idProduit)
       )
-    `);
-    console.log('✅ Table charges_fonctionnement créée');
-
-    // Catégories de charges
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS categories_charges (
-        idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
-        code_categorie TEXT UNIQUE NOT NULL,
-        libelle TEXT NOT NULL,
-        description TEXT,
-        est_actif INTEGER DEFAULT 1
-      )
-    `);
-    console.log('✅ Table categories_charges créée');
-
-    // Récapitulatif journalier
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
-        idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
-        date_recap DATE UNIQUE NOT NULL,
-        solde_initial REAL DEFAULT 0,
-        total_entrees REAL DEFAULT 0,
-        total_sorties REAL DEFAULT 0,
-        solde_final REAL DEFAULT 0,
-        total_ventes_comptoir REAL DEFAULT 0,
-        total_reglements_factures REAL DEFAULT 0,
-        total_decomptes_revendeurs REAL DEFAULT 0,
-        total_charges REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Table recapitulatif_journalier créée');
-
-    // Index
-    await db.execute(`
-      CREATE INDEX IF NOT EXISTS idx_journal_caisse_date ON journal_caisse(date_journal);
-      CREATE INDEX IF NOT EXISTS idx_journal_caisse_type ON journal_caisse(type_mouvement);
-      CREATE INDEX IF NOT EXISTS idx_journal_caisse_categorie ON journal_caisse(categorie);
-      CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charge);
-      CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
-    `);
-    console.log('✅ Index créés');
-
-    // Données initiales
-    await db.execute(`
-      INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
-      ('EAU', 'Eau'),
-      ('ELECTRICITE', 'Électricité'),
-      ('LOYER', 'Loyer'),
-      ('SALAIRE', 'Salaire'),
-      ('TRANSPORT', 'Transport'),
-      ('COMMUNICATION', 'Communication'),
-      ('AUTRE', 'Autres charges')
-    `);
-    console.log('✅ Données initiales des catégories de charges insérées');
-
-    // Journal initial avec solde à 0
-    const journalCount = await db.select(`
-      SELECT COUNT(*) as count FROM journal_caisse
-    `) as { count: number }[];
-
-    if (journalCount[0]?.count === 0) {
-      await db.execute(`
-        INSERT INTO journal_caisse (code_journal, date_journal, type_mouvement, categorie, designation, montant, solde_apres)
-        VALUES ('JRN-INIT', datetime('now'), 'ENTREE', 'AUTRE_ENTREE', 'Solde initial', 0, 0)
-      `);
-      console.log('✅ Solde initial à 0 créé');
-    }
-
-    console.log('✅ Toutes les tables de caisse sont créées');
-
-  } catch (error) {
-    console.error('❌ Erreur création tables de caisse:', error);
-    throw error;
-  }
-};
-
-/**
- * Crée les tables de crédits
- */
-const createCreditsTables = async (db: any): Promise<void> => {
-  console.log('🔄 Création des tables de crédits...');
-
-  try {
-    // Table des crédits
-    await db.execute(`
+    `,
+    'credits': `
       CREATE TABLE IF NOT EXISTS credits (
         idCredit INTEGER PRIMARY KEY AUTOINCREMENT,
         code_credit TEXT NOT NULL UNIQUE,
@@ -253,11 +1006,8 @@ const createCreditsTables = async (db: any): Promise<void> => {
         updated_at TEXT NOT NULL,
         FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
       )
-    `);
-    console.log('✅ Table credits créée');
-
-    // Table des remboursements
-    await db.execute(`
+    `,
+    'remboursements': `
       CREATE TABLE IF NOT EXISTS remboursements (
         idRemboursement INTEGER PRIMARY KEY AUTOINCREMENT,
         code_remboursement TEXT NOT NULL UNIQUE,
@@ -272,471 +1022,197 @@ const createCreditsTables = async (db: any): Promise<void> => {
         FOREIGN KEY (idCredit) REFERENCES credits(idCredit) ON DELETE CASCADE,
         FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
       )
-    `);
-    console.log('✅ Table remboursements créée');
+    `,
+    'journal_caisse': `
+      CREATE TABLE IF NOT EXISTS journal_caisse (
+        idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_journal TEXT UNIQUE NOT NULL,
+        date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
+        type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
+        categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
+        designation TEXT NOT NULL,
+        montant REAL NOT NULL,
+        solde_apres REAL NOT NULL,
+        reference TEXT,
+        idReference INTEGER,
+        idUtilisateur INTEGER,
+        idSession INTEGER,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id),
+        FOREIGN KEY (idSession) REFERENCES sessions_caisse(idSession)
+      )
+    `,
+    'charges_fonctionnement': `
+      CREATE TABLE IF NOT EXISTS charges_fonctionnement (
+        idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_charge TEXT UNIQUE NOT NULL,
+        date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
+        designation TEXT NOT NULL,
+        montant REAL NOT NULL,
+        beneficiaire TEXT NOT NULL,
+        categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
+        reference_paiement TEXT,
+        idJournal INTEGER,
+        idUtilisateur INTEGER,
+        idSession INTEGER,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+      )
+    `,
+    'categories_charges': `
+      CREATE TABLE IF NOT EXISTS categories_charges (
+        idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_categorie TEXT UNIQUE NOT NULL,
+        libelle TEXT NOT NULL,
+        description TEXT,
+        est_actif INTEGER DEFAULT 1
+      )
+    `,
+    'recapitulatif_journalier': `
+      CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
+        idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
+        date_recap DATE UNIQUE NOT NULL,
+        solde_initial REAL DEFAULT 0,
+        total_entrees REAL DEFAULT 0,
+        total_sorties REAL DEFAULT 0,
+        solde_final REAL DEFAULT 0,
+        total_ventes_comptoir REAL DEFAULT 0,
+        total_reglements_factures REAL DEFAULT 0,
+        total_decomptes_revendeurs REAL DEFAULT 0,
+        total_charges REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    'sessions_caisse': `
+      CREATE TABLE IF NOT EXISTS sessions_caisse (
+        idSession INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_session TEXT UNIQUE NOT NULL,
+        nom_operateur TEXT NOT NULL,
+        date_ouverture DATETIME DEFAULT CURRENT_TIMESTAMP,
+        solde_initial REAL DEFAULT 0,
+        solde_ouverture REAL DEFAULT 0,
+        date_fermeture DATETIME,
+        solde_calcule REAL,
+        solde_declare REAL,
+        ecart REAL DEFAULT 0,
+        total_entrees REAL DEFAULT 0,
+        total_sorties REAL DEFAULT 0,
+        total_ventes REAL DEFAULT 0,
+        total_reglements REAL DEFAULT 0,
+        total_decomptes REAL DEFAULT 0,
+        total_charges REAL DEFAULT 0,
+        statut TEXT DEFAULT 'OUVERTE' CHECK(statut IN ('OUVERTE', 'FERMEE', 'BLOQUEE')),
+        notes_ouverture TEXT,
+        notes_fermeture TEXT,
+        idUtilisateur INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+      )
+    `,
+    'licence_application': `
+      CREATE TABLE IF NOT EXISTS licence_application (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        first_launch_date TEXT NOT NULL,
+        licence_key TEXT,
+        valid_activation_key TEXT,
+        licence_type TEXT DEFAULT 'BETA' CHECK(licence_type IN ('BETA', 'DEFINITIF')),
+        statut TEXT DEFAULT 'ACTIF' CHECK(statut IN ('ACTIF', 'EXPIRE')),
+        trial_days INTEGER DEFAULT 60,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    
+    'revendeurs_ponctuels': `
+      CREATE TABLE IF NOT EXISTS revendeurs_ponctuels (
+        idRevendeurPonctuel INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom_complet TEXT NOT NULL,
+        telephone TEXT NOT NULL,
+        email TEXT,
+        adresse TEXT,
+        piece_identite TEXT,
+        numero_piece TEXT,
+        date_inscription DATETIME DEFAULT CURRENT_TIMESTAMP,
+        est_actif INTEGER DEFAULT 1,
+        notes TEXT
+      )
+    `,
+    'mouvements_revendeurs': `
+      CREATE TABLE IF NOT EXISTS mouvements_revendeurs (
+        idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_mouvement TEXT UNIQUE NOT NULL,
+        idRevendeurPonctuel INTEGER NOT NULL,
+        idProduit INTEGER NOT NULL,
+        date_sortie DATETIME DEFAULT CURRENT_TIMESTAMP,
+        quantite_sortie REAL NOT NULL,
+        prix_unitaire REAL NOT NULL,
+        montant_total REAL NOT NULL,
+        destination TEXT NOT NULL CHECK(destination IN ('PRESENTATION', 'VENTE')),
+        statut TEXT DEFAULT 'EN_COURS' CHECK(statut IN ('EN_COURS', 'RETOURNE', 'VENDU', 'PARTIELLEMENT_RETOURNE', 'PARTIELLEMENT_VENDU', 'CLOTURE')),
+        stock_avant_sortie REAL NOT NULL,
+        stock_apres_sortie REAL NOT NULL,
+        notes TEXT,
+        idUtilisateur INTEGER,
+        date_cloture DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idRevendeurPonctuel) REFERENCES revendeurs_ponctuels(idRevendeurPonctuel),
+        FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+      )
+    `,
+    'mouvement_evenements': `
+      CREATE TABLE IF NOT EXISTS mouvement_evenements (
+        idEvenement INTEGER PRIMARY KEY AUTOINCREMENT,
+        idMouvement INTEGER NOT NULL,
+        type_evenement TEXT NOT NULL CHECK(type_evenement IN ('RETOUR', 'VENTE', 'PERTE', 'ECHANGE', 'AJUSTEMENT')),
+        date_evenement DATETIME DEFAULT CURRENT_TIMESTAMP,
+        quantite REAL NOT NULL,
+        prix_unitaire REAL,
+        montant REAL,
+        etat TEXT CHECK(etat IN ('BON', 'ABIME', 'PERDU')),
+        client_nom TEXT,
+        client_contact TEXT,
+        stock_avant REAL NOT NULL,
+        stock_apres REAL NOT NULL,
+        notes TEXT,
+        idUtilisateur INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+      )
+    `,
+    'mouvement_etats': `
+      CREATE TABLE IF NOT EXISTS mouvement_etats (
+        idEtat INTEGER PRIMARY KEY AUTOINCREMENT,
+        idMouvement INTEGER NOT NULL,
+        ancien_statut TEXT NOT NULL,
+        nouveau_statut TEXT NOT NULL,
+        date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
+        raison TEXT,
+        idUtilisateur INTEGER,
+        FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+        FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+      )
+    `
+  };
 
-    // Index pour améliorer les performances
-    await db.execute(`
-      CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
-      CREATE INDEX IF NOT EXISTS idx_credits_statut ON credits(statut);
-      CREATE INDEX IF NOT EXISTS idx_credits_date ON credits(date_credit);
-      CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredit);
-      CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
-    `);
-    console.log('✅ Index des crédits créés');
-
-    console.log('✅ Toutes les tables de crédits sont créées');
-
-  } catch (error) {
-    console.error('❌ Erreur création tables de crédits:', error);
-    throw error;
-  }
-};
-
-/**
- * Exécute les migrations pour ajouter les colonnes manquantes
- */
-export const runMigrations = async (db: any): Promise<void> => {
-  console.log('🔄 [runMigrations] Vérification des migrations...');
-  let migrationCount = 0;
-
-  try {
-    // 1. Vérifier les colonnes de decomptes
-    console.log('📋 [runMigrations] Vérification de la table decomptes...');
+  if (createQueries[tableName]) {
     try {
-      const tableInfo = await db.select(`PRAGMA table_info(decomptes)`);
-      console.log('=== STRUCTURE DE DECOMPTES ===');
-      tableInfo.forEach((col: any) => console.log(col.name));
-      const columns = tableInfo.map((c: any) => c.name);
-      console.log(`   Colonnes existantes: ${columns.join(', ')}`);
-
-      if (!columns.includes('taux_commission')) {
-        console.log('🔄 Ajout de la colonne taux_commission à decomptes...');
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN taux_commission REAL DEFAULT 60`);
-        migrationCount++;
-      }
-
-      if (!columns.includes('idFactureRevendeur')) {
-        console.log('🔄 Ajout de la colonne idFactureRevendeur à decomptes...');
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN idFactureRevendeur INTEGER`);
-        migrationCount++;
-      }
-      if (!columns.includes('periode_debut')) {
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN periode_debut TEXT`);
-        migrationCount++;
-      }
-      if (!columns.includes('periode_fin')) {
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN periode_fin TEXT`);
-        migrationCount++;
-      }
-      if (!columns.includes('notes')) {
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN notes TEXT`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur decomptes:', error);
-    }
-
-    // 2. Vérifier les colonnes de decompte_details
-    console.log('📋 [runMigrations] Vérification de la table decompte_details...');
-    try {
-      const detailsInfo = await db.select(`PRAGMA table_info(decompte_details)`);
-      const detailsColumns = detailsInfo.map((c: any) => c.name);
-      console.log(`   Colonnes existantes: ${detailsColumns.join(', ')}`);
-
-      if (!detailsColumns.includes('benefice')) {
-        console.log('🔄 Ajout de la colonne benefice à decompte_details...');
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN benefice REAL DEFAULT 0`);
-        migrationCount++;
-      }
-
-      if (!detailsColumns.includes('commission')) {
-        console.log('🔄 Ajout de la colonne commission à decompte_details...');
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN commission REAL DEFAULT 0`);
-        migrationCount++;
-      }
-
-      if (!detailsColumns.includes('qte_avant_decompte')) {
-        console.log('🔄 Ajout de la colonne qte_avant_decompte à decompte_details...');
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_avant_decompte REAL DEFAULT 0`);
-        migrationCount++;
-      }
-      if (!detailsColumns.includes('commission_pourcentage')) {
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN commission_pourcentage REAL DEFAULT 0`);
-        migrationCount++;
-      }
-      if (!detailsColumns.includes('designation')) {
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN designation TEXT`);
-        migrationCount++;
-      }
-      if (!detailsColumns.includes('total')) {
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN total REAL DEFAULT 0`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur decompte_details:', error);
-    }
-
-    // 3. Vérifier factures_revendeur
-    console.log('📋 [runMigrations] Vérification de la table factures_revendeur...');
-    try {
-      const facturesRevInfo = await db.select(`PRAGMA table_info(factures_revendeur)`);
-      const facturesRevColumns = facturesRevInfo.map((c: any) => c.name);
-      console.log(`   Colonnes existantes: ${facturesRevColumns.join(', ')}`);
-
-      if (!facturesRevColumns.includes('taux_commission')) {
-        console.log('🔄 Ajout de la colonne taux_commission à factures_revendeur...');
-        await db.execute(`ALTER TABLE factures_revendeur ADD COLUMN taux_commission REAL DEFAULT 60`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures_revendeur:', error);
-    }
-
-    // 4. Vérifier reglements
-    console.log('📋 [runMigrations] Vérification de la table reglements...');
-    try {
-      const reglementsInfo = await db.select(`PRAGMA table_info(reglements)`);
-      const reglementsColumns = (reglementsInfo as any[]).map((c: any) => c.name);
-      console.log(`   Colonnes existantes: ${reglementsColumns.join(', ')}`);
-
-      const regCols: [string, string][] = [
-        ['code_reglement', 'TEXT'],
-        ['idClient', 'INTEGER'],
-        ['idVente', 'INTEGER'],
-        ['reference', 'TEXT'],
-        ['banque', 'TEXT'],
-        ['numero_cheque', 'TEXT'],
-        ['date_valeur', 'DATE'],
-        ['est_lettrage', 'INTEGER DEFAULT 0'],
-        ['observation', 'TEXT'],
-        ['idUtilisateur', 'INTEGER'],
-        ['idDecompte', 'INTEGER'],
-      ];
-      for (const [col, def] of regCols) {
-        if (!reglementsColumns.includes(col)) {
-          await db.execute(`ALTER TABLE reglements ADD COLUMN ${col} ${def}`);
-          migrationCount++;
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur reglements:', error);
-    }
-
-    // 4bis. Vérifier colonne id_facture_approvisionnement dans decomptes
-    try {
-      const decomptesInfo = await db.select(`PRAGMA table_info(decomptes)`);
-      const decomptesColumns = (decomptesInfo as any[]).map((c: any) => c.name);
-      if (!decomptesColumns.includes('id_facture_approvisionnement')) {
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN id_facture_approvisionnement INTEGER`);
-        migrationCount++;
-      }
-      if (!decomptesColumns.includes('taux_commission')) {
-        await db.execute(`ALTER TABLE decomptes ADD COLUMN taux_commission REAL DEFAULT 60`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur decomptes id_facture_approvisionnement:', error);
-    }
-
-    // 4b. Vérifier products — methode_gestion_stock (manquant dans ancienne SCHEMA_SQL)
-    console.log('📋 [runMigrations] Vérification de la table products...');
-    try {
-      const productsInfo = await db.select(`PRAGMA table_info(products)`);
-      const productsColumns = productsInfo.map((c: any) => c.name);
-      console.log(`   Colonnes existantes: ${productsColumns.join(', ')}`);
-
-      if (!productsColumns.includes('methode_gestion_stock')) {
-        console.log('🔄 Ajout de la colonne methode_gestion_stock à products...');
-        await db.execute(`ALTER TABLE products ADD COLUMN methode_gestion_stock TEXT DEFAULT 'FIFO'`);
-        migrationCount++;
-      }
-      if (!productsColumns.includes('idUniteStockage')) {
-        await db.execute(`ALTER TABLE products ADD COLUMN idUniteStockage INTEGER`);
-        migrationCount++;
-      }
-      if (!productsColumns.includes('commission_pourcentage')) {
-        await db.execute(`ALTER TABLE products ADD COLUMN commission_pourcentage REAL DEFAULT 0`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur products:', error);
-    }
-
-    // 4c. Vérifier commandes — colonnes manquantes dans ancienne SCHEMA_SQL
-    console.log('📋 [runMigrations] Vérification de la table commandes...');
-    try {
-      const commandesInfo = await db.select(`PRAGMA table_info(commandes)`);
-      const commandesColumns = commandesInfo.map((c: any) => c.name);
-
-      const commandesMissingCols: [string, string][] = [
-        ['adresse_livraison', 'TEXT'],
-        ['montant_tva', 'REAL DEFAULT 0'],
-        ['montant_remise', 'REAL DEFAULT 0'],
-        ['montant_net', 'REAL DEFAULT 0'],
-        ['source', "TEXT DEFAULT 'DIRECT'"],
-        ['notes', 'TEXT'],
-        ['signature_base64', 'TEXT'],
-        ['date_facture', 'DATE'],
-      ];
-      for (const [col, def] of commandesMissingCols) {
-        if (!commandesColumns.includes(col)) {
-          await db.execute(`ALTER TABLE commandes ADD COLUMN ${col} ${def}`);
-          migrationCount++;
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur commandes:', error);
-    }
-
-    // 4d. Vérifier utilisateurs — permissions
-    console.log('📋 [runMigrations] Vérification de la table utilisateurs...');
-    try {
-      const utilisateursInfo = await db.select(`PRAGMA table_info(utilisateurs)`);
-      const utilisateursColumns = utilisateursInfo.map((c: any) => c.name);
-
-      if (!utilisateursColumns.includes('permissions')) {
-        console.log('🔄 Ajout de la colonne permissions à utilisateurs...');
-        await db.execute(`ALTER TABLE utilisateurs ADD COLUMN permissions TEXT DEFAULT '{}'`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur utilisateurs:', error);
-    }
-
-    // 4e. Vérifier commande_details — remise + idConditionnement
-    try {
-      const cmdDetailsInfo = await db.select(`PRAGMA table_info(commande_details)`);
-      const cmdDetailsCols = cmdDetailsInfo.map((c: any) => c.name);
-      if (!cmdDetailsCols.includes('remise')) {
-        await db.execute(`ALTER TABLE commande_details ADD COLUMN remise REAL DEFAULT 0`);
-        migrationCount++;
-      }
-      if (!cmdDetailsCols.includes('idConditionnement')) {
-        await db.execute(`ALTER TABLE commande_details ADD COLUMN idConditionnement INTEGER`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur commande_details:', error);
-    }
-
-    // 4f. Vérifier decompte_details — qte_reappro
-    try {
-      const ddInfo = await db.select(`PRAGMA table_info(decompte_details)`);
-      const ddCols = ddInfo.map((c: any) => c.name);
-      if (!ddCols.includes('qte_reappro')) {
-        await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_reappro REAL DEFAULT 0`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur decompte_details qte_reappro:', error);
-    }
-
-    // 4g. Créer factures_approvisionnement si manquant
-    try {
-      const factAppInfo = await db.select(`PRAGMA table_info(factures_approvisionnement)`);
-      if (factAppInfo.length === 0) {
+      await db.execute(createQueries[tableName]);
+      log(`✅ Table ${tableName} créée avec succès`);
+      
+      // Insertion des données initiales pour certaines tables
+      if (tableName === 'licence_application') {
         await db.execute(`
-          CREATE TABLE IF NOT EXISTS factures_approvisionnement (
-            idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_facture TEXT UNIQUE NOT NULL,
-            idRevendeur INTEGER NOT NULL,
-            idDecompte INTEGER NOT NULL,
-            date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
-            montant_ht REAL DEFAULT 0,
-            montant_ttc REAL DEFAULT 0,
-            statut TEXT DEFAULT 'EN_ATTENTE',
-          reference_decompte TEXT,
-            notes TEXT,
-            FOREIGN KEY (idRevendeur) REFERENCES clients(idClient),
-            FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
-          )
+          INSERT OR IGNORE INTO licence_application (id, first_launch_date, licence_type, statut, trial_days)
+          VALUES (1, datetime('now'), 'BETA', 'ACTIF', 60)
         `);
-        migrationCount++;
       }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures_approvisionnement:', error);
-    }
-
-    try {
-      const factAppDetInfo = await db.select(`PRAGMA table_info(factures_approvisionnement_details)`);
-      if (factAppDetInfo.length === 0) {
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
-            idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
-            idFactureAppro INTEGER NOT NULL,
-            idProduit INTEGER NOT NULL,
-            quantite REAL NOT NULL,
-            prix_achat REAL NOT NULL,
-            prix_vente REAL NOT NULL,
-            total_ht REAL NOT NULL,
-            total_ttc REAL NOT NULL,
-            FOREIGN KEY (idFactureAppro) REFERENCES factures_approvisionnement(idFactureAppro) ON DELETE CASCADE,
-            FOREIGN KEY (idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures_approvisionnement_details:', error);
-    }
-
-    // 5a. Créer factures_revendeur si manquante (table parent requise)
-    try {
-      const factRevInfo = await db.select(`PRAGMA table_info(factures_revendeur)`);
-      if ((factRevInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table factures_revendeur...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS factures_revendeur (
-            idFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-            idCommande INTEGER NOT NULL,
-            idRevendeur INTEGER NOT NULL,
-            code_facture TEXT UNIQUE,
-            date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
-            montant_ht REAL DEFAULT 0,
-            montant_ttc REAL DEFAULT 0,
-            commission REAL DEFAULT 0,
-            statut TEXT DEFAULT 'EN_ATTENTE',
-            FOREIGN KEY(idCommande) REFERENCES commandes(idCommande),
-            FOREIGN KEY(idRevendeur) REFERENCES clients(idClient)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures_revendeur:', error);
-    }
-
-    // 5. Vérifier factures_revendeur_details
-    console.log('📋 [runMigrations] Vérification de la table factures_revendeur_details...');
-    try {
-      const detailsFRInfo = await db.select(`PRAGMA table_info(factures_revendeur_details)`);
-
-      if (detailsFRInfo.length === 0) {
-        console.log('🔄 Création de la table factures_revendeur_details...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS factures_revendeur_details (
-              idDetailFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-              idFactureRevendeur INTEGER NOT NULL,
-              idProduit INTEGER NOT NULL,
-              qte_commande REAL NOT NULL,
-              prix_achat_base REAL DEFAULT 0,
-              prix_unitaire_vente REAL NOT NULL,
-              FOREIGN KEY(idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur) ON DELETE CASCADE,
-              FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures_revendeur_details:', error);
-    }
-
-    // 6. Vérifier reglements_revendeur
-    console.log('📋 [runMigrations] Vérification de la table reglements_revendeur...');
-    try {
-      const reglementsRevInfo = await db.select(`PRAGMA table_info(reglements_revendeur)`);
-
-      if (reglementsRevInfo.length === 0) {
-        console.log('🔄 Création de la table reglements_revendeur...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS reglements_revendeur (
-              idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
-              idFactureRevendeur INTEGER NOT NULL,
-              idClient INTEGER NOT NULL,
-              date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
-              montant REAL NOT NULL,
-              mode_reglement TEXT,
-              reference TEXT,
-              observation TEXT,
-              FOREIGN KEY(idFactureRevendeur) REFERENCES factures_revendeur(idFactureRevendeur),
-              FOREIGN KEY(idClient) REFERENCES clients(idClient)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur reglements_revendeur:', error);
-    }
-
-    // 7. Vérifier les tables de caisse
-    console.log('📋 [runMigrations] Vérification des tables de caisse...');
-
-    // Vérifier journal_caisse
-    try {
-      const journalInfo = await db.select(`PRAGMA table_info(journal_caisse)`);
-      if (journalInfo.length === 0) {
-        console.log('🔄 Création de la table journal_caisse...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS journal_caisse (
-            idJournal INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_journal TEXT UNIQUE NOT NULL,
-            date_journal DATETIME DEFAULT CURRENT_TIMESTAMP,
-            type_mouvement TEXT NOT NULL CHECK(type_mouvement IN ('ENTREE', 'SORTIE')),
-            categorie TEXT NOT NULL CHECK(categorie IN ('VENTE_COMPTOIR', 'REGLEMENT_FACTURE', 'DECOMPTE_REVENDEUR', 'CHARGE_FONCTIONNEMENT', 'AUTRE_ENTREE', 'AUTRE_SORTIE')),
-            designation TEXT NOT NULL,
-            montant REAL NOT NULL,
-            solde_apres REAL NOT NULL,
-            reference TEXT,
-            idReference INTEGER,
-            idUtilisateur INTEGER,
-            notes TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur journal_caisse:', error);
-    }
-
-    // Vérifier charges_fonctionnement
-    try {
-      const chargesInfo = await db.select(`PRAGMA table_info(charges_fonctionnement)`);
-      if (chargesInfo.length === 0) {
-        console.log('🔄 Création de la table charges_fonctionnement...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS charges_fonctionnement (
-            idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_charge TEXT UNIQUE NOT NULL,
-            date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
-            designation TEXT NOT NULL,
-            montant REAL NOT NULL,
-            beneficiaire TEXT NOT NULL,
-            categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
-            reference_paiement TEXT,
-            idJournal INTEGER,
-            idUtilisateur INTEGER,
-            notes TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
-            FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur charges_fonctionnement:', error);
-    }
-
-    // Vérifier categories_charges
-    try {
-      const categoriesInfo = await db.select(`PRAGMA table_info(categories_charges)`);
-      if (categoriesInfo.length === 0) {
-        console.log('🔄 Création de la table categories_charges...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS categories_charges (
-            idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_categorie TEXT UNIQUE NOT NULL,
-            libelle TEXT NOT NULL,
-            description TEXT,
-            est_actif INTEGER DEFAULT 1
-          )
-        `);
-        migrationCount++;
-
-        // Insérer les catégories par défaut
+      
+      if (tableName === 'categories_charges') {
         await db.execute(`
           INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
           ('EAU', 'Eau'),
@@ -749,886 +1225,537 @@ export const runMigrations = async (db: any): Promise<void> => {
         `);
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur categories_charges:', error);
+      log(`❌ Erreur création table ${tableName}: ${error}`);
     }
+  } else {
+    log(`⚠️ Aucune requête de création définie pour ${tableName}`);
+  }
+};
 
-    // Vérifier recapitulatif_journalier
+// ==================== FONCTION DE MIGRATION ====================
+export const runMigrations = async (db: any): Promise<number> => {
+  let migrationCount = 0;
+
+  try {
+    // ====================================================================
+    // 0. Colonnes ajoutées pour : annulation en cascade des commandes,
+    //    mode de paiement au journal de caisse, format d'impression.
+    // ====================================================================
+    const ajouterColonnes = async (table: string, cols: [string, string][]) => {
+      try {
+        const info = await db.select(`PRAGMA table_info(${table})`);
+        if (!info || info.length === 0) return;
+        const existantes = info.map((c: any) => c.name);
+        for (const [col, def] of cols) {
+          if (!existantes.includes(col)) {
+            await db.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+            log(`   ➕ ${table}.${col} ajoutée`);
+            migrationCount++;
+          }
+        }
+      } catch (error) {
+        log(`⚠️ Erreur ajout colonnes sur ${table}: ${error}`);
+      }
+    };
+
+    log('📋 Vérification des colonnes d\'annulation et de paiement...');
+
+    // Annulation des factures (propagée depuis l'annulation de commande)
+    await ajouterColonnes('factures', [
+      ['est_annule', 'INTEGER DEFAULT 0'],
+      ['date_annulation', 'DATETIME'],
+      ['annule_par', 'TEXT'],
+      ['motif_annulation', 'TEXT'],
+    ]);
+
+    // Annulation des règlements (circuit standard)
+    await ajouterColonnes('reglements', [
+      ['statut', "TEXT DEFAULT 'VALIDE'"],
+      ['est_annule', 'INTEGER DEFAULT 0'],
+      ['date_annulation', 'DATETIME'],
+      ['annule_par', 'TEXT'],
+    ]);
+
+    // Annulation des règlements revendeur (même principe)
+    await ajouterColonnes('reglements_revendeur', [
+      ['statut', "TEXT DEFAULT 'VALIDE'"],
+      ['est_annule', 'INTEGER DEFAULT 0'],
+      ['date_annulation', 'DATETIME'],
+      ['annule_par', 'TEXT'],
+    ]);
+
+    // Annulation des factures revendeur
+    await ajouterColonnes('factures_revendeur', [
+      ['est_annule', 'INTEGER DEFAULT 0'],
+      ['date_annulation', 'DATETIME'],
+      ['annule_par', 'TEXT'],
+      ['motif_annulation', 'TEXT'],
+    ]);
+
+    // Mode de paiement au journal de caisse.
+    // NULL = « Non précisé » : les opérations antérieures à cette migration
+    // n'ont pas cette information et ne sont donc pas comptées à tort
+    // en espèces lors du point de caisse.
+    await ajouterColonnes('journal_caisse', [
+      ['mode_paiement', 'TEXT'],
+    ]);
+
+    // 1. Vérifier les colonnes de decomptes
+    log('📋 Vérification de la table decomptes...');
     try {
-      const recapInfo = await db.select(`PRAGMA table_info(recapitulatif_journalier)`);
-      if (recapInfo.length === 0) {
-        console.log('🔄 Création de la table recapitulatif_journalier...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
-            idRecap INTEGER PRIMARY KEY AUTOINCREMENT,
-            date_recap DATE UNIQUE NOT NULL,
-            solde_initial REAL DEFAULT 0,
-            total_entrees REAL DEFAULT 0,
-            total_sorties REAL DEFAULT 0,
-            solde_final REAL DEFAULT 0,
-            total_ventes_comptoir REAL DEFAULT 0,
-            total_reglements_factures REAL DEFAULT 0,
-            total_decomptes_revendeurs REAL DEFAULT 0,
-            total_charges REAL DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          )
-        `);
-        migrationCount++;
+      const tableInfo = await db.select(`PRAGMA table_info(decomptes)`);
+      if (tableInfo && tableInfo.length > 0) {
+        const columns = tableInfo.map((c: any) => c.name);
+        log(`   Colonnes existantes: ${columns.join(', ')}`);
+
+        const colsToAdd: [string, string][] = [
+          ['taux_commission', 'REAL DEFAULT 60'],
+          ['idFactureRevendeur', 'INTEGER'],
+          ['periode_debut', 'TEXT'],
+          ['periode_fin', 'TEXT'],
+          ['notes', 'TEXT'],
+          ['id_facture_approvisionnement', 'INTEGER']
+        ];
+        
+        for (const [col, def] of colsToAdd) {
+          if (!columns.includes(col)) {
+            await db.execute(`ALTER TABLE decomptes ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+          }
+        }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur recapitulatif_journalier:', error);
+      log(`⚠️ Erreur sur decomptes: ${error}`);
     }
 
-    // 8. Vérifier les tables de crédits
-    console.log('📋 [runMigrations] Vérification des tables de crédits...');
-
-    // Vérifier credits
+    // 2. Vérifier les colonnes de decompte_details
+    log('📋 Vérification de la table decompte_details...');
     try {
-      const creditsInfo = await db.select(`PRAGMA table_info(credits)`);
-      if (creditsInfo.length === 0) {
-        console.log('🔄 Création de la table credits...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS credits (
-            idCredit INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_credit TEXT NOT NULL UNIQUE,
-            date_credit TEXT NOT NULL,
-            designation TEXT NOT NULL,
-            montant_total REAL NOT NULL,
-            montant_restant REAL NOT NULL,
-            beneficiaire TEXT NOT NULL,
-            type_credit TEXT NOT NULL CHECK (type_credit IN ('CLIENT', 'FOURNISSEUR', 'AUTRE')),
-            reference TEXT,
-            notes TEXT,
-            statut TEXT NOT NULL DEFAULT 'EN_COURS' CHECK (statut IN ('EN_COURS', 'TERMINE', 'ANNULE')),
-            idJournal INTEGER,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
-          )
-        `);
-        migrationCount++;
+      const detailsInfo = await db.select(`PRAGMA table_info(decompte_details)`);
+      if (detailsInfo && detailsInfo.length > 0) {
+        const detailsColumns = detailsInfo.map((c: any) => c.name);
+        log(`   Colonnes existantes: ${detailsColumns.join(', ')}`);
 
-        // Créer les index pour credits
-        await db.execute(`
-          CREATE INDEX IF NOT EXISTS idx_credits_beneficiaire ON credits(beneficiaire);
-          CREATE INDEX IF NOT EXISTS idx_credits_statut ON credits(statut);
-          CREATE INDEX IF NOT EXISTS idx_credits_date ON credits(date_credit);
-        `);
+        const detailsCols: [string, string][] = [
+          ['benefice', 'REAL DEFAULT 0'],
+          ['commission', 'REAL DEFAULT 0'],
+          ['qte_avant_decompte', 'REAL DEFAULT 0'],
+          ['commission_pourcentage', 'REAL DEFAULT 0'],
+          ['designation', 'TEXT'],
+          ['total', 'REAL DEFAULT 0'],
+          ['qte_reappro', 'REAL DEFAULT 0'],
+        ];
+        for (const [col, def] of detailsCols) {
+          if (!detailsColumns.includes(col)) {
+            await db.execute(`ALTER TABLE decompte_details ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+          }
+        }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur credits:', error);
+      log(`⚠️ Erreur sur decompte_details: ${error}`);
     }
 
-    // Vérifier remboursements
+    // 3. Vérifier products — colonnes manquantes
+    log('📋 Vérification de la table products...');
     try {
-      const remboursementsInfo = await db.select(`PRAGMA table_info(remboursements)`);
-      if (remboursementsInfo.length === 0) {
-        console.log('🔄 Création de la table remboursements...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS remboursements (
-            idRemboursement INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_remboursement TEXT NOT NULL UNIQUE,
-            date_remboursement TEXT NOT NULL,
-            idCredit INTEGER NOT NULL,
-            montant REAL NOT NULL,
-            mode_paiement TEXT NOT NULL CHECK (mode_paiement IN ('ESPECES', 'VIREMENT', 'CHEQUE', 'MOBILE_MONEY', 'AUTRE')),
-            reference_paiement TEXT,
-            notes TEXT,
-            idJournal INTEGER,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (idCredit) REFERENCES credits(idCredit) ON DELETE CASCADE,
-            FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal)
-          )
-        `);
-        migrationCount++;
+      const productsInfo = await db.select(`PRAGMA table_info(products)`);
+      if (productsInfo && productsInfo.length > 0) {
+        const productsColumns = productsInfo.map((c: any) => c.name);
+        log(`   Colonnes existantes: ${productsColumns.join(', ')}`);
 
-        // Créer les index pour remboursements
-        await db.execute(`
-          CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredit);
-          CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
-        `);
+        const prodCols: [string, string][] = [
+          ['methode_gestion_stock', "TEXT DEFAULT 'FIFO'"],
+          ['idUniteStockage', 'INTEGER'],
+          ['commission_pourcentage', 'REAL DEFAULT 0'],
+          ['seuil_alerte', 'REAL DEFAULT 0'],
+        ];
+        for (const [col, def] of prodCols) {
+          if (!productsColumns.includes(col)) {
+            await db.execute(`ALTER TABLE products ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+          }
+        }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur remboursements:', error);
+      log(`⚠️ Erreur sur products: ${error}`);
     }
 
-    // Migration : table debug_logs
+    // 4. Vérifier commandes — colonnes manquantes
+    log('📋 Vérification de la table commandes...');
     try {
-      await db.execute(`
-        CREATE TABLE IF NOT EXISTS debug_logs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          timestamp TEXT NOT NULL,
-          level TEXT NOT NULL,
-          category TEXT NOT NULL,
-          message TEXT NOT NULL,
-          details TEXT,
-          stack TEXT,
-          app_version TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      await db.execute(`CREATE INDEX IF NOT EXISTS idx_debug_logs_timestamp ON debug_logs(timestamp DESC)`);
-      await db.execute(`CREATE INDEX IF NOT EXISTS idx_debug_logs_level ON debug_logs(level)`);
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur debug_logs:', error);
-    }
+      const commandesInfo = await db.select(`PRAGMA table_info(commandes)`);
+      if (commandesInfo && commandesInfo.length > 0) {
+        const commandesColumns = commandesInfo.map((c: any) => c.name);
 
-    // Migration : créer factures si absente (tronquée du SCHEMA_SQL)
-    try {
-      const factInfo = await db.select(`PRAGMA table_info(factures)`);
-      if ((factInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table factures...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS factures (
-            idFacture INTEGER PRIMARY KEY AUTOINCREMENT,
-            code_facture TEXT UNIQUE NOT NULL,
-            idClient INTEGER NOT NULL,
-            idCommande INTEGER,
-            date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
-            montant_ht REAL DEFAULT 0,
-            montant_tva REAL DEFAULT 0,
-            montant_ttc REAL DEFAULT 0,
-            montant_regle REAL DEFAULT 0,
-            statut TEXT DEFAULT 'EN_ATTENTE',
-            FOREIGN KEY(idClient) REFERENCES clients(idClient),
-            FOREIGN KEY(idCommande) REFERENCES commandes(idCommande)
-          )
-        `);
-        migrationCount++;
+        const commandesMissingCols: [string, string][] = [
+          ['adresse_livraison', 'TEXT'],
+          ['montant_tva', 'REAL DEFAULT 0'],
+          ['montant_remise', 'REAL DEFAULT 0'],
+          ['montant_net', 'REAL DEFAULT 0'],
+          ['source', "TEXT DEFAULT 'DIRECT'"],
+          ['notes', 'TEXT'],
+          ['signature_base64', 'TEXT'],
+          ['date_facture', 'DATE'],
+          ['taux_commission', 'REAL DEFAULT 60'],
+        ];
+        for (const [col, def] of commandesMissingCols) {
+          if (!commandesColumns.includes(col)) {
+            await db.execute(`ALTER TABLE commandes ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+          }
+        }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures:', error);
+      log(`⚠️ Erreur sur commandes: ${error}`);
     }
 
-    // Migration : créer facture_details si absente
+    // 5. Vérifier utilisateurs — permissions
+    log('📋 Vérification de la table utilisateurs...');
     try {
-      const factDetInfo = await db.select(`PRAGMA table_info(facture_details)`);
-      if ((factDetInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table facture_details...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS facture_details (
-            idDetailFacture INTEGER PRIMARY KEY AUTOINCREMENT,
-            idFacture INTEGER NOT NULL,
-            idProduit INTEGER NOT NULL,
-            qte REAL NOT NULL,
-            prix_unitaire REAL NOT NULL,
-            FOREIGN KEY(idFacture) REFERENCES factures(idFacture) ON DELETE CASCADE,
-            FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        migrationCount++;
+      const utilisateursInfo = await db.select(`PRAGMA table_info(utilisateurs)`);
+      if (utilisateursInfo && utilisateursInfo.length > 0) {
+        const utilisateursColumns = utilisateursInfo.map((c: any) => c.name);
+
+        if (!utilisateursColumns.includes('permissions')) {
+          log('🔄 Ajout de la colonne permissions à utilisateurs...');
+          await db.execute(`ALTER TABLE utilisateurs ADD COLUMN permissions TEXT DEFAULT '{}'`);
+          migrationCount++;
+        }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur facture_details:', error);
+      log(`⚠️ Erreur sur utilisateurs: ${error}`);
     }
 
-    // Migration : créer reglements si absent
+    // 6. Vérifier commande_details
+    try {
+      const cmdDetailsInfo = await db.select(`PRAGMA table_info(commande_details)`);
+      if (cmdDetailsInfo && cmdDetailsInfo.length > 0) {
+        const cmdDetailsCols = cmdDetailsInfo.map((c: any) => c.name);
+        if (!cmdDetailsCols.includes('remise')) {
+          await db.execute(`ALTER TABLE commande_details ADD COLUMN remise REAL DEFAULT 0`);
+          migrationCount++;
+        }
+        if (!cmdDetailsCols.includes('idConditionnement')) {
+          await db.execute(`ALTER TABLE commande_details ADD COLUMN idConditionnement INTEGER`);
+          migrationCount++;
+        }
+        if (!cmdDetailsCols.includes('total')) {
+          await db.execute(`ALTER TABLE commande_details ADD COLUMN total REAL DEFAULT 0`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur commande_details: ${error}`);
+    }
+
+    // 7. Vérifier vente_details
+    try {
+      const vdInfo = await db.select(`PRAGMA table_info(vente_details)`);
+      if (vdInfo && vdInfo.length > 0) {
+        const vdCols = vdInfo.map((c: any) => c.name);
+        if (!vdCols.includes('idConditionnement')) {
+          await db.execute(`ALTER TABLE vente_details ADD COLUMN idConditionnement INTEGER`);
+          migrationCount++;
+        }
+        if (!vdCols.includes('quantite_pieces')) {
+          await db.execute(`ALTER TABLE vente_details ADD COLUMN quantite_pieces REAL DEFAULT 0`);
+          migrationCount++;
+        }
+        if (!vdCols.includes('libelle_conditionnement')) {
+          await db.execute(`ALTER TABLE vente_details ADD COLUMN libelle_conditionnement TEXT`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur vente_details: ${error}`);
+    }
+
+    // 8. Vérifier factures_revendeur
+    try {
+      const factRevInfo = await db.select(`PRAGMA table_info(factures_revendeur)`);
+      if (factRevInfo && factRevInfo.length > 0) {
+        const factRevCols = factRevInfo.map((c: any) => c.name);
+        if (!factRevCols.includes('taux_commission')) {
+          await db.execute(`ALTER TABLE factures_revendeur ADD COLUMN taux_commission REAL DEFAULT 60`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur factures_revendeur: ${error}`);
+    }
+
+    // 9. Vérifier reglements
     try {
       const reglementsInfo = await db.select(`PRAGMA table_info(reglements)`);
-      if ((reglementsInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table reglements...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS reglements (
-            idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
-            idFacture INTEGER NOT NULL,
-            montant REAL NOT NULL,
-            mode_reglement TEXT,
-            date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(idFacture) REFERENCES factures(idFacture)
-          )
-        `);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur reglements:', error);
-    }
+      if (reglementsInfo && reglementsInfo.length > 0) {
+        const reglementsColumns = reglementsInfo.map((c: any) => c.name);
 
-    // Migration : colonnes montant_ht / montant_tva dans factures
-    try {
-      const colsFact = (await db.select(`PRAGMA table_info(factures)`)) as any[];
-      const factCols = colsFact.map((c: any) => c.name);
-      if (!factCols.includes('montant_ht')) {
-        await db.execute(`ALTER TABLE factures ADD COLUMN montant_ht REAL DEFAULT 0`);
-      }
-      if (!factCols.includes('montant_tva')) {
-        await db.execute(`ALTER TABLE factures ADD COLUMN montant_tva REAL DEFAULT 0`);
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur factures colonnes:', error);
-    }
-
-    // Migration : tables lots_stock, sorties_lots, historique_prix (requises par stockService)
-    try {
-      const lotsInfo = await db.select(`PRAGMA table_info(lots_stock)`);
-      if ((lotsInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table lots_stock...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS lots_stock (
-            idLot INTEGER PRIMARY KEY AUTOINCREMENT,
-            idProduit INTEGER NOT NULL,
-            code_lot TEXT UNIQUE NOT NULL,
-            quantite_entree REAL NOT NULL,
-            quantite_restante REAL NOT NULL,
-            prix_achat_unitaire REAL NOT NULL,
-            prix_vente_unitaire REAL NOT NULL,
-            date_entree DATE NOT NULL,
-            date_expiration DATE,
-            reference_facture TEXT,
-            idFournisseur INTEGER,
-            notes TEXT,
-            est_supprime INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_lots_produit ON lots_stock(idProduit)`);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_lots_date ON lots_stock(date_entree)`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur lots_stock:', error);
-    }
-
-    try {
-      const sortiesInfo = await db.select(`PRAGMA table_info(sorties_lots)`);
-      if ((sortiesInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table sorties_lots...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS sorties_lots (
-            idSortieLot INTEGER PRIMARY KEY AUTOINCREMENT,
-            idLot INTEGER NOT NULL,
-            idMouvement INTEGER NOT NULL,
-            quantite_sortie REAL NOT NULL,
-            prix_vente_unitaire REAL NOT NULL,
-            FOREIGN KEY (idLot) REFERENCES lots_stock(idLot),
-            FOREIGN KEY (idMouvement) REFERENCES mouvements_stock(idMouvement)
-          )
-        `);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_sorties_lot ON sorties_lots(idLot)`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur sorties_lots:', error);
-    }
-
-    try {
-      const historiqueInfo = await db.select(`PRAGMA table_info(historique_prix)`);
-      if ((historiqueInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table historique_prix...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS historique_prix (
-            idHistorique INTEGER PRIMARY KEY AUTOINCREMENT,
-            idProduit INTEGER NOT NULL,
-            date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ancien_prix_achat REAL,
-            nouveau_prix_achat REAL,
-            ancien_prix_vente REAL,
-            nouveau_prix_vente REAL,
-            idLot INTEGER,
-            motif TEXT,
-            FOREIGN KEY (idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_historique_produit ON historique_prix(idProduit)`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur historique_prix:', error);
-    }
-
-    // Migration : créer mouvements_stock si absent (tronqué du SCHEMA_SQL)
-    try {
-      const mvtInfo = await db.select(`PRAGMA table_info(mouvements_stock)`);
-      if ((mvtInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table mouvements_stock...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS mouvements_stock (
-            idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
-            idProduit INTEGER NOT NULL,
-            type_mouvement TEXT NOT NULL,
-            quantite REAL NOT NULL,
-            stock_avant REAL NOT NULL,
-            stock_apres REAL NOT NULL,
-            date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
-            idCommande INTEGER,
-            prix_unitaire REAL,
-            reference TEXT,
-            notes TEXT,
-            idLot INTEGER,
-            FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_mvt_stock_produit ON mouvements_stock(idProduit)`);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_mvt_stock_date ON mouvements_stock(date_mouvement)`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur mouvements_stock création:', error);
-    }
-
-    // Migration : créer mouvements_revendeur si absent
-    try {
-      const mvtRevInfo = await db.select(`PRAGMA table_info(mouvements_revendeur)`);
-      if ((mvtRevInfo as any[]).length === 0) {
-        console.log('🔄 Création de la table mouvements_revendeur...');
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS mouvements_revendeur (
-            idMouvementRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-            idProduit INTEGER NOT NULL,
-            idRevendeur INTEGER NOT NULL,
-            idCommande INTEGER,
-            idDecompte INTEGER,
-            type_mouvement TEXT NOT NULL,
-            qte_mouvement REAL NOT NULL,
-            date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(idProduit) REFERENCES products(idProduit),
-            FOREIGN KEY(idRevendeur) REFERENCES clients(idClient),
-            FOREIGN KEY(idCommande) REFERENCES commandes(idCommande),
-            FOREIGN KEY(idDecompte) REFERENCES decomptes(idDecompte)
-          )
-        `);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_mvt_rev_produit ON mouvements_revendeur(idProduit)`);
-        await db.execute(`CREATE INDEX IF NOT EXISTS idx_mvt_rev_revendeur ON mouvements_revendeur(idRevendeur)`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur mouvements_revendeur:', error);
-    }
-
-    // Migration : colonnes manquantes dans mouvements_stock (prix_unitaire, reference, notes)
-    try {
-      const mvtCols = (await db.select(`PRAGMA table_info(mouvements_stock)`) as any[]).map((c: any) => c.name);
-      if (!mvtCols.includes('prix_unitaire')) {
-        await db.execute(`ALTER TABLE mouvements_stock ADD COLUMN prix_unitaire REAL`);
-      }
-      if (!mvtCols.includes('reference')) {
-        await db.execute(`ALTER TABLE mouvements_stock ADD COLUMN reference TEXT`);
-      }
-      if (!mvtCols.includes('notes')) {
-        await db.execute(`ALTER TABLE mouvements_stock ADD COLUMN notes TEXT`);
-      }
-      if (!mvtCols.includes('idLot')) {
-        await db.execute(`ALTER TABLE mouvements_stock ADD COLUMN idLot INTEGER`);
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur mouvements_stock colonnes:', error);
-    }
-
-    // ─── CONDITIONNEMENTS ──────────────────────────────────
-    // S'assurer que la table conditionnements existe avec les bonnes colonnes
-    try {
-      const condInfo = await db.select(`PRAGMA table_info(conditionnements)`) as any[];
-      if (condInfo.length === 0) {
-        // Créer la table si elle n'existe pas du tout
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS conditionnements (
-            idConditionnement INTEGER PRIMARY KEY AUTOINCREMENT,
-            idProduit INTEGER NOT NULL,
-            libelle TEXT NOT NULL,
-            quantite_par_unite_base REAL NOT NULL DEFAULT 1,
-            prix_vente_ttc REAL DEFAULT 0,
-            prix_vente_ht REAL DEFAULT 0,
-            code_conditionnement TEXT,
-            est_conditionnement_par_defaut INTEGER DEFAULT 0,
-            est_actif INTEGER DEFAULT 1,
-            FOREIGN KEY (idProduit) REFERENCES products(idProduit)
-          )
-        `);
-        migrationCount++;
-      } else {
-        // Table existe — vérifier les colonnes manquantes
-        const condCols = condInfo.map((c: any) => c.name);
-        // Ajouter code_conditionnement si absent
-        if (!condCols.includes('code_conditionnement')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN code_conditionnement TEXT`);
-          migrationCount++;
-        }
-        // Normaliser: ajouter quantite_par_unite_base si la table avait quantite_unites
-        if (!condCols.includes('quantite_par_unite_base') && condCols.includes('quantite_unites')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN quantite_par_unite_base REAL DEFAULT 1`);
-          await db.execute(`UPDATE conditionnements SET quantite_par_unite_base = quantite_unites`);
-          migrationCount++;
-        }
-        if (!condCols.includes('quantite_par_unite_base')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN quantite_par_unite_base REAL DEFAULT 1`);
-          migrationCount++;
-        }
-        if (!condCols.includes('prix_vente_ttc') && condCols.includes('prix_vente')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN prix_vente_ttc REAL DEFAULT 0`);
-          await db.execute(`UPDATE conditionnements SET prix_vente_ttc = prix_vente`);
-          migrationCount++;
-        }
-        if (!condCols.includes('prix_vente_ttc')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN prix_vente_ttc REAL DEFAULT 0`);
-          migrationCount++;
-        }
-        if (!condCols.includes('prix_vente_ht')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN prix_vente_ht REAL DEFAULT 0`);
-          migrationCount++;
-        }
-        if (!condCols.includes('est_conditionnement_par_defaut')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN est_conditionnement_par_defaut INTEGER DEFAULT 0`);
-          migrationCount++;
-        }
-        if (!condCols.includes('est_actif')) {
-          await db.execute(`ALTER TABLE conditionnements ADD COLUMN est_actif INTEGER DEFAULT 1`);
-          migrationCount++;
+        const regCols: [string, string][] = [
+          ['code_reglement', 'TEXT'],
+          ['idClient', 'INTEGER'],
+          ['idVente', 'INTEGER'],
+          ['reference', 'TEXT'],
+          ['banque', 'TEXT'],
+          ['numero_cheque', 'TEXT'],
+          ['date_valeur', 'DATE'],
+          ['est_lettrage', 'INTEGER DEFAULT 0'],
+          ['observation', 'TEXT'],
+          ['idUtilisateur', 'INTEGER'],
+          ['idDecompte', 'INTEGER'],
+        ];
+        for (const [col, def] of regCols) {
+          if (!reglementsColumns.includes(col)) {
+            await db.execute(`ALTER TABLE reglements ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+          }
         }
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur conditionnements:', error);
+      log(`⚠️ Erreur sur reglements: ${error}`);
     }
 
-    // ─── VENTE_DETAILS : conditionnement + pièces ─────────
+    // 10. Vérifier credits pour date_echeance
     try {
-      const vdCols = (await db.select(`PRAGMA table_info(vente_details)`) as any[]).map((c: any) => c.name);
-      if (!vdCols.includes('idConditionnement')) {
-        await db.execute(`ALTER TABLE vente_details ADD COLUMN idConditionnement INTEGER`);
-        migrationCount++;
-      }
-      if (!vdCols.includes('quantite_pieces')) {
-        await db.execute(`ALTER TABLE vente_details ADD COLUMN quantite_pieces REAL DEFAULT 0`);
-        migrationCount++;
-      }
-      if (!vdCols.includes('libelle_conditionnement')) {
-        await db.execute(`ALTER TABLE vente_details ADD COLUMN libelle_conditionnement TEXT`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur vente_details conditionnements:', error);
-    }
-
-    // ─── PRODUCTS : seuil_alerte ──────────────────────────────────────────────
-    try {
-      const prodCols = (await db.select(`PRAGMA table_info(products)`) as any[]).map((c: any) => c.name);
-      if (!prodCols.includes('seuil_alerte')) {
-        await db.execute(`ALTER TABLE products ADD COLUMN seuil_alerte REAL DEFAULT 0`);
-        migrationCount++;
-      }
-    } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur products seuil_alerte:', error);
-    }
-
-    // ─── CREDITS : date_echeance ──────────────────────────────────────────────
-    try {
-      const creditsCols = (await db.select(`PRAGMA table_info(credits)`) as any[]).map((c: any) => c.name);
+      const creditsCols = (await db.select(`PRAGMA table_info(credits)`)).map((c: any) => c.name);
       if (!creditsCols.includes('date_echeance')) {
         await db.execute(`ALTER TABLE credits ADD COLUMN date_echeance TEXT`);
         migrationCount++;
-        console.log('✅ Colonne date_echeance ajoutée à credits');
+        log('✅ Colonne date_echeance ajoutée à credits');
       }
     } catch (error) {
-      console.warn('⚠️ [runMigrations] Erreur sur credits date_echeance:', error);
+      log(`⚠️ Erreur sur credits: ${error}`);
     }
 
-    console.log(`✅ [runMigrations] ${migrationCount} migration(s) exécutée(s)`);
+    // 11. Vérifier configuration_atelier
+    try {
+      const atelierInfo = await db.select(`PRAGMA table_info(configuration_atelier)`);
+      if (atelierInfo && atelierInfo.length > 0) {
+        const atelierCols = atelierInfo.map((c: any) => c.name);
+        
+        const atelierColsToAdd: [string, string][] = [
+          ['ifu', 'TEXT'],
+          ['rccm', 'TEXT'],
+          ['adresse_postale', 'TEXT'],
+          ['adresse_cadastrale', 'TEXT'],
+          ['compte_bancaire', 'TEXT'],
+          ['regime_fiscal', 'TEXT'],
+          ['service_impots', 'TEXT'],
+          ['forme_juridique', 'TEXT'],
+          ['tva_active', 'INTEGER DEFAULT 0'],
+        ];
+        
+        for (const [col, def] of atelierColsToAdd) {
+          if (!atelierCols.includes(col)) {
+            await db.execute(`ALTER TABLE configuration_atelier ADD COLUMN ${col} ${def}`);
+            migrationCount++;
+            log(`✅ Colonne ${col} ajoutée à configuration_atelier`);
+          }
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur configuration_atelier: ${error}`);
+    }
+
+    // 12. Vérifier clients pour IFU/RCCM
+    try {
+      const clientsInfo = await db.select(`PRAGMA table_info(clients)`);
+      if (clientsInfo && clientsInfo.length > 0) {
+        const clientsCols = clientsInfo.map((c: any) => c.name);
+        
+        const clientsColsToAdd: [string, string][] = [
+          ['ifu', 'TEXT'],
+          ['rccm', 'TEXT'],
+          ['adresse_postale', 'TEXT'],
+          ['code_client', 'TEXT'],
+        ];
+        
+        for (const [col, def] of clientsColsToAdd) {
+          if (!clientsCols.includes(col)) {
+            try {
+              await db.execute(`ALTER TABLE clients ADD COLUMN ${col} ${def}`);
+              migrationCount++;
+            } catch (e) {
+              log(`⚠️ Impossible d'ajouter ${col} à clients: ${e}`);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur clients: ${error}`);
+    }
+
+    // 13. Vérifier licence_application pour valid_activation_key
+    try {
+      const licInfo = await db.select(`PRAGMA table_info(licence_application)`);
+      if (licInfo && licInfo.length > 0) {
+        const licCols = licInfo.map((c: any) => c.name);
+        
+        if (!licCols.includes('valid_activation_key')) {
+          await db.execute(`ALTER TABLE licence_application ADD COLUMN valid_activation_key TEXT`);
+          migrationCount++;
+        }
+        if (!licCols.includes('trial_days')) {
+          await db.execute(`ALTER TABLE licence_application ADD COLUMN trial_days INTEGER DEFAULT 60`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur licence_application: ${error}`);
+    }
+
+    // 14. Vérifier journal_caisse pour idSession
+    try {
+      const journalInfo = await db.select(`PRAGMA table_info(journal_caisse)`);
+      if (journalInfo && journalInfo.length > 0) {
+        const journalCols = journalInfo.map((c: any) => c.name);
+        if (!journalCols.includes('idSession')) {
+          await db.execute(`ALTER TABLE journal_caisse ADD COLUMN idSession INTEGER REFERENCES sessions_caisse(idSession)`);
+          migrationCount++;
+          log('✅ Colonne idSession ajoutée à journal_caisse');
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur journal_caisse: ${error}`);
+    }
+
+    // 15. Vérifier charges_fonctionnement pour idSession
+    try {
+      const chargesInfo = await db.select(`PRAGMA table_info(charges_fonctionnement)`);
+      if (chargesInfo && chargesInfo.length > 0) {
+        const chargesCols = chargesInfo.map((c: any) => c.name);
+        if (!chargesCols.includes('idSession')) {
+          await db.execute(`ALTER TABLE charges_fonctionnement ADD COLUMN idSession INTEGER REFERENCES sessions_caisse(idSession)`);
+          migrationCount++;
+          log('✅ Colonne idSession ajoutée à charges_fonctionnement');
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur charges_fonctionnement: ${error}`);
+    }
+
+    // 16. Vérifier ventes pour idUtilisateur et notes
+    try {
+      const ventesInfo = await db.select(`PRAGMA table_info(ventes)`);
+      if (ventesInfo && ventesInfo.length > 0) {
+        const ventesCols = ventesInfo.map((c: any) => c.name);
+        if (!ventesCols.includes('idUtilisateur')) {
+          await db.execute(`ALTER TABLE ventes ADD COLUMN idUtilisateur INTEGER REFERENCES utilisateurs(id)`);
+          migrationCount++;
+        }
+        if (!ventesCols.includes('notes')) {
+          await db.execute(`ALTER TABLE ventes ADD COLUMN notes TEXT`);
+          migrationCount++;
+        }
+        if (!ventesCols.includes('statut')) {
+          await db.execute(`ALTER TABLE ventes ADD COLUMN statut TEXT DEFAULT 'EN_ATTENTE'`);
+          migrationCount++;
+        }
+        if (!ventesCols.includes('created_at')) {
+          await db.execute(`ALTER TABLE ventes ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+          migrationCount++;
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur ventes: ${error}`);
+    }
+
+    // 17. Vérifier les colonnes de mouvements_revendeurs
+    try {
+      const mvInfo = await db.select(`PRAGMA table_info(mouvements_revendeurs)`);
+      if (mvInfo && mvInfo.length > 0) {
+        const mvCols = mvInfo.map((c: any) => c.name);
+        log(`   Colonnes mouvements_revendeurs: ${mvCols.join(', ')}`);
+
+        // Ajouter date_cloture si manquant
+        if (!mvCols.includes('date_cloture')) {
+          await db.execute(`ALTER TABLE mouvements_revendeurs ADD COLUMN date_cloture DATETIME`);
+          migrationCount++;
+          log('✅ Colonne date_cloture ajoutée à mouvements_revendeurs');
+        }
+
+        // Vérifier les statuts
+        const checkConstraint = await db.select(`
+          SELECT sql FROM sqlite_master WHERE type='table' AND name='mouvements_revendeurs'
+        `);
+        if (checkConstraint.length > 0) {
+          const sql = checkConstraint[0].sql;
+          if (sql && !sql.includes("'RETOURNE'")) {
+            // Recréer la table avec les bons statuts
+            log('🔄 Mise à jour des statuts de mouvements_revendeurs...');
+            await db.execute(`
+              CREATE TABLE mouvements_revendeurs_new (
+                idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_mouvement TEXT UNIQUE NOT NULL,
+                idRevendeurPonctuel INTEGER NOT NULL,
+                idProduit INTEGER NOT NULL,
+                date_sortie DATETIME DEFAULT CURRENT_TIMESTAMP,
+                quantite_sortie REAL NOT NULL,
+                prix_unitaire REAL NOT NULL,
+                montant_total REAL NOT NULL,
+                destination TEXT NOT NULL CHECK(destination IN ('PRESENTATION', 'VENTE')),
+                statut TEXT DEFAULT 'EN_COURS' CHECK(statut IN ('EN_COURS', 'RETOURNE', 'VENDU', 'PARTIELLEMENT_RETOURNE', 'PARTIELLEMENT_VENDU', 'CLOTURE')),
+                stock_avant_sortie REAL NOT NULL,
+                stock_apres_sortie REAL NOT NULL,
+                notes TEXT,
+                idUtilisateur INTEGER,
+                date_cloture DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (idRevendeurPonctuel) REFERENCES revendeurs_ponctuels(idRevendeurPonctuel),
+                FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+                FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+              )
+            `);
+            await db.execute(`
+              INSERT INTO mouvements_revendeurs_new SELECT * FROM mouvements_revendeurs
+            `);
+            await db.execute(`DROP TABLE mouvements_revendeurs`);
+            await db.execute(`ALTER TABLE mouvements_revendeurs_new RENAME TO mouvements_revendeurs`);
+            migrationCount++;
+            log('✅ Table mouvements_revendeurs recréée avec les bons statuts');
+          }
+        }
+      }
+    } catch (error) {
+      log(`⚠️ Erreur sur mouvements_revendeurs: ${error}`);
+    }
+
+    log(`✅ ${migrationCount} migration(s) appliquée(s)`);
+    return migrationCount;
 
   } catch (error) {
-    console.error('❌ [runMigrations] Erreur lors des migrations:', error);
+    log(`❌ Erreur migration: ${error}`);
     throw error;
   }
 };
 
-/**
- * Fonction principale pour initialiser la base de données avec toutes les migrations
- */
-export const initDatabaseWithMigrations = async (): Promise<void> => {
+// ==================== FONCTION POUR VÉRIFIER LA STRUCTURE ====================
+export const verifySchema = async (): Promise<void> => {
   try {
-    console.log('🚀 [initDatabaseWithMigrations] Initialisation de la base de données...');
-    await runSchemaMigration();
-    console.log('✅ [initDatabaseWithMigrations] Base de données initialisée avec succès');
+    const db = await getDb();
+    log('🔍 Vérification de la structure de la base de données...');
+    
+    const tables = await db.select(`
+      SELECT name FROM sqlite_master WHERE type='table' ORDER BY name
+    `) as Array<{ name: string }>;
+    
+    log(`📊 Tables trouvées: ${tables.map((t) => t.name).join(', ')}`);
+    
+    // Vérifier les colonnes de mouvements_revendeurs
+    const columns = await db.select(`PRAGMA table_info(mouvements_revendeurs)`) as Array<{ name: string }>;
+    if (columns.length > 0) {
+      log(`📋 Colonnes de mouvements_revendeurs: ${columns.map((c) => c.name).join(', ')}`);
+    }
+    
+    log('✅ Vérification terminée');
   } catch (error) {
-    console.error('❌ [initDatabaseWithMigrations] Erreur:', error);
-    throw error;
+    log(`❌ Erreur vérification: ${error}`);
   }
 };
 
-// =====================================================
-// SCHÉMA SQL COMPLET
-// =====================================================
-const SCHEMA_SQL = `
-PRAGMA foreign_keys = ON;
-
--- =====================================================
--- 1. CONFIGURATION GENERALE DE L'APPLICATION
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS config_generale (
-    id_config INTEGER PRIMARY KEY CHECK (id_config = 1),
-    nom_application TEXT DEFAULT 'Gestion Commerciale',
-    version TEXT DEFAULT '3.0.0',
-    devise TEXT DEFAULT 'FCFA',
-    symbole_devise TEXT DEFAULT 'CFA',
-    taux_tva_default REAL DEFAULT 18,
-    date_format TEXT DEFAULT 'DD/MM/YYYY',
-    nombre_decimales INTEGER DEFAULT 2,
-    separateur_milliers TEXT DEFAULT ' ',
-    theme TEXT DEFAULT 'light',
-    langue TEXT DEFAULT 'fr',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS config_modules (
-    id_module INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_module TEXT UNIQUE NOT NULL,
-    nom_module TEXT NOT NULL,
-    description TEXT,
-    est_actif INTEGER DEFAULT 1,
-    ordre_affichage INTEGER DEFAULT 0,
-    date_activation DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS config_types_commerce (
-    id_type_commerce INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_type TEXT UNIQUE NOT NULL,
-    libelle TEXT NOT NULL,
-    description TEXT,
-    parametres_par_defaut TEXT,
-    est_actif INTEGER DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS config_parametres (
-    id_param INTEGER PRIMARY KEY AUTOINCREMENT,
-    categorie TEXT NOT NULL,
-    code_param TEXT NOT NULL,
-    valeur TEXT,
-    type_valeur TEXT DEFAULT 'string',
-    description TEXT,
-    modifiable INTEGER DEFAULT 1,
-    UNIQUE(categorie, code_param)
-);
-
-CREATE TABLE IF NOT EXISTS config_statuts (
-    id_statut INTEGER PRIMARY KEY AUTOINCREMENT,
-    entite_type TEXT NOT NULL,
-    code_statut TEXT NOT NULL,
-    libelle TEXT NOT NULL,
-    couleur TEXT DEFAULT '#000000',
-    ordre INTEGER DEFAULT 0,
-    est_initial INTEGER DEFAULT 0,
-    est_final INTEGER DEFAULT 0,
-    est_actif INTEGER DEFAULT 1,
-    UNIQUE(entite_type, code_statut)
-);
-
-CREATE TABLE IF NOT EXISTS config_modes_reglement (
-    id_mode INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_mode TEXT UNIQUE NOT NULL,
-    libelle TEXT NOT NULL,
-    necessite_reference INTEGER DEFAULT 0,
-    delai_jours INTEGER DEFAULT 0,
-    est_actif INTEGER DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS config_tva (
-    id_tva INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_tva TEXT UNIQUE NOT NULL,
-    taux REAL NOT NULL,
-    libelle TEXT NOT NULL,
-    est_defaut INTEGER DEFAULT 0,
-    est_actif INTEGER DEFAULT 1
-);
-
--- =====================================================
--- 2. REFERENTIEL PRODUITS
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS marques (
-    idMarque INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_marque TEXT UNIQUE NOT NULL,
-    nom_marque TEXT NOT NULL,
-    site_web TEXT,
-    contact TEXT,
-    est_actif INTEGER DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS fournisseurs (
-    idFournisseur INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_fournisseur TEXT UNIQUE NOT NULL,
-    raison_sociale TEXT NOT NULL,
-    adresse TEXT,
-    ville TEXT,
-    pays TEXT,
-    telephone TEXT,
-    email TEXT,
-    site_web TEXT,
-    contact_nom TEXT,
-    contact_telephone TEXT,
-    delai_livraison_jours INTEGER DEFAULT 0,
-    conditions_paiement TEXT,
-    est_actif INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS categories (
-    idCategorie INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_categorie TEXT UNIQUE NOT NULL,
-    nom_categorie TEXT NOT NULL,
-    description TEXT,
-    parent_id INTEGER,
-    niveau INTEGER DEFAULT 0,
-    chemin TEXT,
-    image_url TEXT,
-    est_active INTEGER DEFAULT 1,
-    ordre_affichage INTEGER DEFAULT 0,
-    FOREIGN KEY (parent_id) REFERENCES categories(idCategorie)
-);
-
-CREATE TABLE IF NOT EXISTS unites (
-    idUnite INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_unite TEXT UNIQUE NOT NULL,
-    nom_unite TEXT NOT NULL,
-    symbole TEXT,
-    type_unite TEXT,
-    est_actif INTEGER DEFAULT 1
-);
-
--- =====================================================
--- 2. REFERENTIEL PRODUITS
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS products (
-    idProduit INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_produit TEXT UNIQUE NOT NULL,
-    designation TEXT NOT NULL,
-    categorie TEXT,
-    unite_base TEXT,
-    prix_achat_base REAL DEFAULT 0,
-    prix_vente_detail REAL DEFAULT 0,
-    prix_vente_gros REAL DEFAULT 0,
-    commission_pourcentage REAL DEFAULT 0,
-    qte_stock REAL DEFAULT 0,
-    seuil_alerte REAL DEFAULT 0,
-    date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
-    est_supprime INTEGER DEFAULT 0
-);
-
--- =====================================================
--- 3. CLIENTS
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS clients (
-    idClient INTEGER PRIMARY KEY AUTOINCREMENT,
-    NomComplet TEXT NOT NULL,
-    Societe TEXT,
-    Adresse TEXT,
-    Tel TEXT,
-    Email TEXT,
-    Ville TEXT,
-    TypeClient TEXT NOT NULL CHECK(TypeClient IN ('client','revendeur'))
-);
-
--- =====================================================
--- 4. COMMANDES
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS commandes (
-    idCommande INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_commande TEXT UNIQUE NOT NULL,
-    idClient INTEGER NOT NULL,
-    type_commande TEXT NOT NULL,
-    date_commande DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_ht REAL DEFAULT 0,
-    montant_ttc REAL DEFAULT 0,
-    code_facture TEXT,
-    statut TEXT DEFAULT 'BROUILLON',
-    FOREIGN KEY(idClient) REFERENCES clients(idClient)
-);
-
-CREATE TABLE IF NOT EXISTS commande_details (
-    idDetail INTEGER PRIMARY KEY AUTOINCREMENT,
-    idCommande INTEGER NOT NULL,
-    idProduit INTEGER NOT NULL,
-    qte_commande REAL NOT NULL,
-    prix_unitaire_vente REAL NOT NULL,
-    remise REAL DEFAULT 0,
-    FOREIGN KEY(idCommande) REFERENCES commandes(idCommande) ON DELETE CASCADE,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-);
-
--- =====================================================
--- 5. STOCK REVENDEUR
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS stock_revendeur (
-    idStockRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    idProduit INTEGER NOT NULL,
-    idRevendeur INTEGER NOT NULL,
-    qte_stock REAL DEFAULT 0,
-    prix_achat REAL DEFAULT 0,
-    prix_vente REAL DEFAULT 0,
-    commission_pourcentage REAL DEFAULT 0,
-    UNIQUE(idProduit, idRevendeur)
-);
-
--- =====================================================
--- 6. DECOMPTES
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS decomptes (
-    idDecompte INTEGER PRIMARY KEY AUTOINCREMENT,
-    idClient INTEGER NOT NULL,
-    code_decompte TEXT UNIQUE,
-    date_decompte DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_achat REAL DEFAULT 0,
-    montant_vente REAL DEFAULT 0,
-    montant_benefice REAL DEFAULT 0,
-    montant_commission REAL DEFAULT 0,
-    montant_net REAL DEFAULT 0,
-    statut TEXT DEFAULT 'EN_ATTENTE',
-    observation TEXT,
-    FOREIGN KEY(idClient) REFERENCES clients(idClient)
-);
-
-CREATE TABLE IF NOT EXISTS decompte_details (
-    idDetailRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    idDecompte INTEGER NOT NULL,
-    idProduit INTEGER NOT NULL,
-    qte_decompte REAL NOT NULL DEFAULT 0,
-    qte_reappro REAL DEFAULT 0,
-    prix_achat REAL DEFAULT 0,
-    prix_vente REAL DEFAULT 0,
-    commission_pourcentage REAL DEFAULT 0,
-    FOREIGN KEY(idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-);
-
--- =====================================================
--- 7. VENTES
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS ventes (
-    idVente INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_vente TEXT UNIQUE NOT NULL,
-    idClient INTEGER,
-    nom_prenom TEXT,
-    contact TEXT,
-    date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_ht REAL DEFAULT 0,
-    montant_tva REAL DEFAULT 0,
-    montant_ttc REAL DEFAULT 0,
-    type_vente TEXT DEFAULT 'COMPTOIR',
-    observation TEXT,
-    FOREIGN KEY(idClient) REFERENCES clients(idClient)
-);
-
-CREATE TABLE IF NOT EXISTS vente_details (
-    idDetail INTEGER PRIMARY KEY AUTOINCREMENT,
-    idVente INTEGER NOT NULL,
-    idProduit INTEGER NOT NULL,
-    quantite REAL NOT NULL,
-    prix_unitaire_ht REAL NOT NULL,
-    prix_unitaire_ttc REAL NOT NULL,
-    remise_percent REAL DEFAULT 0,
-    tva_taux REAL DEFAULT 18,
-    FOREIGN KEY(idVente) REFERENCES ventes(idVente) ON DELETE CASCADE,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-);
-
-CREATE INDEX IF NOT EXISTS idx_vente_date ON ventes(date_vente);
-CREATE INDEX IF NOT EXISTS idx_vente_client ON ventes(idClient);
-CREATE INDEX IF NOT EXISTS idx_vente_detail_vente ON vente_details(idVente);
-CREATE INDEX IF NOT EXISTS idx_vente_detail_produit ON vente_details(idProduit);
-
--- =====================================================
--- 8. MOUVEMENTS STOCK
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS mouvements_stock (
-    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
-    idProduit INTEGER NOT NULL,
-    type_mouvement TEXT NOT NULL,
-    quantite REAL NOT NULL,
-    stock_avant REAL NOT NULL,
-    stock_apres REAL NOT NULL,
-    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
-    idCommande INTEGER,
-    prix_unitaire REAL,
-    reference TEXT,
-    notes TEXT,
-    idLot INTEGER,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-);
-
-CREATE INDEX IF NOT EXISTS idx_mvt_stock_produit ON mouvements_stock(idProduit);
-CREATE INDEX IF NOT EXISTS idx_mvt_stock_date ON mouvements_stock(date_mouvement);
-
--- =====================================================
--- 9. MOUVEMENTS REVENDEUR
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS mouvements_revendeur (
-    idMouvementRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    idProduit INTEGER NOT NULL,
-    idRevendeur INTEGER NOT NULL,
-    idCommande INTEGER,
-    idDecompte INTEGER,
-    type_mouvement TEXT NOT NULL,
-    qte_mouvement REAL NOT NULL,
-    date_mouvement DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit),
-    FOREIGN KEY(idRevendeur) REFERENCES clients(idClient),
-    FOREIGN KEY(idCommande) REFERENCES commandes(idCommande),
-    FOREIGN KEY(idDecompte) REFERENCES decomptes(idDecompte)
-);
-
--- =====================================================
--- 10. FACTURES
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS factures (
-    idFacture INTEGER PRIMARY KEY AUTOINCREMENT,
-    code_facture TEXT UNIQUE NOT NULL,
-    idClient INTEGER NOT NULL,
-    idCommande INTEGER,
-    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_ht REAL DEFAULT 0,
-    montant_tva REAL DEFAULT 0,
-    montant_ttc REAL DEFAULT 0,
-    montant_regle REAL DEFAULT 0,
-    statut TEXT DEFAULT 'EN_ATTENTE',
-    FOREIGN KEY(idClient) REFERENCES clients(idClient),
-    FOREIGN KEY(idCommande) REFERENCES commandes(idCommande)
-);
-
-CREATE TABLE IF NOT EXISTS facture_details (
-    idDetailFacture INTEGER PRIMARY KEY AUTOINCREMENT,
-    idFacture INTEGER NOT NULL,
-    idProduit INTEGER NOT NULL,
-    qte REAL NOT NULL,
-    prix_unitaire REAL NOT NULL,
-    FOREIGN KEY(idFacture) REFERENCES factures(idFacture) ON DELETE CASCADE,
-    FOREIGN KEY(idProduit) REFERENCES products(idProduit)
-);
-
--- =====================================================
--- 11. FACTURES REVENDEUR
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS factures_revendeur (
-    idFactureRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
-    idCommande INTEGER NOT NULL,
-    idRevendeur INTEGER NOT NULL,
-    code_facture TEXT UNIQUE,
-    date_facture DATETIME DEFAULT CURRENT_TIMESTAMP,
-    montant_ht REAL DEFAULT 0,
-    montant_ttc REAL DEFAULT 0,
-    commission REAL DEFAULT 0,
-    statut TEXT DEFAULT 'EN_ATTENTE',
-    FOREIGN KEY(idCommande) REFERENCES commandes(idCommande),
-    FOREIGN KEY(idRevendeur) REFERENCES clients(idClient)
-);
-
--- =====================================================
--- 12. REGLEMENTS
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS reglements (
-    idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
-    idFacture INTEGER NOT NULL,
-    montant REAL NOT NULL,
-    mode_reglement TEXT,
-    date_reglement DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(idFacture) REFERENCES factures(idFacture)
-);
-`;
+export default {
+  runSchemaMigration,
+  runMigrations,
+  verifySchema
+};

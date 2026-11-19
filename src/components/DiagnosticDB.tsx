@@ -1148,14 +1148,10 @@ const recreateAllFinanceTables = async () => {
     <Container size="xl" py="xl">
       <Stack gap="lg">
         {/* HEADER AVEC GRADIENT - CORRIGÉ ET ERGONOMIQUE */}
-        <Paper
+        <Paper className="tk-page-tools tk-page-tools--fiche"
           p="xl"
           radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
+          style={{ position: 'relative', overflow: 'hidden' }}
         >
           <Box
             style={{
@@ -1306,10 +1302,7 @@ const recreateAllFinanceTables = async () => {
           <Paper
             p="md"
             radius="md"
-            style={{
-              background: 'linear-gradient(135deg, #e3f2fd, #bbdefb)',
-              border: '1px solid #90caf9',
-            }}
+            className="tk-kpi"
           >
             <Group>
               <ThemeIcon size={40} radius="md" color="blue" variant="light">
@@ -1325,10 +1318,7 @@ const recreateAllFinanceTables = async () => {
           <Paper
             p="md"
             radius="md"
-            style={{
-              background: 'linear-gradient(135deg, #e8f5e9, #c8e6c9)',
-              border: '1px solid #a5d6a7',
-            }}
+            className="tk-kpi"
           >
             <Group>
               <ThemeIcon size={40} radius="md" color="green" variant="light">
@@ -1344,10 +1334,7 @@ const recreateAllFinanceTables = async () => {
           <Paper
             p="md"
             radius="md"
-            style={{
-              background: 'linear-gradient(135deg, #f3e5f5, #e1bee7)',
-              border: '1px solid #ce93d8',
-            }}
+            className="tk-kpi"
           >
             <Group>
               <ThemeIcon size={40} radius="md" color="purple" variant="light">
@@ -1363,10 +1350,7 @@ const recreateAllFinanceTables = async () => {
           <Paper
             p="md"
             radius="md"
-            style={{
-              background: 'linear-gradient(135deg, #fff3e0, #ffe0b2)',
-              border: '1px solid #ffcc80',
-            }}
+            className="tk-kpi"
           >
             <Group>
               <div style={{ position: 'relative' }}>
@@ -1755,11 +1739,11 @@ const recreateAllFinanceTables = async () => {
                   ) : (
                     <ScrollArea h={320}>
                       <Table striped highlightOnHover withTableBorder style={{ minWidth: Math.max(600, Object.keys(queryResult[0] || {}).length * 120) }}>
-                        <Table.Thead style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)' }}>
+                        <Table.Thead>
                           <Table.Tr>
                             <Table.Th c="rgba(255,255,255,0.5)" style={{ whiteSpace: 'nowrap', width: 40, textAlign: 'center', fontSize: 11 }}>#</Table.Th>
                             {Object.keys(queryResult[0]).map((key) => (
-                              <Table.Th key={key} c="white" style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{key}</Table.Th>
+                              <Table.Th key={key} style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{key}</Table.Th>
                             ))}
                           </Table.Tr>
                         </Table.Thead>

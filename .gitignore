@@ -23,3 +23,35 @@ Thumbs.db
 # Logs
 *.log
 .env
+
+# ----- Artefacts de distribution / binaires (générés, ne pas versionner) -----
+node/
+Distribution/
+*.zip
+
+# Fichiers parasites / temporaires
+zi2DktT8
+fonctionne
+.fuse_hidden*
+*.orig
+
+# GestionPro : executable et caches generes (jamais les donnees dans le binaire)
+GestionPro.exe
+GestionPro.build.json
+Preparer-prestations.exe
+Preparer-prestations.build.json
+.build-gestionpro/
+.gestionpro-cache/
+backups/builds/
+
+# ----- Assainissement 2026-11-19 -----
+# Archives locales (fichiers deplaces, jamais versionnes)
+_archives/
+# Module serveur genere par npm run build (vite.prestations.config.ts)
+server/runtime/
+# Donnees et rapports locaux de sauvegarde / migration
+data/
+backups/
+# Sauvegardes d'etapes
+*.bak-*
+*.backup

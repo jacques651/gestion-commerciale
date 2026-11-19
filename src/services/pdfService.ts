@@ -10,10 +10,10 @@ export const exportFactureToPDF = async (idFacture: number): Promise<Blob | null
       SELECT 
         f.*,
         c.code_commande as commande_code,
-        cl.nom_complet as client_nom,
-        cl.adresse as client_adresse,
-        cl.telephone as client_telephone,
-        cl.email as client_email
+        cl.NomComplet as client_nom,
+        cl.Adresse as client_adresse,
+        cl.Tel as client_telephone,
+        cl.Email as client_email
       FROM factures f
       JOIN commandes c ON f.idCommande = c.idCommande
       JOIN clients cl ON c.idClient = cl.idClient

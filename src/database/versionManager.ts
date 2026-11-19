@@ -10,7 +10,7 @@ export interface DatabaseVersion {
 }
 
 export class DatabaseVersionManager {
-  private static readonly CURRENT_VERSION = 3; // Incrémentez à chaque changement de schéma
+  private static readonly CURRENT_VERSION = 6; // Synchronisé avec le nombre de migrations
   
   static async getCurrentVersion(): Promise<DatabaseVersion> {
     try {
@@ -34,17 +34,17 @@ export class DatabaseVersionManager {
           )
         `);
 
-        // Fresh install → démarrer directement à la version courante
+        // Nouvelle installation : partir de v0 pour que TOUTES les migrations s'exécutent
         await db.execute(`
           INSERT INTO database_version (id, version, last_migration)
-          VALUES (1, ?, 'Initial installation')
-        `, [this.CURRENT_VERSION]);
+          VALUES (1, 0, 'Fresh install')
+        `);
 
         return {
-          version: this.CURRENT_VERSION,
-          lastMigration: 'Initial installation',
-          status: 'OK',
-          tables: await this.getTableList()
+          version: 0,
+          lastMigration: 'Fresh install',
+          status: 'MIGRATION_NEEDED',
+          tables: []
         };
       }
       

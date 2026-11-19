@@ -2,17 +2,25 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, BrowserRouter, useNavigate, useLocation } from 'react-router-dom';
 import { AppShell, Loader, Center, Button, Notification, MantineProvider, Stack, Text, Burger, Group } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Notifications } from '@mantine/notifications';
 import Navbar from './components/common/Navbar';
+import TopBar from './components/common/TopBar';
+import PageBanner from './components/common/PageBanner';
+import BandeauRestauration from './components/common/BandeauRestauration';
+import { useGlobalModalDrag } from './hooks/useDraggable';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { initDatabaseWithMigrations } from './database/runMigration';
+import { theme } from './theme';
+import { colorSchemeManager, defaultColorScheme } from './theme/themeScheme';
+import { runSchemaMigration } from './database/runMigration';
+import { initDatabase } from './database/db'; // ✅ AJOUTÉ
 import { confirm } from './utils/confirm';
 import { DatabaseVersionManager } from './database/versionManager';
-import { MigrationManagerComponent } from './components/MigrationManager';
-import '@mantine/core/styles.css';
-import '@mantine/notifications/styles.css';
+import { sessionCaisseService } from './services/sessionCaisseService';
+import { licenceService, LicenceStatus } from './services/licenceService';
+import { EcranExpiration } from './components/EcranExpiration';
+import { ModalActivationLicence } from './components/ModalActivationLicence';
 const DebugPanel = lazy(() => import('./components/debug/DebugPanel'));
 
 // ==================== FACTURES DÉTAILS ====================
@@ -20,18 +28,23 @@ import DetailFacture from './components/factures/DetailFacture';
 import DetailFactureRevendeur from './components/factures/DetailFactureRevendeur';
 import HistoriqueRevendeur from './components/pages/revendeurs/HistoriqueRevendeur';
 import ListeCommandes from './components/commandes/ListeCommandes';
+import { GestionRevendeursPonctuels } from './components/pages/revendeurs/ponctuels/GestionRevendeursPonctuels';
+import SecondeMain from './components/pages/SecondeMain';
 
 // ==================== AUTH ====================
 const Login = lazy(() => import('./components/auth/Login'));
 
 // ==================== DASHBOARD ====================
 const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
+const HistoriqueActivite = lazy(() => import('./components/historique/HistoriqueActivite'));
+const GuideCircuits = lazy(() => import('./components/guide/GuideCircuits'));
 
 // ==================== GESTION COMMERCIALE ====================
 const ListeClients = lazy(() => import('./components/clients/ListeClients'));
 const ListeFactures = lazy(() => import('./components/factures/ListeFactures'));
 const ListeVentes = lazy(() => import('./components/ventes/ListeVentes'));
 const FormulaireVente = lazy(() => import('./components/ventes/FormulaireVente'));
+const GestionPrestations = lazy(() => import('./components/ventes/GestionPrestations'));
 
 const ListeCommandeStandard = lazy(() => import('./components/commandes/ListeCommandeStandard'));
 const ListeCommandesRevendeur = lazy(() => import('./components/commandes/ListeCommandesRevendeur'));
@@ -50,12 +63,17 @@ const NouveauDecompte = lazy(() => import('./components/decomptes/NouveauDecompt
 // ==================== REVENDEURS (suite) ====================
 const ListeStockRevendeur = lazy(() => import('./components/pages/revendeurs/ListeStockRevendeur'));
 const DashboardRevendeurs = lazy(() => import('./components/pages/revendeurs/DashboardRevendeurs'));
+const FicheRevendeur = lazy(() => import('./components/pages/revendeurs/FicheRevendeur'));
+const AlertesRevendeurs = lazy(() => import('./components/pages/revendeurs/AlertesRevendeurs'));
+const ControleCoherence = lazy(() => import('./components/pages/revendeurs/ControleCoherence'));
+
 
 // ==================== PRODUITS & STOCK ====================
 const ListeProduits = lazy(() => import('./components/products/ListeProduits'));
 
 // ==================== FINANCES ====================
 const ListeReglements = lazy(() => import('./components/reglements/ListeReglements'));
+const TableauBordFinancier = lazy(() => import('./components/finances/TableauBordFinancier'));
 
 // ==================== CAISSE ====================
 const JournalCaisse = lazy(() => import('./components/caisse/JournalCaisse'));
@@ -68,6 +86,8 @@ const RemboursementsList = lazy(() => import('./components/credits/Remboursement
 // ==================== PARAMÈTRES ====================
 const ListeUtilisateurs = lazy(() => import('./components/utilisateurs/ListeUtilisateurs'));
 const ParametresAtelier = lazy(() => import('./components/parametres/ParametresAtelier'));
+const GestionLicence = lazy(() => import('./components/parametres/GestionLicence'));
+const DevDashboard = lazy(() => import('./components/parametres/DevDashboard'));
 const DiagnosticDB = lazy(() => import('./components/DiagnosticDB'));
 
 // ==================== TYPES ====================
@@ -89,7 +109,8 @@ type PageKey =
   | 'dashboard-revendeurs'
   | 'stock-revendeurs'
   | 'factures-revendeur'
-  | 'revendeurs-historique';
+  | 'revendeurs-historique'
+  | 'tableau-bord-financier';
 
 // ==================== COMPOSANTS ====================
 const LoadingFallback = () => (
@@ -239,10 +260,29 @@ function FicheCommandeWrapper() {
 }
 
 // ==================== APP AUTHENTIFIÉE ====================
-function AuthenticatedApp() {
+function AuthenticatedApp({
+  licenceStatus,
+  onLicenceActivated
+}: {
+  licenceStatus?: LicenceStatus | null;
+  onLicenceActivated?: () => void;
+}) {
   const { user, logout, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
   const [navbarOpened, { toggle: toggleNavbar, close: closeNavbar }] = useDisclosure();
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('tk-nav-collapsed') === '1'; } catch { return false; }
+  });
+  const toggleNavCollapsed = () => setNavCollapsed((c) => {
+    const next = !c;
+    try { localStorage.setItem('tk-nav-collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
+  // Sous 900 px : barre latérale remplacée par un bandeau horizontal en haut
+  const isNarrow = useMediaQuery('(max-width: 900px)') ?? false;
+  // Modales déplaçables par l'en-tête (délégation globale)
+  useGlobalModalDrag();
+  const [activationModalOpened, { open: openActivation, close: closeActivation }] = useDisclosure(false);
 
   const handleLogout = async () => {
     if (await confirm("Voulez-vous vous déconnecter ?", "Déconnexion")) {
@@ -250,6 +290,19 @@ function AuthenticatedApp() {
       navigate('/login');
     }
   };
+
+  // Après une relève : le nouvel opérateur qui se connecte est amené
+  // directement à la caisse, où son poste s'ouvre automatiquement.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let pending = false;
+    try { pending = localStorage.getItem('gc_releve_pending') === '1'; } catch {}
+    if (pending) navigate('/caisse');
+    // Normalisation des anciennes factures si la TVA est désactivée
+    // (montant_ttc = montant_ht) : évite d'afficher un TTC gonflé partout.
+    import('./services/tvaService').then(m => m.tvaService.normaliserFacturesSiDesactivee()).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   const handleSetPage = (page: PageKey) => {
     const routeMap: Record<PageKey, string> = {
@@ -270,7 +323,8 @@ function AuthenticatedApp() {
       'dashboard-revendeurs': '/dashboard-revendeurs',
       'stock-revendeurs': '/stock-revendeurs',
       'factures-revendeur': '/factures-revendeur',
-      'revendeurs-historique': '/revendeurs/historique'
+      'revendeurs-historique': '/revendeurs/historique',
+      'tableau-bord-financier': '/finances/tableau-de-bord'
     };
     navigate(routeMap[page] || '/');
   };
@@ -281,46 +335,97 @@ function AuthenticatedApp() {
   return (
     <AppShell
       padding="md"
-      header={{ height: { base: 50, sm: 0 } }}
-      navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !navbarOpened } }}
+      header={{ height: 56 }}
+      navbar={{ width: navCollapsed ? 72 : 260, breakpoint: 0, collapsed: { desktop: isNarrow, mobile: isNarrow } }}
       styles={{
         main: {
-          minHeight: '100vh',
-          overflow: 'visible',
-          backgroundColor: '#f5f7fa'
+          height: '100vh',
+          overflowY: 'auto',
         },
-        header: {
-          display: 'flex',
-          alignItems: 'center',
-          backgroundColor: '#0a1628',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-        }
       }}
     >
-      <AppShell.Header hiddenFrom="sm">
-        <Group h="100%" px="md" justify="space-between">
-          <Burger
-            opened={navbarOpened}
-            onClick={toggleNavbar}
-            size="sm"
-            color="white"
-          />
-          <Text fw={900} style={{ color: '#f4b400', letterSpacing: 2, fontSize: 15, fontFamily: 'Georgia, serif', textTransform: 'uppercase' }}>
-            GESTION PRO
-          </Text>
-          <div style={{ width: 28 }} />
-        </Group>
+      <AppShell.Header>
+        <TopBar userName={user?.nom} userRole={user?.role} onLogout={handleLogout} />
       </AppShell.Header>
       <AppShell.Navbar>
-        <Navbar userRole={user?.role} userName={user?.nom} onLogout={handleLogout} onNavClose={closeNavbar} />
+        <Navbar userRole={user?.role} onNavClose={closeNavbar} collapsed={navCollapsed} onToggleCollapse={toggleNavCollapsed} />
       </AppShell.Navbar>
       <AppShell.Main>
+        {isNarrow && (
+          <Navbar userRole={user?.role} onNavClose={closeNavbar} horizontal />
+        )}
+        {/* ── Bannière période d'essai + bouton activation ── */}
+        {licenceStatus && licenceStatus.statut !== 'DEFINITIF' && (
+          <div style={{
+            background: licenceStatus.statut === 'EXPIRE'
+              ? '#fff5f5'
+              : licenceStatus.joursRestants <= 7 ? '#fff3cd' : '#e8f4fd',
+            borderBottom: `1px solid ${licenceStatus.statut === 'EXPIRE'
+              ? '#ffa8a8'
+              : licenceStatus.joursRestants <= 7 ? '#ffc107' : '#74c0fc'}`,
+            padding: '4px 16px',
+            fontSize: 12,
+            color: licenceStatus.statut === 'EXPIRE'
+              ? '#c92a2a'
+              : licenceStatus.joursRestants <= 7 ? '#856404' : '#1971c2',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8
+          }}>
+            <span>
+              {licenceStatus.statut === 'EXPIRE' ? '🔒' : licenceStatus.joursRestants <= 7 ? '⚠️' : 'ℹ️'}
+              {' '}
+              {licenceStatus.message}
+            </span>
+            <button
+              onClick={openActivation}
+              style={{
+                background: licenceStatus.statut === 'EXPIRE' ? '#c92a2a' : licenceStatus.joursRestants <= 7 ? '#e67700' : '#1971c2',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                padding: '2px 10px',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontWeight: 600,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Activer la version définitive
+            </button>
+          </div>
+        )}
+
+        {/* ── Modal d'activation ── */}
+        <ModalActivationLicence
+          opened={activationModalOpened}
+          onClose={closeActivation}
+          onActivated={() => { closeActivation(); onLicenceActivated?.(); }}
+          licenceStatus={licenceStatus ?? null}
+        />
+        <PageBanner />
+        <BandeauRestauration />
         <Suspense fallback={<LoadingFallback />}>
           <Routes>
             {/* DASHBOARD */}
             <Route path="/" element={
               <RouteGuard requiredPermissions={['dashboard.view']}>
                 <Dashboard setPage={handleSetPage} />
+              </RouteGuard>
+            } />
+
+            {/* HISTORIQUE GÉNÉRAL */}
+            <Route path="/historique" element={
+              <RouteGuard requiredPermissions={['dashboard.view']}>
+                <HistoriqueActivite />
+              </RouteGuard>
+            } />
+
+            {/* GUIDE DES CIRCUITS */}
+            <Route path="/guide" element={
+              <RouteGuard requiredPermissions={['dashboard.view']}>
+                <GuideCircuits />
               </RouteGuard>
             } />
 
@@ -400,6 +505,16 @@ function AuthenticatedApp() {
                 <NouvelleVenteWrapper />
               </RouteGuard>
             } />
+            <Route path="/prestations" element={
+              <RouteGuard requiredPermissions={['ventes.create']}>
+                <GestionPrestations />
+              </RouteGuard>
+            } />
+            <Route path="/seconde-main" element={
+              <RouteGuard requiredPermissions={['ventes.view']}>
+                <SecondeMain />
+              </RouteGuard>
+            } />
 
             {/* REVENDEURS */}
             <Route path="/dashboard-revendeurs" element={
@@ -415,6 +530,28 @@ function AuthenticatedApp() {
             <Route path="/revendeurs/historique" element={
               <RouteGuard requiredPermissions={['revendeurs.view']}>
                 <HistoriqueRevendeur />
+              </RouteGuard>
+            } />
+            <Route path="/revendeurs/fiche" element={
+              <RouteGuard requiredPermissions={['revendeurs.view']}>
+                <FicheRevendeur />
+              </RouteGuard>
+            } />
+            <Route path="/revendeurs/alertes" element={
+              <RouteGuard requiredPermissions={['revendeurs.view']}>
+                <AlertesRevendeurs />
+              </RouteGuard>
+            } />
+            <Route path="/revendeurs/coherence" element={
+              <RouteGuard requiredPermissions={['revendeurs.view']}>
+                <ControleCoherence />
+              </RouteGuard>
+            } />
+
+            {/* ✅ REVENDEURS PONCTUELS */}
+            <Route path="/revendeurs/ponctuels" element={
+              <RouteGuard requiredPermissions={['revendeurs.view']} requiredRoles={['admin']}>
+                <GestionRevendeursPonctuels />
               </RouteGuard>
             } />
 
@@ -462,6 +599,13 @@ function AuthenticatedApp() {
               </RouteGuard>
             } />
 
+            {/* TABLEAU DE BORD FINANCIER */}
+            <Route path="/finances/tableau-de-bord" element={
+              <RouteGuard requiredPermissions={['finances.reglements']}>
+                <TableauBordFinancier />
+              </RouteGuard>
+            } />
+
             {/* CAISSE */}
             <Route path="/caisse" element={
               <RouteGuard requiredPermissions={['caisse.view']}>
@@ -502,6 +646,16 @@ function AuthenticatedApp() {
                 <DiagnosticDB />
               </RouteGuard>
             } />
+            <Route path="/licence" element={
+              <RouteGuard requiredPermissions={['admin.parametres']}>
+                <GestionLicence />
+              </RouteGuard>
+            } />
+            <Route path="/dev/licence" element={
+              <RouteGuard requiredPermissions={['admin.parametres']}>
+                <DevDashboard />
+              </RouteGuard>
+            } />
             <Route path="/debug" element={
               <RouteGuard requiredPermissions={['admin.diagnostic']}>
                 <DebugPanel />
@@ -536,122 +690,77 @@ function AuthenticatedApp() {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5,
       retry: 1,
-      refetchOnWindowFocus: false
-    }
+      refetchOnWindowFocus: false,
+    },
   },
 });
 
-// ==================== APP PRINCIPALE ====================
-function App() {
-  const [dbReady, setDbReady] = useState(false);
-  const [migrationRunning, setMigrationRunning] = useState(true);
-  const [showMigration, setShowMigration] = useState(false);
-  const [appReady, setAppReady] = useState(false);
-  const [dbError, setDbError] = useState<string | null>(null);
+// ==================== APP ROOT ====================
+function AppWithProviders() {
+  const [licenceStatus, setLicenceStatus] = useState<LicenceStatus | null>(null);
+  const [licenceLoaded, setLicenceLoaded] = useState(false);
 
   useEffect(() => {
-    const setup = async () => {
+    const checkLicence = async () => {
       try {
-        console.log('🚀 Démarrage de l\'application...');
-
-        await initDatabaseWithMigrations();
-
-        try {
-          const versionInfo = await DatabaseVersionManager.getCurrentVersion();
-          const currentVersion = DatabaseVersionManager.getCurrentVersionNumber();
-
-          console.log(`📊 Version DB: ${versionInfo.version} (dernière: ${currentVersion})`);
-
-          if (versionInfo.version < currentVersion) {
-            console.log('🔄 Migration nécessaire !');
-            setShowMigration(true);
-          } else {
-            console.log('✅ Base de données à jour');
-            setAppReady(true);
-          }
-        } catch (versionError) {
-          console.warn('⚠️ Impossible de vérifier la version, continuation...');
-          setAppReady(true);
-        }
-
-        console.log('✅ Base de données initialisée avec succès');
-        setDbReady(true);
-      } catch (error: any) {
-        const errorMsg = error?.message || 'Erreur inconnue';
-        console.error('❌ Erreur DB fatale:', errorMsg);
-        setDbError(errorMsg);
-        setDbReady(false);
+        // ✅ FORCER l'initialisation de la base avec le bon schéma
+        console.log('🚀 Initialisation de la base de données avec le bon schéma...');
+        await initDatabase();
+        console.log('✅ Base initialisée avec le bon schéma');
+        
+        await runSchemaMigration();
+        const status = await licenceService.verifierLicence();
+        setLicenceStatus(status);
+      } catch (error) {
+        console.error('Erreur init:', error);
       } finally {
-        setMigrationRunning(false);
+        setLicenceLoaded(true);
       }
     };
-    setup();
+    checkLicence();
   }, []);
 
-  if (migrationRunning) {
+  if (!licenceLoaded) {
     return (
-      <MantineProvider>
+      <MantineProvider theme={theme} defaultColorScheme={defaultColorScheme} colorSchemeManager={colorSchemeManager}>
         <Center style={{ height: '100vh' }}>
-          <Stack align="center" gap="md">
-            <Loader size="xl" variant="dots" />
-            <Text size="lg" fw={600}>Initialisation de la base de données...</Text>
-            <Text size="sm" c="dimmed">Création des tables et migration en cours</Text>
-          </Stack>
+          <Loader size="xl" variant="dots" />
         </Center>
       </MantineProvider>
     );
   }
 
-  if (showMigration) {
+  if (licenceStatus?.statut === 'EXPIRE') {
     return (
-      <MantineProvider>
-        <MigrationManagerComponent onComplete={() => { setShowMigration(false); setAppReady(true); }} />
-      </MantineProvider>
-    );
-  }
-
-  if (dbError) {
-    return (
-      <MantineProvider>
-        <Center style={{ height: '100vh' }}>
-          <Stack align="center" gap="md">
-            <Notification color="red" title="Erreur de base de données">
-              {dbError}
-            </Notification>
-            <Button onClick={() => window.location.reload()}>Réessayer</Button>
-          </Stack>
-        </Center>
-      </MantineProvider>
-    );
-  }
-
-  if (!dbReady || !appReady) {
-    return (
-      <MantineProvider>
-        <Center style={{ height: '100vh' }}>
-          <Stack align="center" gap="md">
-            <Loader size="xl" variant="dots" />
-            <Text size="sm" c="dimmed">Chargement...</Text>
-          </Stack>
-        </Center>
+      <MantineProvider theme={theme} defaultColorScheme={defaultColorScheme} colorSchemeManager={colorSchemeManager}>
+        <EcranExpiration
+          status={licenceStatus}
+          onActivated={() => {
+            licenceService.verifierLicence().then(setLicenceStatus);
+          }}
+        />
       </MantineProvider>
     );
   }
 
   return (
     <QueryClientProvider client={queryClient}>
-      <MantineProvider>
-        <Notifications />
-        <BrowserRouter>
-          <AuthProvider>
-            <AuthenticatedApp />
-          </AuthProvider>
-        </BrowserRouter>
+      <MantineProvider theme={theme} defaultColorScheme={defaultColorScheme} colorSchemeManager={colorSchemeManager}>
+        <Notifications position="top-right" zIndex={1000} />
+        <AuthProvider>
+          <BrowserRouter>
+            <AuthenticatedApp
+              licenceStatus={licenceStatus}
+              onLicenceActivated={() => {
+                licenceService.verifierLicence().then(setLicenceStatus);
+              }}
+            />
+          </BrowserRouter>
+        </AuthProvider>
       </MantineProvider>
     </QueryClientProvider>
   );
 }
 
-export default App;
+export default AppWithProviders;

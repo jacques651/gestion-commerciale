@@ -1,6 +1,7 @@
 // src/database/repositories/factureRepository.ts
 
 import { getDb } from "../db";
+import { tvaService } from "../../services/tvaService";
 
 export interface Facture {
   NomComplet: string;
@@ -61,11 +62,13 @@ export const factureRepository = {
         fd.qte,
         fd.prix_unitaire,
         p.code_produit,
+        p.reference,
         p.designation,
         p.categorie,
         p.unite_base,
         p.prix_achat_base,
-        p.prix_vente_gros
+        p.prix_vente_gros,
+        p.prix_vente_gros AS prix_reel
       FROM facture_details fd
       INNER JOIN products p ON p.idProduit = fd.idProduit
       WHERE fd.idFacture = ?
@@ -154,9 +157,10 @@ export const factureRepository = {
     // 4. Générer le code facture
     const codeFacture = await this.generateCode();
 
-    // 5. Calculer les montants
+    // 5. Calculer les montants — TVA selon le réglage (0 si désactivée)
     const montantHT = details.reduce((sum, d) => sum + (d.prix_unitaire_vente * d.qte_commande), 0);
-    const tva = montantHT * 0.18;
+    const _tvaCfg = await tvaService.get(true);
+    const tva = _tvaCfg.active ? montantHT * (_tvaCfg.taux / 100) : 0;
     const montantTTC = montantHT + tva;
 
     // 6. Insérer la facture (colonnes réelles de la table)
@@ -248,12 +252,14 @@ export const factureRepository = {
     const db = await getDb();
     
     return await db.select<any[]>(`
-      SELECT 
+      SELECT
         fd.*,
         p.designation,
         p.code_produit,
+        p.reference,
         p.categorie,
-        p.unite_base
+        p.unite_base,
+        p.prix_vente_gros AS prix_reel
       FROM facture_details fd
       INNER JOIN products p ON p.idProduit = fd.idProduit
       WHERE fd.idFacture = ?
@@ -263,11 +269,11 @@ export const factureRepository = {
   // ✅ Vérifier si une facture existe pour une commande
   async getByCommande(idCommande: number): Promise<any> {
     const db = await getDb();
-    
+
     const result = await db.select<any[]>(`
       SELECT * FROM factures WHERE idCommande = ?
     `, [idCommande]);
-    
+
     return result.length > 0 ? result[0] : null;
   }
 };

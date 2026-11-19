@@ -24,8 +24,8 @@ export const ChartStats: React.FC = () => {
       const result = await db.select<any[]>(`
         SELECT 
           COUNT(*) as nb_ventes,
-          COALESCE(SUM(montant_total), 0) as total_ca,
-          COALESCE(AVG(montant_total), 0) as avg_vente
+          COALESCE(SUM(montant_ttc), 0) as total_ca,
+          COALESCE(AVG(montant_ttc), 0) as avg_vente
         FROM ventes
         WHERE date(date_vente) >= date('now', '-' || ? || ' days')
       `, [period]);

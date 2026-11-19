@@ -9,6 +9,9 @@ import { IconPrinter, IconDownload, IconAlertCircle } from '@tabler/icons-react'
 import { useReactToPrint } from 'react-to-print';
 import html2pdf from 'html2pdf.js';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
+import { construireCssImpression } from '../../utils/printFormats';
+import SelecteurFormatImpression, { useFormatImpression } from '../common/SelecteurFormatImpression';
 import { getDb } from '../../database/db';
 
 interface FactureStandardProps {
@@ -45,6 +48,8 @@ const statutLabel = (s?: string) => {
 export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => {
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
+  const { tvaActive, tauxTVA, loading: tvaLoading } = useTVAConfig();
+  const { format, setFormat } = useFormatImpression();
   const [codeFacture, setCodeFacture] = useState<string>(facture?.code_facture || '');
   const [generating, setGenerating] = useState(false);
 
@@ -77,36 +82,30 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
     let ht = 0;
     const rows = src.map((d: any, i: number) => {
       const qte = d.qte ?? d.qte_commande ?? d.quantite ?? 0;
+      // Prix vendu : prix figé sur la facture au moment de la vente
       const prix = d.prix_unitaire ?? d.prix_unitaire_vente ?? d.prix_vente ?? 0;
       const total = qte * prix;
       ht += total;
       return { num: i + 1, designation: d.designation || '-', qte, prix, total };
     });
-    const tva = ht * 0.18;
+    // TVA appliquée uniquement si activée dans les paramètres (source unique : tvaService)
+    // et au taux configuré, plus de 18 % codé en dur.
+    const tva = tvaActive ? ht * (tauxTVA / 100) : 0;
     return { details: rows, totalHT: ht, totalTVA: tva, totalTTC: ht + tva };
-  }, [facture]);
+  }, [facture, tvaActive, tauxTVA]);
 
+  // Le format papier choisi pilote la géométrie de page ET l'adaptation
+  // automatique du corps (police, marges, tableaux).
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Facture_${codeFacture || 'standard'}`
+    documentTitle: `Facture_${codeFacture || 'standard'}`,
+    pageStyle: construireCssImpression({ format, racine: '.print-area' }),
   });
 
-  const handlePdf = async () => {
-    if (!printRef.current) return;
-    try {
-      const worker = html2pdf().set({
-        margin: 0.2,
-        filename: `Facture_${codeFacture || 'standard'}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-      }).from(printRef.current);
-      const blob = await worker.outputPdf('blob');
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (e) {
-      console.error('Erreur PDF:', e);
-    }
+  const handlePdf = () => {
+    // Impression vectorielle (pas de capture d'écran, pas de popup) :
+    // l'utilisateur choisit « Enregistrer au format PDF » et l'emplacement.
+    handlePrint();
   };
 
   if (!facture) {
@@ -117,7 +116,7 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
     );
   }
 
-  if (atelierLoading || generating) {
+  if (atelierLoading || tvaLoading || generating) {
     return (
       <Center py={50}>
         <Loader size="xl" />
@@ -131,13 +130,22 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
 
   return (
     <Box>
-      <Group justify="flex-end" mb="sm" className="no-print">
-        <Button size="xs" variant="light" onClick={handlePrint} leftSection={<IconPrinter size={14} />}>
-          Imprimer
-        </Button>
-        <Button size="xs" variant="light" color="teal" onClick={handlePdf} leftSection={<IconDownload size={14} />}>
-          Télécharger PDF
-        </Button>
+      <Group justify="space-between" align="flex-end" mb="sm" className="no-print" wrap="wrap">
+        {/* Choix du format papier, pré-rempli depuis les Paramètres */}
+        <SelecteurFormatImpression
+          format={format}
+          onFormatChange={setFormat}
+          avecOrientation={false}
+          size="xs"
+        />
+        <Group gap="xs">
+          <Button size="xs" variant="light" onClick={handlePrint} leftSection={<IconPrinter size={14} />}>
+            Imprimer
+          </Button>
+          <Button size="xs" variant="light" color="teal" onClick={handlePdf} leftSection={<IconDownload size={14} />}>
+            Télécharger PDF
+          </Button>
+        </Group>
       </Group>
 
       <div ref={printRef} className="print-area">
@@ -148,11 +156,19 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
             justify="space-between" align="center" wrap="wrap" gap="xs"
             style={{ borderBottom: '1px solid #1b365d', paddingBottom: 6, marginBottom: 10 }}
           >
-            <Box>
-              <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
-              <Text size="xs" c="dimmed">{atelier.adresse}</Text>
-              <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text>
-            </Box>
+            <Group gap="sm" wrap="nowrap" align="flex-start">
+              {(atelier as any).logo_base64 ? (
+                <img src={(atelier as any).logo_base64} alt="" style={{ height: 42, objectFit: 'contain' }} />
+              ) : null}
+              <Box>
+                <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
+                {atelier.adresse ? <Text size="xs" c="dimmed">{atelier.adresse}</Text> : null}
+                {atelier.telephone ? <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text> : null}
+                {(atelier as any).email ? <Text size="xs" c="dimmed">{(atelier as any).email}</Text> : null}
+                {(atelier as any).ifu ? <Text size="xs" c="dimmed">IFU: {(atelier as any).ifu}</Text> : null}
+                {(atelier as any).rccm ? <Text size="xs" c="dimmed">RCCM: {(atelier as any).rccm}</Text> : null}
+              </Box>
+            </Group>
             <Box style={{ textAlign: 'right' }}>
               <Text size="xs" c="dimmed">N° : {code}</Text>
               <Text size="xs" c="dimmed">Date : {fmtDate(facture.date_facture)}</Text>
@@ -191,20 +207,22 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
                 <Table.Th c="white" ta="center" w={28}>#</Table.Th>
                 <Table.Th c="white">Désignation</Table.Th>
                 <Table.Th c="white" ta="center" w={55}>Qté</Table.Th>
-                <Table.Th c="white" ta="right" w={100}>Prix unit. HT</Table.Th>
+                <Table.Th c="white" ta="right" w={100}>Prix vendu HT</Table.Th>
                 <Table.Th c="white" ta="right" w={100}>Total HT</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {details.length > 0 ? details.map((d: {num:number; designation:string; qte:number; prix:number; total:number}) => (
+              {details.length > 0 ? details.map((d: {num:number; designation:string; qte:number; prix:number; total:number}) => {
+                return (
                 <Table.Tr key={d.num}>
                   <Table.Td ta="center">{d.num}</Table.Td>
                   <Table.Td><Text size="xs" fw={500}>{d.designation}</Text></Table.Td>
                   <Table.Td ta="center">{d.qte}</Table.Td>
-                  <Table.Td ta="right">{fmt(d.prix)}</Table.Td>
+                   <Table.Td ta="right"><Text size="xs" fw={600}>{fmt(d.prix)}</Text></Table.Td>
                   <Table.Td ta="right" fw={700}>{fmt(d.total)}</Table.Td>
                 </Table.Tr>
-              )) : (
+                );
+              }) : (
                 <Table.Tr>
                   <Table.Td colSpan={5}>
                     <Text ta="center" c="dimmed" size="sm" py="md">Aucun article dans cette facture</Text>
@@ -213,29 +231,37 @@ export const FactureStandard: React.FC<FactureStandardProps> = ({ facture }) => 
               )}
             </Table.Tbody>
           </Table>
+<Divider my="xs" />
 
-          <Divider my="xs" />
+          {/* Récapitulatif — la ligne TVA disparaît totalement si la TVA est désactivée */}
+          {tvaActive ? (
+            <SimpleGrid cols={3} spacing="xs" mb="xs">
+              <Paper p="xs" withBorder bg="gray.0">
+                <Text size="xs" c="dimmed">Total HT</Text>
+                <Text size="sm" fw={700} c="blue">{fmt(totalHT)} FCFA</Text>
+              </Paper>
+              <Paper p="xs" withBorder bg="orange.0">
+                <Text size="xs" c="orange">{`TVA ${tauxTVA}%`}</Text>
+                <Text size="sm" fw={700} c="orange">{fmt(totalTVA)} FCFA</Text>
+              </Paper>
+              <Paper p="xs" withBorder bg="green.0">
+                <Text size="xs" c="green">Total TTC</Text>
+                <Text size="sm" fw={700} c="green">{fmt(totalTTC)} FCFA</Text>
+              </Paper>
+            </SimpleGrid>
+          ) : (
+            <SimpleGrid cols={1} spacing="xs" mb="xs">
+              <Paper p="xs" withBorder bg="green.0">
+                <Text size="xs" c="green">Total</Text>
+                <Text size="sm" fw={700} c="green">{fmt(totalTTC)} FCFA</Text>
+              </Paper>
+            </SimpleGrid>
+          )}
 
-          {/* Récapitulatif — même structure que FactureRevendeur */}
-          <SimpleGrid cols={3} spacing="xs" mb="xs">
-            <Paper p="xs" withBorder bg="gray.0">
-              <Text size="xs" c="dimmed">Total HT</Text>
-              <Text size="sm" fw={700} c="blue">{fmt(totalHT)} FCFA</Text>
-            </Paper>
-            <Paper p="xs" withBorder bg="orange.0">
-              <Text size="xs" c="orange">TVA 18%</Text>
-              <Text size="sm" fw={700} c="orange">{fmt(totalTVA)} FCFA</Text>
-            </Paper>
-            <Paper p="xs" withBorder bg="green.0">
-              <Text size="xs" c="green">Total TTC</Text>
-              <Text size="sm" fw={700} c="green">{fmt(totalTTC)} FCFA</Text>
-            </Paper>
-          </SimpleGrid>
-
-          {/* Total TTC en grand */}
+          {/* Total en grand */}
           <Paper p="xs" withBorder style={{ backgroundColor: '#e8f5e9', border: '2px solid #4caf50' }}>
             <Flex justify="space-between" align="center">
-              <Text fw={700} size="sm" c="green.8">TOTAL TTC :</Text>
+              <Text fw={700} size="sm" c="green.8">{tvaActive ? 'TOTAL TTC :' : 'TOTAL :'}</Text>
               <Text fw={800} size="lg" c="green.8">{fmt(totalTTC)} FCFA</Text>
             </Flex>
           </Paper>

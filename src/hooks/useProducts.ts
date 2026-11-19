@@ -12,7 +12,8 @@ export const useProducts = () => {
     try {
       setLoading(true);
       const data = await productRepository.getAll();
-      setProducts(data);
+      // Les produits annulés restent visibles dans le catalogue mais ne sont pas proposés à la sélection
+      setProducts(data.filter(p => !(p as any).est_annule));
       setError(null);
     } catch (err) {
       setError('Erreur de chargement des produits');

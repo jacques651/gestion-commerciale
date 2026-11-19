@@ -4,12 +4,13 @@ import {
   TextInput, Select, Button, Group, Stack, Box,
   NumberInput, Table, ActionIcon, Text, Card,
   Divider, Title, LoadingOverlay, ScrollArea, Badge, Tooltip,
-  Checkbox, Alert
+  Checkbox, Alert, Modal, Textarea, Pagination
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
   IconTrash, IconPlus, IconShoppingCart, IconSearch,
-  IconRefresh, IconUserPlus, IconAlertCircle, IconBoxMultiple
+  IconRefresh, IconUserPlus, IconAlertCircle, IconBoxMultiple,
+  IconEdit, IconCheck, IconX, IconCategory
 } from '@tabler/icons-react';
 import { useClients } from '../../hooks/useClients';
 import { useProducts } from '../../hooks/useProducts';
@@ -18,6 +19,10 @@ import { FormulaireClient } from '../clients/FormulaireClient';
 import { stockService } from '../../database/repositories/stockService';
 import { journalCaisseService } from '../../services/journalCaisseService';
 import { getDb } from '../../database/db';
+import { categorieRepository } from '../../database/repositories/categorieRepository';
+import { tvaService } from '../../services/tvaService';
+import { MoyenPaiement } from '../../services/journalCaisseService';
+import SelecteurModePaiement from '../common/SelecteurModePaiement';
 
 interface FormulaireVenteProps {
   onSuccess: () => void;
@@ -46,12 +51,13 @@ interface CartItem {
   code_produit: string;
   categorie?: string;
   unite_base: string;
-  quantite_stock: number;         // en unités de base (pièces)
-  prix_vente: number;             // prix de l'unité sélectionnée
+  contenu_unite?: number;
+  quantite_stock: number;
+  prix_vente: number;
   prix_achat_base?: number;
-  quantite: number;               // en unités sélectionnées (boîtes, pièces…)
-  quantite_par_unite_base: number;// 1 = pièce, n = conditionnement
-  libelle_conditionnement: string;// "pièce", "Boîte", etc.
+  quantite: number;
+  quantite_par_unite_base: number;
+  libelle_conditionnement: string;
   total: number;
 }
 
@@ -60,25 +66,75 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
   const { products, loading: productsLoading, refresh: refreshProducts } = useProducts();
   const { createSale, loading } = useSales();
 
+  // États principaux
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [, setSelectedClientDetails] = useState<any>(null);
   const [clientNom, setClientNom] = useState<string>('');
   const [clientContact, setClientContact] = useState<string>('');
+  // Moyen de paiement de la vente : alimente la ventilation automatique
+  // espèces / mobile money du point de caisse (via sa catégorie).
+  const [moyenPaiement, setMoyenPaiement] = useState<MoyenPaiement | null>(null);
   const [ajouterClient, setAjouterClient] = useState<boolean>(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [venteCategorie, setVenteCategorie] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [codeVente, setCodeVente] = useState<string>('');
   const [clientModalOpened, setClientModalOpened] = useState(false);
+  
+  // États pour les catégories
+  const [categories, setCategories] = useState<any[]>([]);
+  const [showAddCategorie, setShowAddCategorie] = useState(false);
+  const [newCategorie, setNewCategorie] = useState({ nom: '', description: '' });
+  const [addingCategorie, setAddingCategorie] = useState(false);
 
-  // Conditionnements: map idProduit → liste de conditionnements
+  // États pour la TVA
+  const [tvaActif, setTvaActif] = useState<boolean>(true);
+  const [tauxTVA, setTauxTVA] = useState<number>(18);
+  const [modifierPrix, setModifierPrix] = useState<{ index: number | null; prix: number }>({
+    index: null,
+    prix: 0
+  });
+
+  // États pour les conditionnements
   const [condMap, setCondMap] = useState<Record<number, Conditionnement[]>>({});
-  // Unité sélectionnée par produit dans la liste
   const [selectedUnits, setSelectedUnits] = useState<Record<number, SelectedUnit>>({});
 
   const itemsPerPage = 5;
 
+  // Charger la configuration TVA via la source de vérité unique (tvaService)
+  useEffect(() => {
+    const loadTVAConfig = async () => {
+      try {
+        const config = await tvaService.get(true);
+        setTvaActif(config.active);
+        setTauxTVA(config.taux);
+      } catch (error) {
+        console.error('Erreur chargement TVA:', error);
+        // Valeurs par défaut en cas d'erreur
+        setTvaActif(true);
+        setTauxTVA(18);
+      }
+    };
+    loadTVAConfig();
+  }, []);
+
+  // Charger les catégories
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadCategories = async () => {
+    try {
+      const cats = await categorieRepository.getAll();
+      setCategories(cats);
+    } catch (error) {
+      console.error('Erreur chargement catégories:', error);
+    }
+  };
+
+  // Générer le code de vente
   const generateUniqueVenteCode = async (): Promise<string> => {
     const db = await getDb();
     const prefix = 'VENTE-';
@@ -107,7 +163,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     generateUniqueVenteCode().then(setCodeVente);
   }, []);
 
-  // Charger les conditionnements de tous les produits affichés
+  // Charger les conditionnements
   const loadConditionnements = useCallback(async (productIds: number[]) => {
     if (productIds.length === 0) return;
     try {
@@ -156,26 +212,64 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
   }, [selectedClientId, clients, ajouterClient]);
 
-  // Construire les options d'unité pour un produit
+  // Fonctions pour les catégories
+  const handleAddCategorie = async () => {
+    if (!newCategorie.nom.trim()) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Le nom de la catégorie est requis',
+        color: 'red'
+      });
+      return;
+    }
+
+    setAddingCategorie(true);
+    try {
+      await categorieRepository.create({
+        code_categorie: `CAT-${Date.now()}`,
+        nom_categorie: newCategorie.nom,
+        description: newCategorie.description
+      });
+
+      notifications.show({
+        title: 'Succès',
+        message: `Catégorie "${newCategorie.nom}" ajoutée avec succès`,
+        color: 'green'
+      });
+
+      setShowAddCategorie(false);
+      setNewCategorie({ nom: '', description: '' });
+      await loadCategories();
+    } catch (error) {
+      notifications.show({
+        title: 'Erreur',
+        message: 'Erreur lors de l\'ajout de la catégorie',
+        color: 'red'
+      });
+    } finally {
+      setAddingCategorie(false);
+    }
+  };
+
+  // Construire les options d'unité
   const getUnitOptions = (product: any): { value: string; label: string }[] => {
+    const contenu = Math.max(1, Number(product.contenu_unite) || 1);
     const opts: { value: string; label: string }[] = [
-      { value: 'piece', label: `Pièce — ${formatMontant(product.prix_vente_detail)} F` }
+      { value: 'piece', label: `${product.unite_base || 'Pièce'}${contenu > 1 ? ` (${contenu} pièces)` : ''} — ${formatMontant(product.prix_vente_detail)} F` }
     ];
     const conds = condMap[product.idProduit] || [];
     for (const c of conds) {
       opts.push({
         value: `cond_${c.idConditionnement}`,
-        label: `${c.libelle} (${c.quantite_par_unite_base} pièces) — ${c.prix_vente_ttc.toLocaleString('fr-FR')} F`,
+        label: `${c.libelle} (${c.quantite_par_unite_base} pièces) — ${formatMontant(c.prix_vente_ttc)} F`,
       });
     }
     return opts;
   };
 
-  // Résoudre l'unité sélectionnée (ou par défaut) pour un produit
   const getResolvedUnit = (product: any): SelectedUnit => {
     const manual = selectedUnits[product.idProduit];
     if (manual) return manual;
-    // Par défaut: le conditionnement marqué par défaut, sinon pièce
     const conds = condMap[product.idProduit] || [];
     const def = conds.find(c => c.est_conditionnement_par_defaut === 1) || conds[0];
     if (def) {
@@ -188,8 +282,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
     return {
       idConditionnement: null,
-      libelle: product.unite_base || 'pièce',
-      quantite_par_unite_base: 1,
+      libelle: `${product.unite_base || 'pièce'}${Number(product.contenu_unite) > 1 ? ` (${product.contenu_unite} pièces)` : ''}`,
+      quantite_par_unite_base: Math.max(1, Number(product.contenu_unite) || 1),
       prix: product.prix_vente_detail || 0,
     };
   };
@@ -201,8 +295,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         ...prev,
         [product.idProduit]: {
           idConditionnement: null,
-          libelle: product.unite_base || 'pièce',
-          quantite_par_unite_base: 1,
+          libelle: `${product.unite_base || 'pièce'}${Number(product.contenu_unite) > 1 ? ` (${product.contenu_unite} pièces)` : ''}`,
+          quantite_par_unite_base: Math.max(1, Number(product.contenu_unite) || 1),
           prix: product.prix_vente_detail || 0,
         }
       }));
@@ -225,11 +319,14 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
   const filteredProducts = products.filter(product => {
     const stockDisponible = (product.qte_stock || 0) > 0;
+    const t = searchTerm.toLowerCase();
     const matchesSearch = searchTerm === '' ||
-      product.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.code_produit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.categorie?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch && stockDisponible;
+      product.designation?.toLowerCase().includes(t) ||
+      product.code_produit?.toLowerCase().includes(t) ||
+      (product as any).reference?.toLowerCase().includes(t) ||
+      product.categorie?.toLowerCase().includes(t);
+    const matchesCategorie = !venteCategorie || product.categorie === venteCategorie;
+    return matchesSearch && matchesCategorie && stockDisponible;
   });
 
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -238,10 +335,12 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     currentPage * itemsPerPage
   );
 
+  // Calcul des totaux
   const totalHT = cart.reduce((sum, item) => sum + item.total, 0);
-  const tva = totalHT * 0.18;
-  const totalTTC = totalHT + tva;
+  const tva = tvaActif ? totalHT * (tauxTVA / 100) : 0;
+  const totalTTC = tvaActif ? totalHT + tva : totalHT;
 
+  // Ajouter au panier
   const addToCart = (product: any) => {
     const unit = getResolvedUnit(product);
     const stock = product.qte_stock || 0;
@@ -263,7 +362,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       return;
     }
 
-    // Vérifier qu'on a au moins 1 unité en stock (en pièces)
     const piecesNecessaires = 1 * unit.quantite_par_unite_base;
     if (piecesNecessaires > stock) {
       notifications.show({
@@ -274,7 +372,6 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       return;
     }
 
-    // Chercher si déjà dans le panier AVEC LA MÊME unité
     const existingIdx = cart.findIndex(
       item => item.idProduit === product.idProduit && item.idConditionnement === unit.idConditionnement
     );
@@ -315,7 +412,9 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     }
   };
 
+  // Modifier la quantité
   const updateQuantity = (index: number, newQuantite: number) => {
+    if (newQuantite < 1) return;
     const item = cart[index];
     const newPieces = newQuantite * item.quantite_par_unite_base;
     if (newPieces > item.quantite_stock) {
@@ -327,14 +426,33 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
       return;
     }
     const newCart = [...cart];
-    newCart[index] = { ...newCart[index], quantite: newQuantite, total: newQuantite * item.prix_vente };
+    newCart[index] = { ...newCart[index], quantite: newQuantite, total: newQuantite * newCart[index].prix_vente };
     setCart(newCart);
   };
 
+  // Modifier le prix
+  const updatePrix = (index: number, newPrix: number) => {
+    if (newPrix < 0) return;
+    const newCart = [...cart];
+    newCart[index] = { ...newCart[index], prix_vente: newPrix, total: newCart[index].quantite * newPrix };
+    setCart(newCart);
+    setModifierPrix({ index: null, prix: 0 });
+  };
+
+  // Ouvrir le modal de modification de prix
+  const openPrixModal = (index: number) => {
+    setModifierPrix({
+      index: index,
+      prix: cart[index].prix_vente
+    });
+  };
+
+  // Supprimer du panier
   const removeFromCart = (index: number) => {
     setCart(cart.filter((_, i) => i !== index));
   };
 
+  // Soumettre la vente
   const handleSubmit = async () => {
     if (cart.length === 0) {
       notifications.show({ title: 'Erreur', message: 'Ajoutez au moins un produit', color: 'red' });
@@ -374,8 +492,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         idConditionnement: item.idConditionnement || null,
         libelle_conditionnement: item.libelle_conditionnement,
         prix_unitaire_ht: item.prix_vente,
-        prix_unitaire_ttc: item.prix_vente * 1.18,
-        tva_taux: 18,
+        prix_unitaire_ttc: tvaActif ? item.prix_vente * (1 + tauxTVA / 100) : item.prix_vente,
+        tva_taux: tvaActif ? tauxTVA : 0,
         remise_percent: 0
       }));
 
@@ -386,8 +504,8 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
         const quantiteEnPieces = item.quantite * item.quantite_par_unite_base;
         const result = await stockService.sortieStock({
           idProduit: item.idProduit,
-          quantite: quantiteEnPieces, // toujours en pièces
-          prix_vente: item.prix_vente / item.quantite_par_unite_base, // prix unitaire pièce
+          quantite: quantiteEnPieces,
+          prix_vente: item.prix_vente / item.quantite_par_unite_base,
           reference: `VENTE-${codeVente}`,
           notes: `Vente au comptoir - ${codeVente} - ${item.quantite} ${item.libelle_conditionnement}(s) - Client: ${sale.nom_prenom}`
         });
@@ -402,14 +520,16 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
           montant: totalTTC,
           idVente: createdSaleId,
           codeVente: codeVente,
-          clientNom: sale.nom_prenom
+          clientNom: sale.nom_prenom,
+          modePaiement: (moyenPaiement?.categorie || 'ESPECES'),
+          modePaiementDetail: moyenPaiement?.libelle,
         });
       } catch (journalError) {
         console.error('Erreur journal de caisse:', journalError);
       }
 
       notifications.show({
-        title: 'Vente enregistrée',
+        title: '✅ Vente enregistrée',
         message: `${cart.length} article(s) — Total: ${totalTTC.toLocaleString()} F — Bénéfice: ${beneficeTotal.toLocaleString()} F`,
         color: 'green',
         autoClose: 5000
@@ -420,7 +540,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
     } catch (error: any) {
       console.error('Erreur lors de la vente:', error);
       notifications.show({
-        title: 'Erreur',
+        title: '❌ Erreur',
         message: error?.message || 'Erreur lors de l\'enregistrement de la vente',
         color: 'red',
       });
@@ -444,11 +564,10 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
   return (
     <>
       <Box p="md">
+        <LoadingOverlay visible={submitting || productsLoading} />
+
         {/* En-tête */}
-        <Box mb="md" p="md" style={{
-          background: 'linear-gradient(135deg, #0a1628 0%, #122040 60%, #1b365d 100%)',
-          borderRadius: 12,
-        }}>
+        <Box mb="md" p="md" className="tk-page-tools tk-page-tools--fiche">
           <Group justify="space-between" wrap="nowrap">
             <Button
               variant="subtle"
@@ -476,7 +595,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
 
         <Stack gap="md">
           {/* Code vente */}
-          <Card withBorder p="sm" radius="md">
+          <Card className="tk-form-section" withBorder p="sm" radius="md">
             <TextInput
               label="Code vente"
               value={codeVente}
@@ -488,7 +607,7 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
           </Card>
 
           {/* Client */}
-          <Card withBorder p="sm" radius="md">
+          <Card className="tk-form-section" withBorder p="sm" radius="md">
             <Group justify="space-between" mb="sm">
               <Title order={5}>Informations client (optionnel)</Title>
               <Checkbox
@@ -553,17 +672,55 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
             )}
           </Card>
 
+          {/* Informations TVA */}
+          <Card className="tk-form-section" withBorder p="sm" radius="md" bg={tvaActif ? 'transparent' : '#fff8e1'}>
+            <Group justify="space-between">
+              <Group>
+                <Text size="sm" fw={500}>
+                  {tvaActif ? `TVA ${tauxTVA}% activée` : 'TVA désactivée'}
+                </Text>
+                <Badge color={tvaActif ? 'blue' : 'yellow'} size="sm">
+                  {tvaActif ? 'Facturée' : 'Non facturée'}
+                </Badge>
+              </Group>
+              <Tooltip label={tvaActif ? 'Désactiver la TVA' : 'Activer la TVA'}>
+                <ActionIcon
+                  color={tvaActif ? 'red' : 'green'}
+                  onClick={() => setTvaActif(!tvaActif)}
+                  variant="outline"
+                >
+                  {tvaActif ? <IconX size={16} /> : <IconCheck size={16} />}
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            {!tvaActif && (
+              <Text size="xs" c="dimmed" mt={5}>
+                ⚠️ La TVA est désactivée. Les prix sont affichés hors taxe.
+              </Text>
+            )}
+          </Card>
+
           {/* Produits */}
-          <Card withBorder p="sm" radius="md">
+          <Card className="tk-form-section" withBorder p="sm" radius="md">
             <Title order={5} mb="sm">Produits disponibles en stock</Title>
             <Group mb="sm" gap="xs">
               <TextInput
-                placeholder="Rechercher un produit..."
+                placeholder="Rechercher (nom, code, référence)..."
                 value={searchTerm}
                 onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 style={{ flex: 1 }}
                 leftSection={<IconSearch size={14} />}
                 size="sm"
+              />
+              <Select
+                placeholder="Catégorie"
+                data={[...new Set(products.map(p => p.categorie).filter(Boolean))].map((c) => ({ value: c as string, label: c as string }))}
+                value={venteCategorie}
+                onChange={(v) => { setVenteCategorie(v); setCurrentPage(1); }}
+                searchable
+                clearable
+                size="sm"
+                w={190}
               />
               <Tooltip label="Actualiser">
                 <ActionIcon
@@ -615,9 +772,19 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                             <Text size="xs" c="dimmed">{product.code_produit}</Text>
                           </Table.Td>
                           <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                            <Badge variant="light" size="xs" color="grape">
-                              {product.categorie || 'Non catégorisé'}
-                            </Badge>
+                            <Group gap="xs">
+                              <Badge variant="light" size="xs" color="grape">
+                                {product.categorie || 'Non catégorisé'}
+                              </Badge>
+                              <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => setShowAddCategorie(true)}
+                              >
+                                <IconPlus size={12} />
+                              </ActionIcon>
+                            </Group>
                           </Table.Td>
                           <Table.Td style={{ minWidth: 200 }}>
                             {hasConds ? (
@@ -644,23 +811,19 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                             )}
                           </Table.Td>
                           <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                            <Badge
-                              color={product.qte_stock <= 0 ? 'red' : product.qte_stock <= (product.seuil_alerte || 0) ? 'orange' : 'green'}
-                              variant="light"
-                              size="xs"
-                            >
-                              {product.qte_stock} {product.unite_base || 'pièce'}(s)
+                            <Badge color={product.qte_stock > 10 ? 'green' : 'orange'} size="sm">
+                              {product.qte_stock} {product.unite_base || 'pièces'}
                             </Badge>
                           </Table.Td>
                           <Table.Td>
-                            <Button
-                              size="xs"
-                              leftSection={<IconPlus size={12} />}
+                            <ActionIcon
+                              color="blue"
                               onClick={() => addToCart(product)}
-                              disabled={product.qte_stock <= 0}
+                              variant="filled"
+                              size="sm"
                             >
-                              Ajouter
-                            </Button>
+                              <IconPlus size={14} />
+                            </ActionIcon>
                           </Table.Td>
                         </Table.Tr>
                       );
@@ -670,42 +833,39 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
               </ScrollArea>
             )}
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <Group justify="center" mt="sm">
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(p => p - 1)}
-                >
-                  ← Précédent
-                </Button>
-                <Text size="xs" c="dimmed">
-                  Page {currentPage} / {totalPages}
-                </Text>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(p => p + 1)}
-                >
-                  Suivant →
-                </Button>
+                <Pagination
+                  total={totalPages}
+                  value={currentPage}
+                  onChange={setCurrentPage}
+                  size="sm"
+                />
               </Group>
             )}
           </Card>
 
           {/* Panier */}
           {cart.length > 0 && (
-            <Card withBorder p="sm" radius="md">
-              <Title order={5} mb="sm">Panier ({cart.length} article(s))</Title>
+            <Card className="tk-form-section" withBorder p="sm" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Title order={5}>Panier ({cart.length} article{cart.length > 1 ? 's' : ''})</Title>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  color="red"
+                  onClick={() => setCart([])}
+                >
+                  Vider le panier
+                </Button>
+              </Group>
+
               <ScrollArea h={200}>
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>Produit</Table.Th>
-                      <Table.Th>Unité</Table.Th>
+                      <Table.Th>Conditionnement</Table.Th>
                       <Table.Th>Qté</Table.Th>
                       <Table.Th>Prix unit.</Table.Th>
                       <Table.Th>Total</Table.Th>
@@ -714,13 +874,13 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                   </Table.Thead>
                   <Table.Tbody>
                     {cart.map((item, index) => (
-                      <Table.Tr key={`${item.idProduit}-${String(item.idConditionnement)}`}>
+                      <Table.Tr key={index}>
                         <Table.Td>
                           <Text size="sm" fw={500}>{item.designation}</Text>
                           <Text size="xs" c="dimmed">{item.code_produit}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Badge variant="light" size="xs">
+                          <Badge size="xs" variant="light">
                             {item.libelle_conditionnement}
                           </Badge>
                         </Table.Td>
@@ -731,17 +891,32 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                             min={1}
                             max={Math.floor(item.quantite_stock / item.quantite_par_unite_base)}
                             size="xs"
-                            style={{ width: 80 }}
+                            style={{ width: 70 }}
                           />
                         </Table.Td>
-                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                          <Text size="sm">{formatMontant(item.prix_vente)} F</Text>
-                        </Table.Td>
-                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                          <Text size="sm" fw={600} c="blue">{formatMontant(item.total)} F</Text>
+                        <Table.Td>
+                          <Group gap="xs">
+                            <Text size="sm">{formatMontant(item.prix_vente)} F</Text>
+                            <ActionIcon
+                              size="xs"
+                              color="blue"
+                              variant="subtle"
+                              onClick={() => openPrixModal(index)}
+                            >
+                              <IconEdit size={12} />
+                            </ActionIcon>
+                          </Group>
                         </Table.Td>
                         <Table.Td>
-                          <ActionIcon color="red" variant="subtle" size="sm" onClick={() => removeFromCart(index)}>
+                          <Text fw={600} size="sm">{formatMontant(item.total)} F</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <ActionIcon
+                            color="red"
+                            onClick={() => removeFromCart(index)}
+                            size="sm"
+                            variant="subtle"
+                          >
                             <IconTrash size={14} />
                           </ActionIcon>
                         </Table.Td>
@@ -750,54 +925,157 @@ export const FormulaireVente: React.FC<FormulaireVenteProps> = ({ onSuccess, onC
                   </Table.Tbody>
                 </Table>
               </ScrollArea>
-            </Card>
-          )}
 
-          {/* Totaux + Soumettre */}
-          {cart.length > 0 && (
-            <Card withBorder p="sm" radius="md">
-              <Group justify="space-between" mb="xs">
-                <Text size="sm" c="dimmed">Total HT</Text>
-                <Text size="sm">{formatMontant(totalHT)} F</Text>
-              </Group>
-              <Group justify="space-between" mb="xs">
-                <Text size="sm" c="dimmed">TVA (18%)</Text>
-                <Text size="sm">{formatMontant(tva)} F</Text>
-              </Group>
-              <Divider mb="xs" />
-              <Group justify="space-between" mb="md">
-                <Text fw={700} size="lg">Total TTC</Text>
-                <Text fw={700} size="lg" c="blue">{formatMontant(totalTTC)} F</Text>
-              </Group>
-              <Group justify="flex-end">
-                <Button variant="outline" onClick={onCancel}>
-                  Annuler
-                </Button>
-                <Button
-                  leftSection={<IconShoppingCart size={16} />}
-                  onClick={handleSubmit}
-                  loading={submitting || loading}
-                  disabled={cart.length === 0}
-                >
-                  Enregistrer la vente
-                </Button>
-              </Group>
+              <Divider my="sm" />
+
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm">Total HT</Text>
+                  <Text fw={600}>{formatMontant(totalHT)} F</Text>
+                </Group>
+                {tvaActif && (
+                  <Group justify="space-between">
+                    <Text size="sm">TVA ({tauxTVA}%)</Text>
+                    <Text fw={600}>{formatMontant(tva)} F</Text>
+                  </Group>
+                )}
+                <Group justify="space-between">
+                  <Text size="lg" fw={700}>Total {tvaActif ? 'TTC' : 'HT'}</Text>
+                  <Text size="lg" fw={700} c="blue">
+                    {formatMontant(totalTTC)} F
+                  </Text>
+                </Group>
+
+                {/* Mode de paiement : distingue automatiquement, au point de
+                    caisse, les espèces présentes dans le tiroir des transferts. */}
+                <SelecteurModePaiement
+                  value={moyenPaiement?.code}
+                  onChange={setMoyenPaiement}
+                  size="sm"
+                  withAsterisk
+                />
+
+                <Group justify="flex-end" mt="md">
+                  <Button variant="light" onClick={onCancel}>
+                    Annuler
+                  </Button>
+                  <Button
+                    onClick={handleSubmit}
+                    loading={submitting}
+                    disabled={cart.length === 0}
+                    leftSection={<IconShoppingCart size={16} />}
+                  >
+                    Valider la vente
+                  </Button>
+                </Group>
+              </Stack>
             </Card>
           )}
         </Stack>
       </Box>
 
-      {/* Modal nouveau client */}
-      {clientModalOpened && (
-        <FormulaireClient
-          opened={clientModalOpened}
-          onClose={() => setClientModalOpened(false)}
-          onSuccess={() => {
-            setClientModalOpened(false);
-            refreshClients();
-          }}
-        />
-      )}
+      {/* Modal d'ajout de catégorie */}
+      <Modal
+        opened={showAddCategorie}
+        onClose={() => {
+          setShowAddCategorie(false);
+          setNewCategorie({ nom: '', description: '' });
+        }}
+        title="Ajouter une nouvelle catégorie"
+        size="sm"
+        centered
+      >
+        <Stack>
+          <TextInput
+            label="Nom de la catégorie *"
+            placeholder="Ex: Accessoires, Électronique..."
+            value={newCategorie.nom}
+            onChange={(e) => setNewCategorie({ ...newCategorie, nom: e.target.value })}
+            required
+          />
+          <TextInput
+            label="Description"
+            placeholder="Description de la catégorie (optionnel)"
+            value={newCategorie.description}
+            onChange={(e) => setNewCategorie({ ...newCategorie, description: e.target.value })}
+          />
+          <Group justify="flex-end">
+            <Button
+              variant="light"
+              onClick={() => {
+                setShowAddCategorie(false);
+                setNewCategorie({ nom: '', description: '' });
+              }}
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={handleAddCategorie}
+              loading={addingCategorie}
+              leftSection={<IconCategory size={16} />}
+            >
+              Ajouter la catégorie
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Modal de modification de prix */}
+      <Modal
+        opened={modifierPrix.index !== null}
+        onClose={() => setModifierPrix({ index: null, prix: 0 })}
+        title="Modifier le prix unitaire"
+        size="sm"
+        centered
+      >
+        {modifierPrix.index !== null && (
+          <Stack>
+            <Text size="sm" c="dimmed">
+              Produit: <strong>{cart[modifierPrix.index]?.designation}</strong>
+            </Text>
+            <Text size="sm" c="dimmed">
+              Conditionnement: <strong>{cart[modifierPrix.index]?.libelle_conditionnement}</strong>
+            </Text>
+            <NumberInput
+              label="Nouveau prix unitaire"
+              value={modifierPrix.prix}
+              onChange={(val) => setModifierPrix({ ...modifierPrix, prix: Number(val) || 0 })}
+              min={0}
+              step={100}
+              leftSection="FCFA"
+              autoFocus
+            />
+            <Group justify="flex-end">
+              <Button
+                variant="light"
+                onClick={() => setModifierPrix({ index: null, prix: 0 })}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={() => {
+                  if (modifierPrix.index !== null) {
+                    updatePrix(modifierPrix.index, modifierPrix.prix);
+                  }
+                }}
+                color="blue"
+              >
+                Appliquer
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      {/* Modal d'ajout client */}
+      <FormulaireClient
+        opened={clientModalOpened}
+        onClose={() => setClientModalOpened(false)}
+        onSuccess={() => {
+          refreshClients();
+          setClientModalOpened(false);
+        }}
+      />
     </>
   );
 };

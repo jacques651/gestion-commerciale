@@ -2,18 +2,12 @@
 import React, { useState, useEffect } from "react";
 import {
   Stack,
-  Card,
-  Title,
   Text,
   Button,
   TextInput,
   PasswordInput,
   Alert,
-  Box,
   LoadingOverlay,
-  ThemeIcon,
-  Center,
-  Divider,
 } from '@mantine/core';
 import {
   IconLogin,
@@ -22,8 +16,8 @@ import {
   IconLock,
   IconUserCircle,
   IconAlertCircle,
-  IconBuildingStore,
 } from '@tabler/icons-react';
+import { Store, ShoppingCart, Warehouse, Banknote } from 'lucide-react';
 import { getDb } from "../../database/db";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -139,108 +133,70 @@ const Login: React.FC = () => {
     }
   };
 
+  const points = [
+    { icon: ShoppingCart, text: 'Commandes, ventes et factures clients et revendeurs' },
+    { icon: Warehouse, text: 'Suivi du stock, des décomptes et des réapprovisionnements' },
+    { icon: Banknote, text: 'Caisse, règlements et crédits en temps réel' },
+  ];
+
+  const brandPanel = (
+    <aside className="tk-login-side">
+      <div className="tk-login-crest"><Store size={34} /></div>
+      <div className="tk-login-brand">GESTION PRO</div>
+      <div className="tk-login-eyebrow">GESTION COMMERCIALE</div>
+      <ul className="tk-login-points">
+        {points.map(({ icon: Icon, text }, i) => (
+          <li key={text} className="tk-login-point" data-active={i === 0 || undefined}>
+            <span className="tk-login-point-icon"><Icon size={18} /></span>
+            <span>{text}</span>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+
   if (isFirstUser === null) {
     return (
-      <Box style={{
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0a1628 0%, #122040 50%, #1b365d 100%)',
-      }}>
-        <Card withBorder radius="xl" p="xl" pos="relative" style={{ minWidth: 340 }}>
-          <LoadingOverlay visible={true} />
-          <Text ta="center" c="dimmed">Chargement...</Text>
-        </Card>
-      </Box>
+      <div className="tk-login">
+        <div className="tk-login-card">
+          {brandPanel}
+          <section className="tk-login-main" style={{ position: 'relative', minHeight: 320 }}>
+            <LoadingOverlay visible={true} />
+            <Text ta="center" className="tk-login-sub">Chargement...</Text>
+          </section>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Box style={{
-      height: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'linear-gradient(135deg, #0a1628 0%, #122040 50%, #1b365d 100%)',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* Cercles décoratifs en arrière-plan */}
-      <Box style={{
-        position: 'absolute',
-        width: 500,
-        height: 500,
-        borderRadius: '50%',
-        background: 'rgba(255,255,255,0.03)',
-        top: -100,
-        right: -100,
-        pointerEvents: 'none',
-      }} />
-      <Box style={{
-        position: 'absolute',
-        width: 300,
-        height: 300,
-        borderRadius: '50%',
-        background: 'rgba(255,255,255,0.03)',
-        bottom: -50,
-        left: -50,
-        pointerEvents: 'none',
-      }} />
+    <div className="tk-login">
+      <div className="tk-login-card">
+        {brandPanel}
 
-      <Box style={{ maxWidth: 420, width: '100%', margin: '0 auto', padding: '0 16px', position: 'relative', zIndex: 1 }}>
-        {/* Logo + titre au-dessus de la carte */}
-        <Center mb="xl">
-          <Stack align="center" gap="xs">
-            <ThemeIcon
-              size={64}
-              radius="xl"
-              variant="gradient"
-              gradient={{ from: '#1b365d', to: '#2563eb' }}
-              style={{
-                boxShadow: '0 8px 32px rgba(37,99,235,0.4)',
-                border: '2px solid rgba(255,255,255,0.15)',
-              }}
-            >
-              <IconBuildingStore size={32} />
-            </ThemeIcon>
-            <Text fw={800} size="xl" c="white" ta="center" style={{ letterSpacing: -0.5 }}>
-              Gestion Commerciale
-            </Text>
-            <Text size="xs" c="rgba(255,255,255,0.45)" ta="center">
-              Système de gestion intégré
-            </Text>
-          </Stack>
-        </Center>
+        <section className="tk-login-main">
+          <div className="tk-login-logo">
+            <Store size={20} />
+            <span>GESTION PRO</span>
+          </div>
+          <div className="tk-login-rule" />
 
-        {/* Carte de connexion */}
-        <Card
-          radius="xl"
-          p="xl"
-          style={{
-            background: 'rgba(255,255,255,0.97)',
-            backdropFilter: 'blur(20px)',
-            boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
-          }}
-        >
-          <Stack gap="xs" mb="lg">
-            <Title order={3} c="#0a1628" fw={700}>
-              {isFirstUser ? "Configuration initiale" : "Connexion"}
-            </Title>
-            <Text size="sm" c="dimmed">
-              {isFirstUser
-                ? "Créez le compte administrateur pour démarrer"
-                : "Entrez vos identifiants pour accéder à l'application"}
-            </Text>
-          </Stack>
+          <h1 className="tk-login-title">
+            {isFirstUser ? "Configuration initiale" : "Connexion"}
+          </h1>
+          <Text className="tk-login-sub">
+            {isFirstUser
+              ? "Créez le compte administrateur pour démarrer"
+              : "Entrez vos identifiants pour accéder à l'application"}
+          </Text>
 
           {error && (
-            <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light" mb="md" radius="md">
+            <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light" mt="md" radius="md" className="tk-login-alert">
               {error}
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="tk-login-form">
             <Stack gap="md">
               {isFirstUser && (
                 <TextInput
@@ -285,10 +241,8 @@ const Login: React.FC = () => {
                 size="md"
                 fullWidth
                 radius="md"
-                variant="gradient"
-                gradient={{ from: '#0a1628', to: '#2563eb' }}
                 leftSection={isFirstUser ? <IconUserPlus size={18} /> : <IconLogin size={18} />}
-                style={{ marginTop: 4, boxShadow: '0 4px 16px rgba(37,99,235,0.35)' }}
+                style={{ marginTop: 4 }}
               >
                 {isFirstUser ? "Créer le compte administrateur" : "Se connecter"}
               </Button>
@@ -296,24 +250,17 @@ const Login: React.FC = () => {
           </form>
 
           {!isFirstUser && (
-            <>
-              <Divider my="md" label="Options" labelPosition="center" />
-              <Button
-                variant="subtle"
-                color="gray"
-                size="xs"
-                fullWidth
-                onClick={handleReset}
-              >
-                Réinitialiser les utilisateurs
-              </Button>
-            </>
+            <button type="button" className="tk-login-link" onClick={handleReset}>
+              Réinitialiser les utilisateurs
+            </button>
           )}
-        </Card>
-      </Box>
+
+          <div className="tk-login-version">Gestion Pro v1.0</div>
+        </section>
+      </div>
 
       <LoadingOverlay visible={loading} />
-    </Box>
+    </div>
   );
 };
 

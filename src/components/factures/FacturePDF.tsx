@@ -111,9 +111,15 @@ const styles = StyleSheet.create({
 interface FacturePDFProps {
   facture: any;
   config?: any;
+  /** TVA activée dans les paramètres (source : tvaService) */
+  tvaActive?: boolean;
+  /** Taux de TVA en pourcentage */
+  tauxTVA?: number;
 }
 
-export const FacturePDF: React.FC<FacturePDFProps> = ({ facture, config }) => {
+export const FacturePDF: React.FC<FacturePDFProps> = ({ facture, config, tvaActive = true, tauxTVA = 18 }) => {
+  // Coefficient TVA effectif : 0 si la TVA est désactivée dans les paramètres.
+  const coefTVA = tvaActive ? tauxTVA / 100 : 0;
   const companyConfig = config || {
     nom_atelier: 'MON ENTREPRISE',
     telephone: '+225 27 20 00 00 00',
@@ -166,34 +172,38 @@ export const FacturePDF: React.FC<FacturePDFProps> = ({ facture, config }) => {
           <View style={styles.tableHeader}>
             <Text style={styles.col1}>Désignation</Text>
             <Text style={styles.col2}>Qté</Text>
-            <Text style={styles.col3}>Prix HT</Text>
+            <Text style={styles.col3}>{tvaActive ? 'Prix HT' : 'Prix'}</Text>
             <Text style={styles.col4}>TVA</Text>
-            <Text style={styles.col5}>Total TTC</Text>
+            <Text style={styles.col5}>{tvaActive ? 'Total TTC' : 'Total'}</Text>
           </View>
           {facture.details?.map((detail: any, index: number) => (
             <View key={index} style={styles.tableRow}>
               <Text style={styles.col1}>{detail.produit_nom || detail.designation}</Text>
               <Text style={styles.col2}>{detail.qte_commande || detail.quantite}</Text>
               <Text style={styles.col3}>{formatCurrency(detail.prix_unitaire_vente || detail.prix_unitaire)}</Text>
-              <Text style={styles.col4}>18%</Text>
-              <Text style={styles.col5}>{formatCurrency((detail.prix_unitaire_vente || detail.prix_unitaire) * (detail.qte_commande || detail.quantite) * 1.18)}</Text>
+              <Text style={styles.col4}>{tvaActive ? `${tauxTVA}%` : '—'}</Text>
+              <Text style={styles.col5}>{formatCurrency((detail.prix_unitaire_vente || detail.prix_unitaire) * (detail.qte_commande || detail.quantite) * (1 + coefTVA))}</Text>
             </View>
           ))}
         </View>
 
         {/* Totaux */}
         <View style={styles.totalSection}>
+          {tvaActive && (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total HT:</Text>
+                <Text style={styles.totalValue}>{formatCurrency(facture.montant_ht)}</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>{`TVA (${tauxTVA}%):`}</Text>
+                <Text style={styles.totalValue}>{formatCurrency(facture.montant_ttc - facture.montant_ht)}</Text>
+              </View>
+            </>
+          )}
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total HT:</Text>
-            <Text style={styles.totalValue}>{formatCurrency(facture.montant_ht)}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>TVA (18%):</Text>
-            <Text style={styles.totalValue}>{formatCurrency(facture.montant_ttc - facture.montant_ht)}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={[styles.totalLabel, { fontWeight: 'bold', fontSize: 12 }]}>Total TTC:</Text>
-            <Text style={[styles.totalValue, { fontWeight: 'bold', fontSize: 12 }]}>{formatCurrency(facture.montant_ttc)}</Text>
+            <Text style={[styles.totalLabel, { fontWeight: 'bold', fontSize: 12 }]}>{tvaActive ? 'Total TTC:' : 'Total:'}</Text>
+            <Text style={[styles.totalValue, { fontWeight: 'bold', fontSize: 12 }]}>{formatCurrency(tvaActive ? facture.montant_ttc : (facture.montant_ht ?? facture.montant_ttc))}</Text>
           </View>
         </View>
 

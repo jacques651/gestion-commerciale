@@ -21,7 +21,7 @@ export const reglementRepository = {
   getAll: async (): Promise<Reglement[]> => {
     const db = await getDb();
     const reglements = await db.select<any[]>(`
-      SELECT r.*, c.nom_complet as client_nom
+      SELECT r.*, c.NomComplet as client_nom
       FROM reglements r
       LEFT JOIN clients c ON r.idClient = c.idClient
       ORDER BY r.date_reglement DESC
@@ -92,7 +92,7 @@ export const reglementRepository = {
   getByFactureId: async (idFacture: number): Promise<Reglement[]> => {
     const db = await getDb();
     const reglements = await db.select<any[]>(`
-      SELECT * FROM reglements WHERE idFacture = ? ORDER BY date_reglement DESC
+      SELECT * FROM reglements WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE' ORDER BY date_reglement DESC
     `, [idFacture]);
     return reglements as Reglement[];
   },

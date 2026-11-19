@@ -14,7 +14,7 @@ import {
   IconCash,
   IconAlertCircle, IconFileInvoice,
   IconCheck, IconX, IconClock,
-  IconInfoCircle, IconListDetails, IconReceipt
+  IconInfoCircle, IconListDetails, IconReceipt, IconBan
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +22,9 @@ import { getDb } from '../../database/db';
 import { factureRepository } from '../../database/repositories/factureRepository';
 import { factureRevendeurRepository } from '../../database/repositories/factureRevendeurRepository';
 import { PageHeader } from '../common/PageHeader';
+import { annulationService } from '../../services/annulationService';
+import { useAuth } from '../../contexts/AuthContext';
+import TkFilters from '../TkFilters';
 
 interface Commande {
   idCommande: number;
@@ -73,6 +76,7 @@ const statutLabels: Record<string, string> = {
 
 export const ListeCommandes: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [commandes, setCommandes] = useState<Commande[]>([]);
   const [filteredCommandes, setFilteredCommandes] = useState<Commande[]>([]);
   const [loading, setLoading] = useState(true);
@@ -407,7 +411,7 @@ export const ListeCommandes: React.FC = () => {
         if (facture.type === 'standard') {
           regs = await db.select<any[]>(`
             SELECT idReglement, montant, date_reglement, mode_reglement 
-            FROM reglements WHERE idFacture = ?
+            FROM reglements WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
           `, [facture.id]);
         } else {
           regs = await db.select<any[]>(`
@@ -529,101 +533,49 @@ export const ListeCommandes: React.FC = () => {
   };
 
   // ✅ Suppression en cascade — version corrigée
+  /**
+   * ANNULATION de la commande (remplace l'ancienne suppression définitive).
+   * Rien n'est effacé : la commande, sa facture et ses règlements sont
+   * marqués « annulés », le stock est réintégré et la caisse contrepassée.
+   * L'historique reste donc consultable et auditable.
+   */
   const handleDelete = async () => {
     if (!commandeToDelete) return;
     setDeleting(true);
 
     try {
-      const db = await getDb();
-
-      if (deleteImpactDetails?.hasPaiement) {
-        notifications.show({
-          title: '❌ Suppression impossible',
-          message: 'Des paiements ou des décomptes soldés existent pour cette commande.',
-          color: 'red'
-        });
-        setDeleteModalOpened(false);
-        setCommandeToDelete(null);
-        setDeleteImpactDetails(null);
-        setDeleting(false);
-        return;
-      }
-
-      // 1. Lire les détails AVANT toute suppression (pour restaurer stocks)
-      const details = await db.select<any[]>(
-        'SELECT idProduit, qte_commande FROM commande_details WHERE idCommande = ?',
-        [commandeToDelete.idCommande]
+      const resultat = await annulationService.annulerCommande(
+        commandeToDelete.idCommande,
+        user?.nom || undefined
       );
 
-      // 2. Règlements + détails + factures
-      for (const facture of deleteImpactDetails?.factures || []) {
-        if (facture.type === 'standard') {
-          await db.execute('DELETE FROM reglements WHERE idFacture = ?', [facture.id]);
-          for (const tbl of ['facture_details', 'factures_details', 'commande_facture_details']) {
-            try { await db.execute(`DELETE FROM ${tbl} WHERE idFacture = ?`, [facture.id]); } catch { }
-          }
-          await db.execute('DELETE FROM factures WHERE idFacture = ?', [facture.id]);
-        } else {
-          await db.execute('DELETE FROM reglements_revendeur WHERE idFactureRevendeur = ?', [facture.id]);
-          for (const tbl of ['factures_revendeur_details', 'facture_revendeur_details']) {
-            try { await db.execute(`DELETE FROM ${tbl} WHERE idFactureRevendeur = ?`, [facture.id]); } catch { }
-          }
-          await db.execute('DELETE FROM factures_revendeur WHERE idFactureRevendeur = ?', [facture.id]);
-        }
+      const details: string[] = [];
+      if (resultat.lignesStockReintegrees > 0) {
+        details.push(`${resultat.lignesStockReintegrees} produit(s) réintégré(s) en stock`);
       }
-
-      // 3. Décomptes liés (règlements → mouvements → factures_appro → détails → décompte)
-      for (const dec of deleteImpactDetails?.decomptes || []) {
-        try { await db.execute('DELETE FROM reglements_decomptes WHERE idDecompte = ?', [dec.idDecompte]); } catch { }
-        try { await db.execute('DELETE FROM mouvements_revendeur WHERE idDecompte = ?', [dec.idDecompte]); } catch { }
-        try { await db.execute('DELETE FROM factures_approvisionnement WHERE idDecompte = ?', [dec.idDecompte]); } catch { }
-        await db.execute('DELETE FROM decompte_details WHERE idDecompte = ?', [dec.idDecompte]);
-        await db.execute('DELETE FROM decomptes WHERE idDecompte = ?', [dec.idDecompte]);
-      }
-
-      // 4. Restaurer stock principal
-      for (const d of details) {
-        await db.execute(
-          'UPDATE products SET qte_stock = qte_stock + ? WHERE idProduit = ?',
-          [d.qte_commande, d.idProduit]
+      if (resultat.codeFacture) details.push(`facture ${resultat.codeFacture} annulée`);
+      if (resultat.reglementsAnnules > 0) {
+        details.push(
+          `${resultat.reglementsAnnules} règlement(s) annulé(s) — ` +
+          `${resultat.montantRembourse.toLocaleString('fr-FR')} F contrepassés en caisse`
         );
       }
-
-      // 5. Stock revendeur
-      if (commandeToDelete.type_commande === 'REVENDEUR') {
-        // Récupérer idClient directement depuis la DB pour être sûr
-        const cmdRow = await db.select<any[]>(
-          'SELECT idClient FROM commandes WHERE idCommande = ?',
-          [commandeToDelete.idCommande]
-        );
-        const idRevendeur = cmdRow.length > 0 ? cmdRow[0].idClient : commandeToDelete.idClient;
-
-        for (const d of details) {
-          await db.execute(
-            `UPDATE stock_revendeur
-             SET qte_stock = CASE WHEN qte_stock >= ? THEN qte_stock - ? ELSE 0 END
-             WHERE idRevendeur = ? AND idProduit = ?`,
-            [d.qte_commande, d.qte_commande, idRevendeur, d.idProduit]
-          );
-        }
-        try { await db.execute('DELETE FROM mouvements_revendeur WHERE idCommande = ?', [commandeToDelete.idCommande]); } catch { }
-      }
-
-      // 6. Détails commande
-      await db.execute('DELETE FROM commande_details WHERE idCommande = ?', [commandeToDelete.idCommande]);
-
-      // 7. Mouvements stock
-      try { await db.execute('DELETE FROM mouvements_stock WHERE reference = ?', [commandeToDelete.code_commande]); } catch { }
-
-      // 8. La commande
-      await db.execute('DELETE FROM commandes WHERE idCommande = ?', [commandeToDelete.idCommande]);
 
       notifications.show({
-        title: '✅ Succès',
-        message: `Commande ${commandeToDelete.code_commande} supprimée. ${details.length} produit(s) restauré(s) en stock.`,
-        color: 'green',
-        autoClose: 5000
+        title: 'Commande annulée',
+        message: `${commandeToDelete.code_commande} — ${details.join(' · ') || 'annulation enregistrée'}`,
+        color: 'orange',
+        autoClose: 8000
       });
+
+      if (resultat.avertissements.length > 0) {
+        notifications.show({
+          title: 'Points à vérifier',
+          message: resultat.avertissements.join(' · '),
+          color: 'yellow',
+          autoClose: 10000
+        });
+      }
 
       setDeleteModalOpened(false);
       setCommandeToDelete(null);
@@ -631,19 +583,13 @@ export const ListeCommandes: React.FC = () => {
       chargerCommandes();
 
     } catch (error: any) {
-      console.error('[DELETE] Erreur suppression:', error);
-
-      let msg = 'Impossible de supprimer la commande.';
+      console.error('[ANNULATION] Erreur:', error);
+      let msg = error?.message || "Impossible d'annuler la commande.";
       if (error?.message?.includes('database is locked')) {
         msg = '⚠️ Base de données verrouillée. Réessayez dans quelques instants.';
-      } else if (error?.message?.includes('FOREIGN KEY')) {
-        msg = `❌ Contrainte FK : ${error.message}`;
-      } else if (error?.message) {
-        msg = error.message;
       }
-
       notifications.show({
-        title: '❌ Erreur',
+        title: 'Erreur',
         message: msg,
         color: 'red',
         autoClose: 8000
@@ -705,6 +651,7 @@ export const ListeCommandes: React.FC = () => {
         />
 
         {/* FILTRES */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="sm">
           <Grid align="flex-end">
             <Grid.Col span={3}>
@@ -728,6 +675,7 @@ export const ListeCommandes: React.FC = () => {
                 value={typeFilter}
                 onChange={setTypeFilter}
                 clearable
+                searchable
                 size="xs"
               />
             </Grid.Col>
@@ -744,6 +692,7 @@ export const ListeCommandes: React.FC = () => {
                 value={statutFilter}
                 onChange={setStatutFilter}
                 clearable
+                searchable
                 size="xs"
               />
             </Grid.Col>
@@ -780,6 +729,7 @@ export const ListeCommandes: React.FC = () => {
             </Grid.Col>
           </Grid>
         </Card>
+        </TkFilters>
 
         {/* TABLEAU */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
@@ -810,15 +760,15 @@ export const ListeCommandes: React.FC = () => {
               <ScrollArea h={500} style={{ overflowX: 'auto' }}>
                 <Table striped highlightOnHover verticalSpacing="xs" style={{ minWidth: 900, tableLayout: 'fixed' }}>
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                      <Table.Th c="white" w={40} ta="center" style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
-                      <Table.Th c="white" w={140} style={{ whiteSpace: 'nowrap' }}>Code</Table.Th>
-                      <Table.Th c="white" w={180} style={{ whiteSpace: 'nowrap' }}>Client</Table.Th>
-                      <Table.Th c="white" w={100} style={{ whiteSpace: 'nowrap' }}>Type</Table.Th>
-                      <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
-                      <Table.Th c="white" w={120} ta="right" style={{ whiteSpace: 'nowrap' }}>Montant</Table.Th>
-                      <Table.Th c="white" w={110} ta="center" style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
-                      <Table.Th c="white" ta="center" w={200} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
+                    <Table.Tr>
+                      <Table.Th w={40} ta="center" style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
+                      <Table.Th w={140} style={{ whiteSpace: 'nowrap' }}>Code</Table.Th>
+                      <Table.Th w={180} style={{ whiteSpace: 'nowrap' }}>Client</Table.Th>
+                      <Table.Th w={100} style={{ whiteSpace: 'nowrap' }}>Type</Table.Th>
+                      <Table.Th w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
+                      <Table.Th w={120} ta="right" style={{ whiteSpace: 'nowrap' }}>Montant</Table.Th>
+                      <Table.Th w={110} ta="center" style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
+                      <Table.Th ta="center" w={200} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -909,15 +859,15 @@ export const ListeCommandes: React.FC = () => {
                                 </Tooltip>
                               )}
 
-                              <Tooltip label="Supprimer">
+                              <Tooltip label="Annuler la commande">
                                 <ActionIcon
                                   variant="light"
-                                  color="red"
+                                  color="orange"
                                   size="sm"
                                   onClick={() => analyzeDeleteImpact(commande)}
-                                  disabled={commande.statut === 'LIVREE'}
+                                  disabled={commande.statut === 'ANNULEE'}
                                 >
-                                  <IconTrash size={14} />
+                                  <IconBan size={14} />
                                 </ActionIcon>
                               </Tooltip>
                             </Group>
@@ -963,7 +913,7 @@ export const ListeCommandes: React.FC = () => {
         </Paper>
       </Stack>
 
-      {/* MODAL DE CONFIRMATION DE SUPPRESSION */}
+      {/* MODAL DE CONFIRMATION D'ANNULATION */}
       <Modal
         opened={deleteModalOpened}
         onClose={() => {
@@ -971,7 +921,7 @@ export const ListeCommandes: React.FC = () => {
           setCommandeToDelete(null);
           setDeleteImpactDetails(null);
         }}
-        title="⚠️ Suppression de commande"
+        title="⚠️ Annulation de commande"
         centered
         size="xl"
         styles={{
@@ -988,13 +938,14 @@ export const ListeCommandes: React.FC = () => {
         <Stack gap="md">
           <Alert
             icon={<IconAlertCircle size={24} />}
-            color="red"
-            title="⚠️ Attention - Action irréversible !"
+            color="orange"
+            title="⚠️ Annulation de la commande"
             variant="filled"
           >
             <Text size="sm" c="white">
-              Vous êtes sur le point de supprimer définitivement cette commande.
-              Cette action est irréversible et aura les conséquences suivantes :
+              Vous êtes sur le point d'annuler cette commande. Elle ne sera pas
+              supprimée : elle restera visible avec le statut « Annulée ».
+              Voici les conséquences :
             </Text>
           </Alert>
 
@@ -1033,7 +984,7 @@ export const ListeCommandes: React.FC = () => {
 
           {deleteImpactDetails && (
             <>
-              <Divider label="📊 Impact de la suppression" labelPosition="center" />
+              <Divider label="📊 Impact de l'annulation" labelPosition="center" />
 
               <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
                 <Paper p="sm" withBorder bg="blue.0">
@@ -1061,11 +1012,12 @@ export const ListeCommandes: React.FC = () => {
               </SimpleGrid>
 
               {deleteImpactDetails.hasPaiement && (
-                <Alert color="red" variant="light" icon={<IconAlertCircle size={16} />}>
-                  <Text size="sm" fw={600}>❌ Suppression impossible</Text>
+                <Alert color="orange" variant="light" icon={<IconAlertCircle size={16} />}>
+                  <Text size="sm" fw={600}>💰 Paiements déjà encaissés</Text>
                   <Text size="sm" c="dimmed">
-                    Des paiements ont déjà été effectués sur cette commande (règlements directs ou décomptes soldés).
-                    Vous ne pouvez pas supprimer une commande ayant fait l'objet de paiements.
+                    Des paiements ont été effectués sur cette commande. Ils seront
+                    annulés et une sortie de caisse compensatoire sera enregistrée
+                    pour chacun, afin que le solde revienne à sa valeur correcte.
                   </Text>
                   {deleteImpactDetails.reglements.length > 0 && (
                     <List size="xs" spacing={4} mt="xs">
@@ -1083,7 +1035,7 @@ export const ListeCommandes: React.FC = () => {
                 <Alert color="orange" variant="light" icon={<IconReceipt size={16} />}>
                   <Text size="sm" fw={600}>📄 Décomptes associés (non soldés)</Text>
                   <Text size="sm" c="dimmed">
-                    Des décomptes non soldés sont liés à cette commande. Ils seront supprimés automatiquement avec leurs détails.
+                    Des décomptes non soldés sont liés à cette commande. Vérifiez-les après l'annulation : ils ne sont pas modifiés automatiquement.
                   </Text>
                   {deleteImpactDetails.decomptes.length > 0 && (
                     <List size="xs" spacing={4} mt="xs">
@@ -1117,21 +1069,20 @@ export const ListeCommandes: React.FC = () => {
 
               <Alert color="orange" variant="light" icon={<IconInfoCircle size={16} />}>
                 <Stack gap={4}>
-                  <Text size="sm" fw={600}>Ce que la suppression va faire :</Text>
+                  <Text size="sm" fw={600}>Ce que l'annulation va faire :</Text>
                   <List size="xs" spacing={4}>
-                    <List.Item>✅ Restaurer les stocks des produits en magasin</List.Item>
-                    <List.Item>✅ Supprimer les mouvements de stock associés</List.Item>
+                    <List.Item>✅ Réintégrer les stocks des produits en magasin</List.Item>
                     {commandeToDelete?.type_commande === 'REVENDEUR' && (
-                      <List.Item>✅ Restaurer le stock du revendeur</List.Item>
+                      <List.Item>✅ Retirer les quantités du stock du revendeur</List.Item>
                     )}
-                    {deleteImpactDetails.hasFacture && !deleteImpactDetails.hasPaiement && (
-                      <List.Item>✅ Supprimer {deleteImpactDetails.factures.length} facture(s) sans paiement</List.Item>
+                    {deleteImpactDetails.hasFacture && (
+                      <List.Item>✅ Marquer {deleteImpactDetails.factures.length} facture(s) « Annulée »</List.Item>
                     )}
-                    {deleteImpactDetails.hasDecompte && !deleteImpactDetails.hasPaiement && (
-                      <List.Item>✅ Supprimer {deleteImpactDetails.decomptes.length} décompte(s) non soldé(s)</List.Item>
+                    {deleteImpactDetails.hasPaiement && (
+                      <List.Item>✅ Annuler les règlements et les contrepasser en caisse</List.Item>
                     )}
-                    <List.Item>✅ Supprimer les détails de la commande</List.Item>
-                    <List.Item>❌ Supprimer définitivement la commande</List.Item>
+                    <List.Item>✅ Marquer la commande « Annulée » — elle reste visible</List.Item>
+                    <List.Item>ℹ️ Aucune donnée n'est supprimée : l'historique est conservé</List.Item>
                   </List>
                 </Stack>
               </Alert>
@@ -1151,18 +1102,16 @@ export const ListeCommandes: React.FC = () => {
               disabled={deleting}
               leftSection={<IconX size={16} />}
             >
-              Annuler
+              Fermer
             </Button>
             <Button
-              color="red"
+              color="orange"
               onClick={handleDelete}
               loading={deleting}
-              leftSection={<IconTrash size={16} />}
-              disabled={deleting || deleteImpactDetails?.hasPaiement}
+              leftSection={<IconBan size={16} />}
+              disabled={deleting}
             >
-              {deleteImpactDetails?.hasPaiement
-                ? '❌ Suppression impossible'
-                : '⚠️ Confirmer la suppression'}
+              ⚠️ Confirmer l'annulation
             </Button>
           </Group>
         </Stack>

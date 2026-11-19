@@ -144,7 +144,7 @@ export default function PrintRecuDecompte() {
             qte_decompte: qteDecompte,
             prix_achat: detail.prix_achat || 0,
             prix_vente: detail.prix_vente || 0,
-            commission_pourcentage: detail.commission_pourcentage || 60,
+            commission_pourcentage: detail.commission_pourcentage ?? 60,
             code_produit: detail.code_produit || '',
             categorie: detail.categorie || 'Catégorie inconnue',
             unite_base: detail.unite_base || 'Unité inconnue',

@@ -13,14 +13,18 @@ import {
   IconSearch, IconRefresh, IconShoppingBag,
   IconCurrencyFrank,
   IconFileInvoice, IconEye, IconReceipt, IconPlus,
-  IconX, IconTruck, IconCash, IconTrash,
+  IconX, IconTruck, IconCash, IconTrash, IconBan,
   IconList, IconMoneybag
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
+import { useAuth } from '../../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
 import { FormulaireCommande } from './FormulaireCommande';
 import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import { useCommandes } from '../../hooks/useCommandes';
+import { annulationService } from '../../services/annulationService';
+import TkFilters from '../TkFilters';
 
 interface CommandeStandard {
   idCommande: number;
@@ -65,7 +69,9 @@ const formatDateCustom = (dateStr: string): string => {
 
 export const ListeCommandeStandard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   useCommandes();
+  const { tvaActive, tauxTVA } = useTVAConfig();
   const [commandes, setCommandes] = useState<CommandeStandard[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -230,14 +236,57 @@ export const ListeCommandeStandard: React.FC = () => {
   };
 
   const handleDelete = async (idCommande: number) => {
-    if (!await confirm('Supprimer cette commande ?', 'Suppression')) return;
+    if (!await confirm(
+      "Annuler cette commande ?\n\n" +
+      "• Le stock sera réintégré\n" +
+      "• La facture liée sera annulée\n" +
+      "• Les règlements encaissés seront annulés et contrepassés en caisse\n\n" +
+      "La commande restera visible, marquée « Annulée ».",
+      'Annulation'
+    )) return;
+
     try {
-      const db = await getDb();
-      await db.execute(`DELETE FROM commandes WHERE idCommande = ?`, [idCommande]);
-      notifications.show({ title: 'Succès', message: 'Commande supprimée', color: 'green' });
+      // L'annulation est propagée à la facture, aux règlements et à la caisse
+      // par annulationService (voir src/services/annulationService.ts).
+      const resultat = await annulationService.annulerCommandeStandard(
+        idCommande,
+        user?.nom || undefined
+      );
+
+      const details: string[] = ['stock réintégré'];
+      if (resultat.codeFacture) details.push(`facture ${resultat.codeFacture} annulée`);
+      if (resultat.reglementsAnnules > 0) {
+        details.push(
+          `${resultat.reglementsAnnules} règlement(s) annulé(s) — ` +
+          `${resultat.montantRembourse.toLocaleString('fr-FR')} F contrepassés en caisse`
+        );
+      }
+
+      notifications.show({
+        title: 'Commande annulée',
+        message: details.join(' · '),
+        color: 'orange',
+        autoClose: 8000,
+      });
+
+      // Les avertissements éventuels ne bloquent pas l'annulation mais
+      // doivent rester visibles pour l'opérateur.
+      if (resultat.avertissements.length > 0) {
+        notifications.show({
+          title: 'Points à vérifier',
+          message: resultat.avertissements.join(' · '),
+          color: 'yellow',
+          autoClose: 10000,
+        });
+      }
+
       await chargerCommandes();
-    } catch (error) {
-      notifications.show({ title: 'Erreur', message: 'Suppression impossible', color: 'red' });
+    } catch (error: any) {
+      notifications.show({
+        title: 'Erreur',
+        message: error?.message || "Annulation impossible",
+        color: 'red',
+      });
     }
   };
 
@@ -278,7 +327,7 @@ export const ListeCommandeStandard: React.FC = () => {
 
   const stats = {
     total: commandes.length,
-    montantTotal: commandes.reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
+    montantTotal: commandes.filter(c => !(c as any).est_annule).reduce((sum, c) => sum + (c.montant_ttc || 0), 0),
     avecFacture: commandes.filter(c => c.code_facture).length,
     sansFacture: commandes.filter(c => !c.code_facture).length,
     confirmees: commandes.filter(c => c.statut === 'CONFIRMEE').length,
@@ -333,7 +382,7 @@ export const ListeCommandeStandard: React.FC = () => {
   return (
     <>
       <Stack gap="lg" p="md">
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+        <Paper className="tk-page-tools" p="xl" radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
@@ -401,6 +450,7 @@ export const ListeCommandeStandard: React.FC = () => {
         </Paper>
 
         {/* FILTRES */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="xs">
           <Group align="flex-end" gap="xs" style={{ flexWrap: 'nowrap' }}>
             <Box style={{ width: 160 }}>
@@ -432,6 +482,7 @@ export const ListeCommandeStandard: React.FC = () => {
                 ]}
                 size="xs"
                 clearable
+                searchable
                 styles={{ input: { fontSize: '11px', padding: '4px 8px' }, label: { fontSize: '10px' } }}
               />
             </Box>
@@ -514,21 +565,22 @@ export const ListeCommandeStandard: React.FC = () => {
             </Group>
           </Group>
         </Card>
+        </TkFilters>
 
         {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
           <ScrollArea h="calc(100vh - 500px)" style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="md" style={{ minWidth: 950, tableLayout: 'fixed' }}>
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                  <Table.Th c="white" w={50} style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
-                  <Table.Th c="white" w={180} style={{ whiteSpace: 'nowrap' }}>Client</Table.Th>
-                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
-                  <Table.Th c="white" w={160} style={{ whiteSpace: 'nowrap' }}>Code commande</Table.Th>
-                  <Table.Th c="white" ta="right" w={120} style={{ whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
-                  <Table.Th c="white" w={200} style={{ whiteSpace: 'nowrap' }}>Code facture</Table.Th>
-                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
-                  <Table.Th c="white" ta="center" w={200} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th w={50} style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
+                  <Table.Th w={180} style={{ whiteSpace: 'nowrap' }}>Client</Table.Th>
+                  <Table.Th w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
+                  <Table.Th w={160} style={{ whiteSpace: 'nowrap' }}>Code commande</Table.Th>
+                  <Table.Th ta="right" w={120} style={{ whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
+                  <Table.Th w={200} style={{ whiteSpace: 'nowrap' }}>Code facture</Table.Th>
+                  <Table.Th w={110} style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
+                  <Table.Th ta="center" w={200} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -544,8 +596,9 @@ export const ListeCommandeStandard: React.FC = () => {
                 ) : (
                   paginatedCommandes.map((commande, index) => {
                     const num = (currentPage - 1) * itemsPerPage + index + 1;
+                    const estAnnulee = !!(commande as any).est_annule || commande.statut === 'ANNULEE';
                     return (
-                      <Table.Tr key={commande.idCommande}>
+                      <Table.Tr key={commande.idCommande} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
                         <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           <Text fw={600} size="sm">{num}</Text>
                         </Table.Td>
@@ -618,14 +671,15 @@ export const ListeCommandeStandard: React.FC = () => {
                               </ActionIcon>
                             </Tooltip>
 
-                            <Tooltip label="Supprimer">
+                            <Tooltip label={estAnnulee ? 'Commande déjà annulée' : 'Annuler la commande'}>
                               <ActionIcon
                                 variant="light"
                                 color="red"
                                 size="md"
+                                disabled={estAnnulee}
                                 onClick={() => handleDelete(commande.idCommande)}
                               >
-                                <IconTrash size={16} />
+                                <IconBan size={16} />
                               </ActionIcon>
                             </Tooltip>
 
@@ -729,7 +783,9 @@ export const ListeCommandeStandard: React.FC = () => {
                 <div>
                   <Text size="sm" c="dimmed">Total HT:</Text>
                   <Text fw={700} size="lg">{formatMontant((selectedCommande as any).montant_ht || 0)} F</Text>
-                  <Text size="xs" c="dimmed">TVA (18%): {formatMontant((selectedCommande as any).montant_tva || 0)} F</Text>
+                  {tvaActive && (
+                    <Text size="xs" c="dimmed">TVA ({tauxTVA}%): {formatMontant((selectedCommande as any).montant_tva || 0)} F</Text>
+                  )}
                   <Text fw={700} size="xl" c="blue">Total TTC: {formatMontant((selectedCommande as any).montant_ttc || 0)} F</Text>
                 </div>
               </Group>

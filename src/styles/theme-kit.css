@@ -1,0 +1,1092 @@
+/* src/styles/theme-kit.css
+ * Theme « Vert-ardoise » : jetons et typographie (etape 2).
+ * Les regles de composants .mantine-* arrivent a l'etape 3.
+ * Ne jamais styler body : fonds scopes a #root et aux portails.
+ */
+
+:root {
+  --tk-grad-dark: linear-gradient(120deg, #02060a 0%, #071114 35%, #10221f 70%, #1f3a3c 100%);
+  --tk-grad-sidebar: linear-gradient(180deg, #1f3a3c 0%, #10221f 30%, #071114 60%, #02060a 100%);
+  --tk-halo: radial-gradient(circle at 95% -30%, rgba(20,184,166,.35), transparent 50%);
+
+  --tk-accent-50: #f0fdfa;
+  --tk-accent-100: #ccfbf1;
+  --tk-accent-200: #6ee7c8;
+  --tk-accent-300: #5eead4;
+  --tk-accent-500: #14b8a6;
+  --tk-accent-600: #0d9488;
+  --tk-accent-700: #0f766e;
+  --tk-accent-800: #134e4a;
+  --tk-accent-icon: #9ee6d3;
+
+  --tk-ink: #0f172a;
+  --tk-ink-2: #334155;
+  --tk-muted: #64748b;
+  --tk-faint: #94a3b8;
+
+  --tk-bg-app: #f2f6f5;
+  --tk-surface: #ffffff;
+  --tk-border: #e3ebe8;
+  --tk-input-border: #b9c6c2;
+  --tk-danger: #e03131;
+
+  --tk-radius-sm: 8px;
+  --tk-radius-md: 12px;
+  --tk-radius-lg: 16px;
+
+  --tk-shadow-card: 0 4px 12px -2px rgba(15,23,42,.08), 0 2px 4px -2px rgba(15,23,42,.05);
+  --tk-shadow-hover: 0 10px 24px -12px rgba(15,118,110,.25);
+  --tk-focus-ring: 0 0 0 3px rgba(20,184,166,.18);
+
+  --tk-font: 'Inter', 'Segoe UI', Roboto, system-ui, sans-serif;
+
+  /* Palette sombre (fournie par l'utilisateur) */
+  --tk-dark-bg: #0b1412;
+  --tk-dark-surface: #13201d;
+  --tk-dark-surface-2: #1a2a26;
+  --tk-dark-border: #24413b;
+  --tk-dark-input-border: #2f5249;
+  --tk-dark-text: #e5eeeb;
+  --tk-dark-text-2: #9fb3ad;
+  --tk-dark-text-3: #6f857f;
+  --tk-dark-thead: #10221f;
+  --tk-dark-row-hover: #17302a;
+  --tk-dark-sep: #1e332e;
+}
+
+/* ---- Typographie ---- */
+
+#root,
+.mantine-Portal {
+  font-family: var(--tk-font);
+}
+
+/* Petits libelles : en-tetes de tableau, eyebrows (10,5 a 11 px, MAJUSCULES) */
+.tk-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+}
+
+.tk-label-sm {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Libelles de champs : 12,5 px, 600, #475569, pas en majuscules */
+.tk-field-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: none;
+}
+:root:not([data-theme="dark"]) .tk-field-label {
+  color: #475569;
+}
+
+/* Chiffres alignes */
+.tk-num,
+.mantine-Table-td,
+.mantine-NumberInput-input {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Valeur vide : affiche « · » */
+.tk-empty:empty::before {
+  content: "\00B7";
+  color: var(--tk-faint);
+}
+
+/* ---- Mode clair : les regles de contenu sont prefixees par
+ * :root:not([data-theme="dark"]) (voir l'etape 3 ci-dessous).
+ */
+
+/* ---- Mode sombre du contenu (valeurs fournies par l'utilisateur) ----
+ * Le cadre (barre laterale, banniere, en-tete de modale, connexion) reste
+ * identique dans les deux modes. Jamais applique a l'impression.
+ */
+html:root:root[data-theme="dark"] {
+  --mantine-color-body: #0b1412;
+  --mantine-color-text: #e5eeeb;
+  --mantine-color-dimmed: #9fb3ad;
+  --mantine-color-default: #13201d;
+  --mantine-color-default-hover: #1a2a26;
+  --mantine-color-default-color: #e5eeeb;
+  --mantine-color-default-border: #24413b;
+  --mantine-color-placeholder: #6f857f;
+  --mantine-color-dark-0: #e5eeeb;
+  --mantine-color-dark-1: #9fb3ad;
+  --mantine-color-dark-2: #9fb3ad;
+  --mantine-color-dark-3: #6f857f;
+  --mantine-color-dark-4: #2f5249;
+  --mantine-color-dark-5: #24413b;
+  --mantine-color-dark-6: #1a2a26;
+  --mantine-color-dark-7: #13201d;
+  --mantine-color-dark-8: #10221f;
+  --mantine-color-dark-9: #0b1412;
+}
+
+@media screen {
+  :root[data-theme="dark"] #root,
+  :root[data-theme="dark"] .mantine-AppShell-main {
+    background: #0b1412;
+    color: #e5eeeb;
+  }
+  :root[data-theme="dark"] .mantine-AppShell-header {
+    background: #13201d;
+    border-bottom: 1px solid #24413b;
+  }
+  :root[data-theme="dark"] .tk-topbar-round,
+  :root[data-theme="dark"] .tk-user-pill {
+    border: 1px solid #24413b;
+    color: #e5eeeb;
+  }
+  :root[data-theme="dark"] .tk-topbar-round:hover,
+  :root[data-theme="dark"] .tk-user-pill:hover {
+    background: #1a2a26;
+  }
+  :root[data-theme="dark"] .tk-user-role,
+  :root[data-theme="dark"] .tk-user-chevron {
+    color: #9fb3ad;
+  }
+
+  /* Cartes et surfaces */
+  :root[data-theme="dark"] :is(.mantine-Card-root, .mantine-Paper-root):not(.mantine-Modal-content):not(.mantine-Popover-dropdown):not(.mantine-Menu-dropdown):not(.mantine-Combobox-dropdown):not(.mantine-Notification-root):not(:is(.print-area, .recu-reg-body, .tk-print) *):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: #13201d;
+    border: 1px solid #24413b;
+    border-radius: 16px;
+    box-shadow: none;
+  }
+  :root[data-theme="dark"] :is(.mantine-Menu-dropdown, .mantine-Popover-dropdown, .mantine-Combobox-dropdown):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #1a2a26;
+    border-color: #24413b;
+  }
+  :root[data-theme="dark"] .tk-card-title,
+  :root[data-theme="dark"] :is(.mantine-Card-root, .mantine-Paper-root) > .mantine-Title-root:first-child:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-left: 3px solid #14b8a6;
+    padding-left: 10px;
+  }
+
+  /* KPI */
+  :root[data-theme="dark"] .tk-kpi:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #13201d !important;
+    border: 1px solid #24413b;
+    border-left: 3px solid #14b8a6 !important;
+    border-radius: 16px;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  :root[data-theme="dark"] .tk-kpi:hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    transform: translateY(-2px);
+    box-shadow: var(--tk-shadow-hover);
+  }
+  :root[data-theme="dark"] .tk-kpi .tk-kpi-value:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #e5eeeb;
+  }
+  :root[data-theme="dark"] .tk-kpi-label:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #9fb3ad;
+  }
+  :root[data-theme="dark"] .tk-kpi-icon:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: #1a2a26;
+    color: #6ee7c8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* Champs */
+  :root[data-theme="dark"] .mantine-Input-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: #13201d;
+    border-color: #2f5249;
+    color: #e5eeeb;
+  }
+  :root[data-theme="dark"] .mantine-Input-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-TextInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-PasswordInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Select-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-NumberInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Textarea-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-DateInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder {
+    color: #6f857f;
+  }
+  :root[data-theme="dark"] .mantine-Input-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:focus:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Input-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:focus-within:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-color: #14b8a6;
+    box-shadow: var(--tk-focus-ring);
+    outline: none;
+  }
+  :root[data-theme="dark"] .mantine-Input-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Input-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: #1a2a26;
+  }
+  :root[data-theme="dark"] .tk-field-label {
+    color: #9fb3ad;
+  }
+
+  /* Tableaux */
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    --table-striped-color: transparent;
+    --table-highlight-on-hover-color: #17302a;
+    --table-border-color: #1e332e;
+    font-variant-numeric: tabular-nums;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-thead .mantine-Table-th:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #10221f;
+    color: #9fb3ad;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid #1e332e;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-th:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-td:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #e5eeeb;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-thead .mantine-Table-th:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #9fb3ad;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: transparent;
+    border-bottom: 1px solid #1e332e;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr:hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: #17302a;
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-td:first-child:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    font-weight: 600;
+    color: #e5eeeb;
+  }
+
+  /* Boutons secondaires (le principal garde son degrade) */
+  :root[data-theme="dark"] .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"], [data-variant="subtle"], [data-variant="white"], [data-variant="transparent"]):not([style*="red-"]):not([style*="orange-"]):not([style*="yellow-"]):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #13201d !important;
+    border: 1px solid #24413b !important;
+    color: #e5eeeb !important;
+  }
+  :root[data-theme="dark"] .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"], [data-variant="subtle"], [data-variant="white"], [data-variant="transparent"]):not([style*="red-"]):not([style*="orange-"]):not([style*="yellow-"]):not(:disabled):hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #1a2a26 !important;
+  }
+
+  /* Onglets et segmentes */
+  :root[data-theme="dark"] .mantine-Tabs-list[data-orientation="horizontal"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-SegmentedControl-root:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #1a2a26;
+    border-radius: 12px;
+    padding: 5px;
+    gap: 4px;
+  }
+  :root[data-theme="dark"] .mantine-Tabs-list:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::before {
+    display: none;
+  }
+  :root[data-theme="dark"] .mantine-Tabs-list[data-orientation="horizontal"] .mantine-Tabs-tab:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border: 0;
+    border-radius: 8px;
+    color: #9fb3ad;
+  }
+  :root[data-theme="dark"] .mantine-Tabs-list[data-orientation="horizontal"] .mantine-Tabs-tab[data-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #13201d;
+    color: #6ee7c8;
+    font-weight: 600;
+  }
+  :root[data-theme="dark"] .mantine-SegmentedControl-indicator:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #13201d;
+    border-radius: 8px;
+  }
+  :root[data-theme="dark"] .mantine-SegmentedControl-label[data-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-SegmentedControl-control[data-active] .mantine-SegmentedControl-label:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #6ee7c8;
+  }
+
+  /* Fieldset et blocs */
+  :root[data-theme="dark"] .mantine-Fieldset-root:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-form-section:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: #13201d !important;
+    border: 1px solid #24413b;
+    border-top: 3px solid #14b8a6;
+    border-radius: 16px;
+    color: #e5eeeb;
+  }
+}
+
+/* =====================================================================
+ * ETAPE 3 : regles globales des composants Mantine
+ * Toutes sous @media screen : rien ne s'applique aux impressions
+ * (react-to-print recopie les CSS). Les zones .print-area, .recu-reg-body
+ * et .tk-print sont aussi exclues a l'ecran.
+ * ===================================================================== */
+
+/* ---- Couleurs Mantine redefinies (un seul accent) ----
+ * Le plein vaut en clair et en sombre ; les variantes claires seulement en clair.
+ */
+html:root:root {
+  --mantine-color-blue-filled: #0f766e;
+  --mantine-color-blue-filled-hover: #134e4a;
+  --mantine-color-blue-outline: #0f766e;
+  --mantine-color-blue-text: #0f766e;
+  --mantine-color-cyan-filled: #0f766e;
+  --mantine-color-cyan-filled-hover: #134e4a;
+  --mantine-color-cyan-outline: #0f766e;
+  --mantine-color-cyan-text: #0f766e;
+  --mantine-color-green-filled: #0f766e;
+  --mantine-color-green-filled-hover: #134e4a;
+  --mantine-color-green-outline: #0f766e;
+  --mantine-color-green-text: #0f766e;
+  --mantine-color-teal-filled: #0f766e;
+  --mantine-color-teal-filled-hover: #134e4a;
+  --mantine-color-teal-outline: #0f766e;
+  --mantine-color-teal-text: #0f766e;
+  --mantine-color-lime-filled: #0f766e;
+  --mantine-color-lime-filled-hover: #134e4a;
+  --mantine-color-lime-outline: #0f766e;
+  --mantine-color-lime-text: #0f766e;
+  --mantine-color-grape-filled: #0f766e;
+  --mantine-color-grape-filled-hover: #134e4a;
+  --mantine-color-grape-outline: #0f766e;
+  --mantine-color-grape-text: #0f766e;
+  --mantine-color-violet-filled: #0f766e;
+  --mantine-color-violet-filled-hover: #134e4a;
+  --mantine-color-violet-outline: #0f766e;
+  --mantine-color-violet-text: #0f766e;
+  --mantine-color-indigo-filled: #0f766e;
+  --mantine-color-indigo-filled-hover: #134e4a;
+  --mantine-color-indigo-outline: #0f766e;
+  --mantine-color-indigo-text: #0f766e;
+  --mantine-color-pink-filled: #0f766e;
+  --mantine-color-pink-filled-hover: #134e4a;
+  --mantine-color-pink-outline: #0f766e;
+  --mantine-color-pink-text: #0f766e;
+  --mantine-color-orange-filled: #b45309;
+  --mantine-color-orange-filled-hover: #b45309;
+  --mantine-color-orange-outline: #b45309;
+  --mantine-color-orange-text: #b45309;
+  --mantine-color-yellow-filled: #b45309;
+  --mantine-color-yellow-filled-hover: #b45309;
+  --mantine-color-yellow-outline: #b45309;
+  --mantine-color-yellow-text: #b45309;
+  --mantine-color-red-filled: #e03131;
+  --mantine-color-red-filled-hover: #e03131;
+  --mantine-color-red-outline: #e03131;
+  --mantine-color-red-text: #e03131;
+}
+
+html:root:root:not([data-theme="dark"]) {
+  --mantine-color-blue-light: #e0f2fe;
+  --mantine-color-blue-light-hover: #e0f2fe;
+  --mantine-color-blue-light-color: #0369a1;
+  --mantine-color-cyan-light: #e0f2fe;
+  --mantine-color-cyan-light-hover: #e0f2fe;
+  --mantine-color-cyan-light-color: #0369a1;
+  --mantine-color-green-light: #ccfbf1;
+  --mantine-color-green-light-hover: #ccfbf1;
+  --mantine-color-green-light-color: #0f766e;
+  --mantine-color-teal-light: #ccfbf1;
+  --mantine-color-teal-light-hover: #ccfbf1;
+  --mantine-color-teal-light-color: #0f766e;
+  --mantine-color-lime-light: #ccfbf1;
+  --mantine-color-lime-light-hover: #ccfbf1;
+  --mantine-color-lime-light-color: #0f766e;
+  --mantine-color-grape-light: #f0fdfa;
+  --mantine-color-grape-light-hover: #f0fdfa;
+  --mantine-color-grape-light-color: #0f766e;
+  --mantine-color-violet-light: #f0fdfa;
+  --mantine-color-violet-light-hover: #f0fdfa;
+  --mantine-color-violet-light-color: #0f766e;
+  --mantine-color-indigo-light: #f0fdfa;
+  --mantine-color-indigo-light-hover: #f0fdfa;
+  --mantine-color-indigo-light-color: #0f766e;
+  --mantine-color-pink-light: #f0fdfa;
+  --mantine-color-pink-light-hover: #f0fdfa;
+  --mantine-color-pink-light-color: #0f766e;
+  --mantine-color-orange-light: #fef3c7;
+  --mantine-color-orange-light-hover: #fef3c7;
+  --mantine-color-orange-light-color: #b45309;
+  --mantine-color-yellow-light: #fef3c7;
+  --mantine-color-yellow-light-hover: #fef3c7;
+  --mantine-color-yellow-light-color: #b45309;
+  --mantine-color-red-light: rgba(224,49,49,.08);
+  --mantine-color-red-light-hover: rgba(224,49,49,.08);
+  --mantine-color-red-light-color: #e03131;
+  --mantine-color-gray-light: #f1f5f9;
+  --mantine-color-gray-light-hover: #f1f5f9;
+  --mantine-color-gray-light-color: #475569;
+}
+
+@media screen {
+
+  /* ---- Tableaux ---- */
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) {
+    --table-striped-color: transparent;
+    --table-highlight-on-hover-color: #f0fdfa;
+    --table-border-color: #f1f5f9;
+    font-variant-numeric: tabular-nums;
+  }
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-thead .mantine-Table-th {
+    background: #f8fafc;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-th,
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-td {
+    padding: 12px 16px;
+    font-size: 13px;
+  }
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr {
+    background-color: transparent;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr:hover {
+    background-color: #f0fdfa;
+  }
+  :root:not([data-theme="dark"]) .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-td:first-child {
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  /* ---- Champs ---- */
+  :root:not([data-theme="dark"]) .mantine-Input-input,
+  :root:not([data-theme="dark"]) .mantine-TextInput-input,
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input,
+  :root:not([data-theme="dark"]) .mantine-Select-input,
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input,
+  :root:not([data-theme="dark"]) .mantine-Textarea-input,
+  :root:not([data-theme="dark"]) .mantine-DateInput-input {
+    background-color: #ffffff;
+    border-color: #b9c6c2;
+    box-shadow: inset 0 1px 2px rgba(15,23,42,.06);
+  }
+  :root:not([data-theme="dark"]) .mantine-Input-input:hover,
+  :root:not([data-theme="dark"]) .mantine-TextInput-input:hover,
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input:hover,
+  :root:not([data-theme="dark"]) .mantine-Select-input:hover,
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input:hover,
+  :root:not([data-theme="dark"]) .mantine-Textarea-input:hover,
+  :root:not([data-theme="dark"]) .mantine-DateInput-input:hover {
+    border-color: #7f9a94;
+  }
+  :root:not([data-theme="dark"]) .mantine-Input-input:focus,
+  :root:not([data-theme="dark"]) .mantine-TextInput-input:focus,
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input:focus,
+  :root:not([data-theme="dark"]) .mantine-Select-input:focus,
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input:focus,
+  :root:not([data-theme="dark"]) .mantine-Textarea-input:focus,
+  :root:not([data-theme="dark"]) .mantine-DateInput-input:focus,
+  :root:not([data-theme="dark"]) .mantine-Input-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-TextInput-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-Select-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-Textarea-input:focus-within,
+  :root:not([data-theme="dark"]) .mantine-DateInput-input:focus-within {
+    border-color: #14b8a6;
+    box-shadow: var(--tk-focus-ring);
+    outline: none;
+  }
+  :root:not([data-theme="dark"]) .mantine-Input-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-TextInput-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-Select-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-Textarea-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-DateInput-input:disabled,
+  :root:not([data-theme="dark"]) .mantine-Input-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-TextInput-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-PasswordInput-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-Select-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-NumberInput-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-Textarea-input[data-disabled],
+  :root:not([data-theme="dark"]) .mantine-DateInput-input[data-disabled] {
+    background-color: #f1f5f4;
+  }
+  :root:not([data-theme="dark"]) .mantine-InputWrapper-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #475569;
+    text-transform: none;
+  }
+
+  /* ---- Boutons ---- */
+  .mantine-Button-root:is([data-variant="filled"], [data-variant="gradient"]):not([style*="red-"]):not([style*="orange-"]):not([style*="yellow-"]):not([style*="gray-"]):not([style*="dark-"]):not(:disabled):not([data-disabled]) {
+    background: linear-gradient(135deg, #0f766e, #134e4a);
+    color: #ffffff;
+    border: 0;
+  }
+  .mantine-Button-root[data-variant="filled"][style*="red-"] {
+    background: #e03131;
+    color: #ffffff;
+  }
+  :root:not([data-theme="dark"]) .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"]):not([style*="red-"]) {
+    background: #ffffff;
+    border: 1px solid #e3ebe8;
+  }
+  :root:not([data-theme="dark"]) .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"]):not([style*="red-"]):not(:disabled):hover {
+    background: #f0fdfa;
+    color: #0f766e;
+  }
+
+  /* ---- Onglets et segmentes (pilule) ---- */
+  :root:not([data-theme="dark"]) .mantine-Tabs-list[data-orientation="horizontal"],
+  :root:not([data-theme="dark"]) .mantine-SegmentedControl-root {
+    background: #e8edf4;
+    border-radius: 12px;
+    padding: 5px;
+    gap: 4px;
+  }
+  :root:not([data-theme="dark"]) .mantine-Tabs-list::before {
+    display: none;
+  }
+  :root:not([data-theme="dark"]) .mantine-Tabs-list[data-orientation="horizontal"] .mantine-Tabs-tab {
+    border: 0;
+    border-radius: 8px;
+    color: #64748b;
+  }
+  :root:not([data-theme="dark"]) .mantine-Tabs-list[data-orientation="horizontal"] .mantine-Tabs-tab[data-active] {
+    background: #ffffff;
+    color: #0f766e;
+    font-weight: 600;
+    box-shadow: var(--tk-shadow-card);
+  }
+  :root:not([data-theme="dark"]) .mantine-SegmentedControl-indicator {
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: var(--tk-shadow-card);
+  }
+  :root:not([data-theme="dark"]) .mantine-SegmentedControl-label[data-active],
+  :root:not([data-theme="dark"]) .mantine-SegmentedControl-control[data-active] .mantine-SegmentedControl-label {
+    color: #0f766e;
+  }
+
+  /* ---- Badges (sans lueur ; « filled » rendus en pastille douce) ---- */
+  .mantine-Badge-root {
+    box-shadow: none;
+  }
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-green-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-teal-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-lime-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-grape-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-violet-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-indigo-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-pink-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-sarcelle-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="primary-color-filled"] {
+    background: #ccfbf1;
+    color: #0f766e;
+  }
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-blue-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-cyan-filled"] {
+    background: #e0f2fe;
+    color: #0369a1;
+  }
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-orange-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-yellow-filled"] {
+    background: #fef3c7;
+    color: #b45309;
+  }
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-red-filled"] {
+    background: rgba(224,49,49,.08);
+    color: #e03131;
+  }
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-gray-filled"],
+  :root:not([data-theme="dark"]) .mantine-Badge-root[data-variant="filled"][style*="-dark-filled"] {
+    background: #f1f5f9;
+    color: #475569;
+  }
+
+  /* ---- Modales (cadre identique dans les deux modes) ---- */
+  .mantine-Modal-content {
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .mantine-Modal-header {
+    background: var(--tk-halo), var(--tk-grad-dark);
+  }
+  .mantine-Modal-title {
+    color: #ffffff;
+  }
+  .mantine-Modal-title svg {
+    color: #6ee7c8;
+  }
+  .mantine-Modal-close {
+    color: #ffffff;
+    background: transparent;
+  }
+  .mantine-Modal-close:hover {
+    background: rgba(255,255,255,.05);
+  }
+  .mantine-Modal-body {
+    padding-top: var(--mantine-spacing-md);
+  }
+  .mantine-Modal-overlay {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(2,6,10,.30);
+  }
+  :root[data-theme="dark"] .mantine-Modal-overlay:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: rgba(2,6,23,.45);
+  }
+
+  /* ---- Cartes ---- */
+  :root:not([data-theme="dark"]) :is(.mantine-Card-root, .mantine-Paper-root):not(.mantine-Modal-content):not(.mantine-Popover-dropdown):not(.mantine-Menu-dropdown):not(.mantine-Combobox-dropdown):not(.mantine-Notification-root):not(:is(.print-area, .recu-reg-body, .tk-print) *) {
+    background-color: #ffffff;
+    border: 1px solid #e3ebe8;
+    box-shadow: var(--tk-shadow-card);
+    border-radius: 16px;
+  }
+  :root:not([data-theme="dark"]) .tk-card-title,
+  :root:not([data-theme="dark"]) :is(.mantine-Card-root, .mantine-Paper-root) > .mantine-Title-root:first-child {
+    border-left: 3px solid #14b8a6;
+    padding-left: 10px;
+  }
+
+  /* ---- Fieldset et blocs de formulaire ---- */
+  :root:not([data-theme="dark"]) .mantine-Fieldset-root,
+  :root:not([data-theme="dark"]) .tk-form-section {
+    background-color: #ffffff;
+    border: 1px solid #e3ebe8;
+    border-top: 3px solid #14b8a6;
+    border-radius: 16px;
+    box-shadow: var(--tk-shadow-card);
+  }
+
+  /* ---- KPI (classe posee a l'etape 4) ---- */
+  :root:not([data-theme="dark"]) .tk-kpi {
+    background: #ffffff;
+    border: 1px solid #e3ebe8;
+    border-left: 3px solid #14b8a6;
+    border-radius: 16px;
+    box-shadow: var(--tk-shadow-card);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  :root:not([data-theme="dark"]) .tk-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--tk-shadow-hover);
+  }
+  :root:not([data-theme="dark"]) .tk-kpi-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: #f0fdfa;
+    color: #0f766e;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  :root:not([data-theme="dark"]) .tk-kpi-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+  }
+  :root:not([data-theme="dark"]) .tk-kpi-value {
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}
+
+
+/* =====================================================================
+ * MODE SOMBRE : PASSE 2 (harmonisation globale, palette --tk-dark-*)
+ * Contenu uniquement ; le cadre (barre laterale, banniere, en-tete de
+ * modale, connexion) n'est pas concerne. Jamais a l'impression.
+ * ===================================================================== */
+@media screen {
+  /* ---- Champs (tous types) ---- */
+  :root[data-theme="dark"] .mantine-Input-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DatePickerInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Autocomplete-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-MultiSelect-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Combobox-search:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PillsInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-FileInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-ColorInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface) !important;
+    border-color: var(--tk-dark-input-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: transparent !important;
+  }
+  :root[data-theme="dark"] .mantine-Input-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-TextInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-PasswordInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Select-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-NumberInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Textarea-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-DateInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-DatePickerInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Autocomplete-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-MultiSelect-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-Combobox-search:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-PillsInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-FileInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder,
+  :root[data-theme="dark"] .mantine-ColorInput-input:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *))::placeholder {
+    color: var(--tk-dark-text-3);
+  }
+  :root[data-theme="dark"] .mantine-Input-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DatePickerInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Autocomplete-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-MultiSelect-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Combobox-search:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PillsInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-FileInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-ColorInput-input:disabled:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Input-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DatePickerInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Autocomplete-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-MultiSelect-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Combobox-search[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PillsInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-FileInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-ColorInput-input[data-disabled]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Input-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DatePickerInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Autocomplete-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-MultiSelect-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Combobox-search[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PillsInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-FileInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-ColorInput-input[readonly]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Input-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-TextInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PasswordInput-innerInput[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Select-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-NumberInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Textarea-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DateInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-DatePickerInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Autocomplete-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-MultiSelect-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Combobox-search[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-PillsInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-FileInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-ColorInput-input[data-read-only]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface-2) !important;
+    color: var(--tk-dark-text-2);
+  }
+  :root[data-theme="dark"] .mantine-Pill-root:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    color: var(--tk-dark-text);
+  }
+
+  /* ---- Dropdowns, popovers, menus, infobulles ---- */
+  :root[data-theme="dark"] :is(.mantine-Combobox-dropdown, .mantine-Popover-dropdown, .mantine-Menu-dropdown, .mantine-Select-dropdown, .mantine-MultiSelect-dropdown, .mantine-Autocomplete-dropdown):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    border-color: var(--tk-dark-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Tooltip-tooltip:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    border: 1px solid var(--tk-dark-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] :is(.mantine-Combobox-option, .mantine-Menu-item):hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] .mantine-Combobox-option[data-combobox-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] .mantine-Menu-item[data-hovered]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-row-hover);
+  }
+  :root[data-theme="dark"] .mantine-Combobox-option:is([data-combobox-selected], [data-checked]):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: #0f766e;
+    color: #ffffff;
+  }
+
+  /* ---- Surfaces ---- */
+  :root[data-theme="dark"] :is(.mantine-Card-root, .mantine-Paper-root):not(.mantine-Modal-content):not(.mantine-Popover-dropdown):not(.mantine-Menu-dropdown):not(.mantine-Combobox-dropdown):not(.mantine-Notification-root):not(:is(.print-area, .recu-reg-body, .tk-print) *):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] :is(.mantine-Modal-body, .mantine-Drawer-body, .mantine-Drawer-content, .mantine-Accordion-item, .mantine-Alert-root, .mantine-Notification-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] :is(.tk-form-section, .tk-detail-section, .tk-page-tools):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface) !important;
+    border-color: var(--tk-dark-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Modal-content:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface);
+  }
+  :root[data-theme="dark"] .tk-detail-tile:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface-2) !important;
+    border-color: var(--tk-dark-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] :is(.mantine-Timeline-itemBullet, .mantine-Stepper-stepIcon):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface);
+    border-color: var(--tk-dark-border);
+  }
+  :root[data-theme="dark"] :is(.mantine-Timeline-itemTitle, .mantine-Stepper-stepLabel, .mantine-Alert-title, .mantine-Alert-message, .mantine-Notification-title, .mantine-Notification-description):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text);
+  }
+
+  /* ---- Onglets, segmentes, NavLink, accordeon ---- */
+  :root[data-theme="dark"] :is(.mantine-Tabs-list[data-orientation="horizontal"], .mantine-SegmentedControl-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+  }
+  :root[data-theme="dark"] .mantine-Tabs-list[data-orientation="horizontal"] .mantine-Tabs-tab[data-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-SegmentedControl-indicator:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface);
+  }
+  :root[data-theme="dark"] .mantine-Tabs-tab[data-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-SegmentedControl-label[data-active]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #6ee7c8;
+  }
+  :root[data-theme="dark"] :is(.mantine-NavLink-root, .mantine-Accordion-control):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] :is(.mantine-NavLink-root[data-active], .mantine-Accordion-item[data-active] > .mantine-Accordion-control):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface);
+    color: #6ee7c8;
+  }
+
+  /* ---- Tableaux ---- */
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    --table-striped-color: transparent;
+    --table-border-color: var(--tk-dark-sep);
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-thead:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)), :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-thead .mantine-Table-th:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-thead);
+    color: var(--tk-dark-text-2);
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-td:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-bottom-color: var(--tk-dark-sep);
+  }
+  :root[data-theme="dark"] .mantine-Table-table:not(:is(.print-area, .recu-reg-body, .tk-print) *) .mantine-Table-tbody .mantine-Table-tr:hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-row-hover);
+  }
+
+  /* ---- Boutons secondaires / outline / ghost (le principal garde son degrade) ---- */
+  :root[data-theme="dark"] .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"], [data-variant="subtle"], [data-variant="white"], [data-variant="transparent"]):not([style*="red-"]):not([style*="orange-"]):not([style*="yellow-"]):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface) !important;
+    border: 1px solid var(--tk-dark-border) !important;
+    color: var(--tk-dark-text) !important;
+  }
+  :root[data-theme="dark"] .mantine-Button-root:is([data-variant="light"], [data-variant="outline"], [data-variant="default"], [data-variant="subtle"], [data-variant="white"], [data-variant="transparent"]):not([style*="red-"]):not([style*="orange-"]):not([style*="yellow-"]):not(:disabled):hover:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2) !important;
+  }
+  :root[data-theme="dark"] .mantine-Button-root[data-variant="filled"]:is([style*="red-"], [style*="orange-"]):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ffffff;
+  }
+
+  /* ---- Badges variante light ---- */
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-green-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-teal-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-lime-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ccfbf1;
+  }
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-orange-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-yellow-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #fef3c7;
+  }
+  :root[data-theme="dark"] .mantine-Badge-root[data-variant="light"][style*="-red-"]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ffc9c9;
+  }
+
+  /* ---- Switch, Checkbox, Radio (sarcelle conservee quand coche) ---- */
+  :root[data-theme="dark"] .mantine-Switch-input:not(:checked) + .mantine-Switch-track:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Checkbox-input:not(:checked):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .mantine-Radio-radio:not(:checked):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface-2);
+    border-color: var(--tk-dark-border);
+  }
+
+  /* ---- ScrollArea, Divider, Code, Kbd ---- */
+  :root[data-theme="dark"] :is(.mantine-Code-root, .mantine-Kbd-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface);
+    border-color: var(--tk-dark-border);
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Divider-root:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-color: var(--tk-dark-border);
+    --divider-color: var(--tk-dark-border);
+  }
+  :root[data-theme="dark"] .mantine-ScrollArea-scrollbar:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface);
+  }
+
+  /* ---- KPI ---- */
+  :root[data-theme="dark"] .tk-kpi:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface) !important;
+    border-left: 3px solid #14b8a6 !important;
+  }
+  :root[data-theme="dark"] .tk-kpi-label:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text-2);
+  }
+  :root[data-theme="dark"] .tk-kpi .tk-kpi-value:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text);
+  }
+}
+
+/* ---- Classes de statut (lignes et tuiles) ----
+ * En clair : teintes actuelles conservees (fond inline) sauf danger/alerte de ligne.
+ * En sombre : fond var(--tk-dark-surface-2), texte = teinte claire du badge.
+ */
+@media screen {
+  :root:not([data-theme="dark"]) .tk-row-danger {
+    background-color: rgba(224,49,49,.08) !important;
+  }
+  :root:not([data-theme="dark"]) .tk-row-warning {
+    background-color: #fef3c7 !important;
+  }
+  :root[data-theme="dark"] :is(.tk-row-muted, .tk-row-danger, .tk-row-warning):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface-2) !important;
+  }
+  :root[data-theme="dark"] .tk-row-danger:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-row-danger .mantine-Table-td:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ffc9c9 !important;
+  }
+  :root[data-theme="dark"] .tk-row-warning:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-row-warning .mantine-Table-td:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #fef3c7 !important;
+  }
+  :root[data-theme="dark"] :is(.tk-tile-success, .tk-tile-warning, .tk-tile-danger):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-dark-surface-2) !important;
+    border: 1px solid var(--tk-dark-border) !important;
+  }
+  :root[data-theme="dark"] .tk-tile-success:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-tile-success :is(.mantine-Text-root, .mantine-Title-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ccfbf1 !important;
+  }
+  :root[data-theme="dark"] .tk-tile-warning:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-tile-warning :is(.mantine-Text-root, .mantine-Title-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #fef3c7 !important;
+  }
+  :root[data-theme="dark"] .tk-tile-danger:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)),
+  :root[data-theme="dark"] .tk-tile-danger :is(.mantine-Text-root, .mantine-Title-root):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: #ffc9c9 !important;
+  }
+}
+
+@media screen {
+  /* Bouton principal explicite (actions rapides) */
+  .tk-btn-primary,
+.mantine-Button-root.tk-btn-primary {
+    background: linear-gradient(135deg, #0f766e, #134e4a) !important;
+    color: #ffffff !important;
+    border: 0 !important;
+    --mantine-color-white: #ffffff;
+  }
+
+  /* Pastille d'icone KPI (reutilisable hors carte) */
+  .tk-kpi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+  :root:not([data-theme="dark"]) .tk-kpi-icon {
+    background: #f0fdfa;
+    color: #0f766e;
+  }
+  :root[data-theme="dark"] .tk-kpi-icon:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-surface-2);
+    color: #6ee7c8;
+  }
+}
+
+/* Complements 5ter2 : etats de contenu, sans modification du cadre. */
+@media screen {
+  :root[data-theme="dark"] :is(.mantine-Menu-item, .mantine-Combobox-option, .mantine-Accordion-label):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text);
+  }
+  :root[data-theme="dark"] .mantine-Combobox-option:is([data-combobox-selected], [data-checked]):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-surface);
+  }
+  :root[data-theme="dark"] :is(.mantine-Menu-label, .mantine-Combobox-empty, .mantine-InputWrapper-description, .mantine-Stepper-stepDescription, .mantine-Timeline-itemBody):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    color: var(--tk-dark-text-2);
+  }
+  :root[data-theme="dark"] :is(.mantine-Menu-divider, .mantine-Timeline-item, .mantine-Stepper-separator):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-color: var(--tk-dark-sep);
+  }
+  :root[data-theme="dark"] .mantine-ScrollArea-thumb:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background: var(--tk-dark-input-border);
+  }
+  :root[data-theme="dark"] .mantine-Input-input:is(:focus, :focus-within):not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    border-color: var(--tk-accent-500);
+    box-shadow: var(--tk-focus-ring);
+  }
+  :root[data-theme="dark"] .mantine-Checkbox-input[data-indeterminate]:not(:where(.tk-login, .tk-login *, .tk-print, .tk-print *, .print-area, .print-area *, .recu-reg-body, .recu-reg-body *, .tk-nav, .tk-nav *, .tk-page-banner, .tk-page-banner *, .mantine-Modal-header, .mantine-Modal-header *)) {
+    background-color: var(--tk-accent-700);
+    border-color: var(--tk-accent-700);
+  }
+}

@@ -44,8 +44,11 @@ import {
 import { notifications } from '@mantine/notifications';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getDb } from '../../database/db';
+import { tvaService } from '../../services/tvaService';
+import StockRevendeurService from '../../services/StockRevendeurService';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { journalCaisseService } from '../../services/journalCaisseService';
+import { revendeurAuditService } from '../../services/revendeurAuditService';
 
 
 interface NouveauDecompteProps {
@@ -220,7 +223,7 @@ export default function NouveauDecompte({
         categorie: p.categorie || 'Non categorise',
         prix_achat: p.prix_achat || 0,
         prix_vente: p.prix_vente || 0,
-        commission_pourcentage: p.commission_pourcentage || 60,
+        commission_pourcentage: p.commission_pourcentage ?? 60,
         qte_stock: p.qte_stock || 0,
         unite_base: p.unite_base || 'piece'
       })));
@@ -319,7 +322,8 @@ export default function NouveauDecompte({
           sr.qte_stock
         FROM decompte_details dd
         INNER JOIN products p ON p.idProduit = dd.idProduit
-        LEFT JOIN stock_revendeur sr ON sr.idProduit = dd.idProduit AND sr.idRevendeur = dd.idRevendeur
+        INNER JOIN decomptes d ON d.idDecompte = dd.idDecompte
+        LEFT JOIN stock_revendeur sr ON sr.idProduit = dd.idProduit AND sr.idRevendeur = d.idClient
         WHERE dd.idDecompte = ?`,
         [id]
       );
@@ -465,7 +469,7 @@ export default function NouveauDecompte({
         INSERT INTO decomptes (
           idClient, date_decompte, code_decompte,
           montant_vente, montant_net, statut, observation
-        ) VALUES (?, datetime('now'), ?, ?, ?, 'EN_ATTENTE', ?)
+        ) VALUES (?, datetime('now'), ?, ?, ?, 'valide', ?)
       `, [selectedClientId, codeRecu, totalVente, montantNet, observation || null]);
 
       const idDecompte = Number(result.lastInsertId);
@@ -489,24 +493,16 @@ export default function NouveauDecompte({
         `, [
           idDecompte, detail.idProduit, detail.qte_decompte,
           detail.qte_stock, detail.prix_achat, detail.prix_vente,
-          detail.commission_pourcentage || 60,
+          detail.commission_pourcentage ?? 60,
           detail.designation, detail.total,
         ]);
 
-        // Déstocker le revendeur (les produits ont été vendus)
-        await db.execute(`
-          UPDATE stock_revendeur
-          SET qte_stock = qte_stock - ?
-          WHERE idProduit = ? AND idRevendeur = ?
-        `, [detail.qte_decompte, detail.idProduit, selectedClientId]);
-
-        // Mouvement revendeur
-        await db.execute(`
-          INSERT INTO mouvements_revendeur (
-            idProduit, idRevendeur, idDecompte,
-            type_mouvement, qte_mouvement
-          ) VALUES (?, ?, ?, 'DECOMPTE', ?)
-        `, [detail.idProduit, selectedClientId, idDecompte, detail.qte_decompte]);
+        // Déstocker le revendeur (produits vendus) via le SERVICE unique
+        // transactionnel : stock ET mouvement 'DECOMPTE' écrits atomiquement.
+        await StockRevendeurService.decreaseStock(
+          Number(selectedClientId), detail.idProduit, detail.qte_decompte,
+          { typeMouvement: 'DECOMPTE', idDecompte, prixUnitaire: detail.prix_achat }
+        );
 
         items.push({
           idProduit: detail.idProduit,
@@ -517,7 +513,7 @@ export default function NouveauDecompte({
           checked: stockPrincipal > 0,
           prix_achat: detail.prix_achat,
           prix_vente: detail.prix_vente,
-          commission_pourcentage: detail.commission_pourcentage || 60,
+          commission_pourcentage: detail.commission_pourcentage ?? 60,
         });
       }
 
@@ -535,6 +531,14 @@ export default function NouveauDecompte({
           console.warn('Journal caisse:', journalErr);
         }
       }
+
+      await revendeurAuditService.tracer({
+        action: 'CREATION_DECOMPTE',
+        entite: 'DECOMPTE',
+        idRevendeur: selectedClientId,
+        idReference: idDecompte,
+        details: { code: codeRecu, lignes: details.length, montantNet },
+      });
 
       notifications.show({
         title: 'Décompte enregistré',
@@ -571,8 +575,11 @@ export default function NouveauDecompte({
     }
 
     setProcessingReappro(true);
+    let transactionStarted = false;
     try {
       const db = await getDb();
+      await db.execute('BEGIN TRANSACTION');
+      transactionStarted = true;
       const codeCommande = `CMD-REV-${savedCodeRecu}`;
       const year = new Date().getFullYear();
 
@@ -596,17 +603,22 @@ export default function NouveauDecompte({
       for (const item of aApprovisionner) {
         const stockAvant = item.stock_principal;
 
-        // Remettre en stock revendeur
-        await db.execute(`
-          UPDATE stock_revendeur SET qte_stock = qte_stock + ?
-          WHERE idProduit = ? AND idRevendeur = ?
-        `, [item.qte_reappro, item.idProduit, selectedClientId]);
-
-        // Déduire du stock principal
-        await db.execute(
-          `UPDATE products SET qte_stock = qte_stock - ? WHERE idProduit = ?`,
-          [item.qte_reappro, item.idProduit]
+        // Remettre en stock revendeur via le SERVICE (stock + mouvement 'REAPPRO')
+        await StockRevendeurService.increaseStock(
+          Number(selectedClientId), item.idProduit, item.qte_reappro,
+          { typeMouvement: 'REAPPRO', prixUnitaire: item.prix_achat }
         );
+
+        // Deduct only when the central stock covers the transfer.
+        const stockGeneral = await db.execute(
+          `UPDATE products
+           SET qte_stock = qte_stock - ?
+           WHERE idProduit = ? AND qte_stock >= ?`,
+          [item.qte_reappro, item.idProduit, item.qte_reappro]
+        );
+        if (stockGeneral.rowsAffected !== 1) {
+          throw new Error(`Stock general insuffisant pour ${item.designation}.`);
+        }
 
         // Mouvement stock principal
         await db.execute(`
@@ -629,8 +641,10 @@ export default function NouveauDecompte({
         montantHT += item.prix_achat * item.qte_reappro;
       }
 
-      // Facture d'approvisionnement
-      const montantTTC = montantHT * 1.18;
+      // Facture d'approvisionnement — TVA selon le réglage (0 si désactivée)
+      const _tvaCfg = await tvaService.get(true);
+      const _coefTVA = _tvaCfg.active ? _tvaCfg.taux / 100 : 0;
+      const montantTTC = montantHT * (1 + _coefTVA);
       const lastFacture = await db.select<any[]>(`
         SELECT code_facture FROM factures_approvisionnement
         WHERE code_facture LIKE 'APP-${year}-%'
@@ -660,7 +674,7 @@ export default function NouveauDecompte({
           idFactureAppro, item.idProduit, item.qte_reappro,
           item.prix_achat, item.prix_vente,
           item.prix_achat * item.qte_reappro,
-          item.prix_achat * item.qte_reappro * 1.18,
+          item.prix_achat * item.qte_reappro * (1 + _coefTVA),
         ]);
       }
 
@@ -677,6 +691,21 @@ export default function NouveauDecompte({
         ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
       `, [idCommande, selectedClientId, codeFactureRev, montantHT, montantTTC, totalCommission]);
 
+      await revendeurAuditService.tracer({
+        action: 'REAPPROVISIONNEMENT',
+        entite: 'STOCK',
+        idRevendeur: selectedClientId,
+        idReference: idCommande,
+        details: {
+          decompte: savedCodeRecu,
+          factureApprovisionnement: codeFactureAppro,
+          lignes: aApprovisionner.length,
+          montantHT,
+        },
+      });
+      await db.execute('COMMIT');
+      transactionStarted = false;
+
       notifications.show({
         title: 'Réapprovisionnement effectué',
         message: `${aApprovisionner.length} produit(s) réapprovisionné(s) — Facture ${codeFactureAppro}`,
@@ -687,6 +716,12 @@ export default function NouveauDecompte({
       if (onSuccess) onSuccess(); else navigate('/decomptes');
 
     } catch (err: any) {
+      if (transactionStarted) {
+        try {
+          const db = await getDb();
+          await db.execute('ROLLBACK');
+        } catch (_) { /* Transaction already ended or unavailable. */ }
+      }
       notifications.show({ title: 'Erreur réappro', message: err?.message, color: 'red' });
     } finally {
       setProcessingReappro(false);
@@ -695,8 +730,11 @@ export default function NouveauDecompte({
 
   // ─── Phase 2b : passer sans réapprovisionnement ───────────────────────────
   const handlePasserSansReappro = async () => {
+    let transactionStarted = false;
     try {
       const db = await getDb();
+      await db.execute('BEGIN TRANSACTION');
+      transactionStarted = true;
       const codeCommande = `CMD-REV-${savedCodeRecu}`;
 
       const commandeResult = await db.execute(`
@@ -713,6 +751,16 @@ export default function NouveauDecompte({
         `, [idCommande, detail.idProduit, detail.qte_decompte, detail.prix_vente]);
       }
 
+      await revendeurAuditService.tracer({
+        action: 'COMMANDE_EN_ATTENTE_REAPPRO',
+        entite: 'DECOMPTE',
+        idRevendeur: selectedClientId,
+        idReference: idCommande,
+        details: { decompte: savedCodeRecu, lignes: reapproItems.length },
+      });
+      await db.execute('COMMIT');
+      transactionStarted = false;
+
       notifications.show({
         title: 'Décompte sans réapprovisionnement',
         message: `Commande ${codeCommande} créée en attente`,
@@ -723,6 +771,12 @@ export default function NouveauDecompte({
       if (onSuccess) onSuccess(); else navigate('/decomptes');
 
     } catch (err: any) {
+      if (transactionStarted) {
+        try {
+          const db = await getDb();
+          await db.execute('ROLLBACK');
+        } catch (_) { /* Transaction already ended or unavailable. */ }
+      }
       notifications.show({ title: 'Erreur', message: err?.message, color: 'red' });
     }
   };
@@ -746,7 +800,7 @@ export default function NouveauDecompte({
 
   return (
     <Stack gap="md" p="md">
-      <Paper p="lg" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+      <Paper className="tk-page-tools tk-page-tools--fiche" p="lg" radius="lg">
         <Group justify="space-between">
           <Group gap="md">
             <ThemeIcon size={40} radius="md" color="red" variant="filled">
@@ -778,7 +832,7 @@ export default function NouveauDecompte({
       )}
 
 
-      <Card withBorder radius="lg" shadow="sm" p="lg">
+      <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="lg">
         <Grid>
           <Grid.Col span={4}>
             <Select
@@ -786,7 +840,7 @@ export default function NouveauDecompte({
               placeholder="Choisir un revendeur"
               searchable
               data={revendeurs}
-              value={selectedClientId?.toString() || null}
+              value={selectedClientId?.toString() ?? undefined}
               onChange={handleClientChange}
               disabled={!!(clientIdFromState || clientIdProp) || isEditMode}
               leftSection={<IconUser size={16} />}
@@ -816,7 +870,7 @@ export default function NouveauDecompte({
       </Card>
 
       {selectedClientId && (
-        <Card withBorder radius="lg" shadow="sm" p="lg">
+        <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="lg">
           <Group gap="xs" mb="md" justify="space-between">
             <Group gap="xs">
               <ThemeIcon color="grape" variant="light" radius="md" size="sm">
@@ -871,14 +925,14 @@ export default function NouveauDecompte({
               <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                 <Table.Thead>
                   <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                    <Table.Th c="white" style={{ width: '10%' }}>Code</Table.Th>
-                    <Table.Th c="white" style={{ width: '25%' }}>Designation</Table.Th>
-                    <Table.Th c="white" style={{ width: '12%' }}>Categorie</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Unite</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Stock</Table.Th>
-                    <Table.Th c="white" style={{ width: '12%' }} ta="right">Prix</Table.Th>
-                    <Table.Th c="white" style={{ width: '10%' }} ta="center">Qte</Table.Th>
-                    <Table.Th c="white" style={{ width: '8%' }} ta="center">Action</Table.Th>
+                    <Table.Th style={{ width: '10%' }}>Code</Table.Th>
+                    <Table.Th style={{ width: '25%' }}>Designation</Table.Th>
+                    <Table.Th style={{ width: '12%' }}>Categorie</Table.Th>
+                    <Table.Th style={{ width: '8%' }} ta="center">Unite</Table.Th>
+                    <Table.Th style={{ width: '8%' }} ta="center">Stock</Table.Th>
+                    <Table.Th style={{ width: '12%' }} ta="right">Prix</Table.Th>
+                    <Table.Th style={{ width: '10%' }} ta="center">Qte</Table.Th>
+                    <Table.Th style={{ width: '8%' }} ta="center">Action</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -956,7 +1010,7 @@ export default function NouveauDecompte({
       )}
 
       {details.length > 0 ? (
-        <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
+        <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
           <Group gap="xs" mb="xs" justify="space-between">
             <Group gap="xs">
               <ThemeIcon color="orange" variant="light" radius="md" size="sm">
@@ -972,15 +1026,15 @@ export default function NouveauDecompte({
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
               <Table.Thead>
                 <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                  <Table.Th c="white" style={{ width: '10%' }}>Code</Table.Th>
-                  <Table.Th c="white" style={{ width: '20%' }}>Designation</Table.Th>
-                  <Table.Th c="white" style={{ width: '10%' }}>Categorie</Table.Th>
-                  <Table.Th c="white" style={{ width: '8%' }} ta="center">Unite</Table.Th>
-                  <Table.Th c="white" style={{ width: '10%' }} ta="center">Qte</Table.Th>
-                  <Table.Th c="white" style={{ width: '12%' }} ta="right">PA</Table.Th>
-                  <Table.Th c="white" style={{ width: '12%' }} ta="right">PV</Table.Th>
-                  <Table.Th c="white" style={{ width: '13%' }} ta="right">Total</Table.Th>
-                  <Table.Th c="white" style={{ width: '5%' }} ta="center">Sup</Table.Th>
+                  <Table.Th style={{ width: '10%' }}>Code</Table.Th>
+                  <Table.Th style={{ width: '20%' }}>Designation</Table.Th>
+                  <Table.Th style={{ width: '10%' }}>Categorie</Table.Th>
+                  <Table.Th style={{ width: '8%' }} ta="center">Unite</Table.Th>
+                  <Table.Th style={{ width: '10%' }} ta="center">Qte</Table.Th>
+                  <Table.Th style={{ width: '12%' }} ta="right">PA</Table.Th>
+                  <Table.Th style={{ width: '12%' }} ta="right">PV</Table.Th>
+                  <Table.Th style={{ width: '13%' }} ta="right">Total</Table.Th>
+                  <Table.Th style={{ width: '5%' }} ta="center">Sup</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1027,7 +1081,7 @@ export default function NouveauDecompte({
           </Group>
         </Card>
       ) : (
-        <Card withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
+        <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="lg" style={{ backgroundColor: '#fafafa' }}>
           <Group gap="xs" mb="xs">
             <ThemeIcon color="orange" variant="light" radius="md" size="sm">
               <IconShoppingCart size={14} />
@@ -1080,7 +1134,7 @@ export default function NouveauDecompte({
       )}
 
 
-      <Card withBorder radius="lg" shadow="sm" p="lg">
+      <Card className="tk-form-section" withBorder radius="lg" shadow="sm" p="lg">
         <TextInput
           label="Observation"
           placeholder="Ajouter une remarque (optionnel)"
@@ -1136,11 +1190,11 @@ export default function NouveauDecompte({
             <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
               <Table.Thead>
                 <Table.Tr style={{ backgroundColor: '#1a1a2e' }}>
-                  <Table.Th c="white" w={40}></Table.Th>
-                  <Table.Th c="white">Produit</Table.Th>
-                  <Table.Th c="white" ta="center">Qté décomptée</Table.Th>
-                  <Table.Th c="white" ta="center">Stock principal</Table.Th>
-                  <Table.Th c="white" ta="center">Qté à approvisionner</Table.Th>
+                  <Table.Th w={40}></Table.Th>
+                  <Table.Th>Produit</Table.Th>
+                  <Table.Th ta="center">Qté décomptée</Table.Th>
+                  <Table.Th ta="center">Stock principal</Table.Th>
+                  <Table.Th ta="center">Qté à approvisionner</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

@@ -19,13 +19,13 @@ import {
   ScrollArea,
   Button,
   TextInput,
+  NumberInput,
   Tooltip,
   ActionIcon,
   Divider,
   Modal,
   Alert
 } from "@mantine/core";
-import '@mantine/dates/styles.css';
 import {
   IconUser,
   IconPackage,
@@ -42,12 +42,19 @@ import {
   IconReceipt,
   IconFileInvoice,
   IconAlertCircle,
-  IconTrash
+  IconTrash,
+  IconUpload,
 } from "@tabler/icons-react";
 import { getDb } from "../../../database/db";
 import { stockRevendeurRepository } from "../../../database/repositories/stockRevendeurRepository";
+import { revendeurAuditService } from "../../../services/revendeurAuditService";
+import StockRevendeurService from "../../../services/StockRevendeurService";
+import { useAuth } from "../../../contexts/AuthContext";
+import { ModalImportStockRevendeur } from "./ModalImportStockRevendeur";
+import { saveText } from "../../../utils/fileExport";
 import { useReactToPrint } from "react-to-print";
 import { notifications } from "@mantine/notifications";
+import TkFilters from '../../TkFilters';
 
 interface Client {
   idClient: number;
@@ -93,16 +100,21 @@ export default function ListeStockRevendeur() {
   const printRef = useRef<HTMLDivElement>(null);
   const factureRef = useRef<HTMLDivElement>(null);
 
+  const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [stock, setStock] = useState<StockItem[]>([]);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [selectedClientDetails, setSelectedClientDetails] = useState<Client | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingStock, setLoadingStock] = useState(false);
   const [valeurStock, setValeurStock] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<StockItem | null>(null);
+  const [adjustQte, setAdjustQte] = useState<number>(0);
+  const [adjustMotif, setAdjustMotif] = useState<string>("");
+  const [adjustLoading, setAdjustLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [factures, setFactures] = useState<FactureRevendeur[]>([]);
@@ -250,7 +262,34 @@ export default function ListeStockRevendeur() {
       label: client.NomComplet || client.Societe || "Revendeur sans nom"
     }));
 
+  const handleAjuster = async () => {
+    if (!selectedClient || !selectedProduct) return;
+    if (!adjustMotif.trim()) {
+      notifications.show({ title: 'Motif requis', message: "Indiquez le motif de l'ajustement.", color: 'orange' });
+      return;
+    }
+    setAdjustLoading(true);
+    try {
+      await StockRevendeurService.ajuster(
+        Number(selectedClient),
+        selectedProduct.idProduit,
+        Number(adjustQte) || 0,
+        adjustMotif.trim(),
+        user?.nom,
+      );
+      notifications.show({ title: 'Stock ajusté', message: `Nouvelle quantité : ${adjustQte} (tracé).`, color: 'teal' });
+      setShowDetailsModal(false);
+      await loadStock(Number(selectedClient));
+    } catch (e: any) {
+      notifications.show({ title: 'Erreur', message: e?.message || "Ajustement impossible", color: 'red' });
+    } finally {
+      setAdjustLoading(false);
+    }
+  };
+
   const handleViewDetails = (product: StockItem) => {
+    setAdjustQte(product.qte_stock || 0);
+    setAdjustMotif("");
     setSelectedProduct(product);
     setShowDetailsModal(true);
   };
@@ -258,30 +297,45 @@ export default function ListeStockRevendeur() {
   const handleResetStock = async () => {
     if (!selectedClient || !selectedClientDetails) return;
     const confirmed = await confirm(
-      `Réinitialiser TOUT le stock de ${selectedClientDetails.NomComplet} à 0 ?\n\nCette action est irréversible.`,
-      'Réinitialisation stock'
+      `Ramener le stock de ${selectedClientDetails.NomComplet} à 0 avec une trace d inventaire ?\n\nLes lignes et l historique seront conservés.`,
+      'Ajustement inventaire'
     );
     if (!confirmed) return;
     try {
       const db = await getDb();
-      await db.execute(
-        'DELETE FROM stock_revendeur WHERE idRevendeur = ?',
-        [Number(selectedClient)]
+      const idRevendeur = Number(selectedClient);
+      const lignes = await db.select<any[]>(
+        'SELECT idProduit, qte_stock FROM stock_revendeur WHERE idRevendeur = ? AND qte_stock <> 0',
+        [idRevendeur]
       );
-      await db.execute(
-        'DELETE FROM mouvements_revendeur WHERE idRevendeur = ?',
-        [Number(selectedClient)]
-      );
-      setStock([]);
-      setValeurStock(0);
-      notifications.show({ title: '✅ Stock réinitialisé', message: 'Toutes les lignes de stock ont été supprimées.', color: 'green' });
+      await db.execute('BEGIN TRANSACTION');
+      try {
+        for (const ligne of lignes) {
+          await db.execute('UPDATE stock_revendeur SET qte_stock = 0 WHERE idRevendeur = ? AND idProduit = ?', [idRevendeur, ligne.idProduit]);
+          await db.execute(
+            `INSERT INTO mouvements_revendeur (idProduit, idRevendeur, type_mouvement, qte_mouvement)
+             VALUES (?, ?, 'AJUSTEMENT_INVENTAIRE', ?)`,
+            [ligne.idProduit, idRevendeur, -Number(ligne.qte_stock)]
+          );
+        }
+        await db.execute('COMMIT');
+      } catch (error) {
+        await db.execute('ROLLBACK');
+        throw error;
+      }
+      await revendeurAuditService.tracer({
+        action: 'AJUSTEMENT_STOCK_A_ZERO', entite: 'STOCK', idRevendeur,
+        details: { lignes: lignes.length, motif: 'Reinitialisation inventaire depuis ecran stock' },
+      });
+      await loadStock(idRevendeur);
+      notifications.show({ title: 'Stock ajusté', message: `${lignes.length} ligne(s) ramenée(s) à 0 avec trace d inventaire.`, color: 'orange' });
     } catch (err) {
       console.error(err);
-      notifications.show({ title: 'Erreur', message: 'Impossible de réinitialiser le stock', color: 'red' });
+      notifications.show({ title: 'Erreur', message: 'Impossible d ajuster le stock', color: 'red' });
     }
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (filteredStock.length === 0) {
       notifications.show({ title: "Info", message: "Aucune donnée à exporter", color: "blue" });
       return;
@@ -297,16 +351,8 @@ export default function ListeStockRevendeur() {
       (item.qte_stock * item.prix_achat_base).toLocaleString()
     ]);
     const csvContent = [headers, ...rows].map(row => row.join(";")).join("\n");
-    const blob = new Blob(["﻿" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.setAttribute("download", `stock_${selectedClientDetails?.NomComplet || "revendeur"}_${new Date().toLocaleDateString()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    notifications.show({ title: "Succès", message: "Export CSV terminé", color: "green" });
+    const res = await saveText(csvContent, `stock_${selectedClientDetails?.NomComplet || "revendeur"}_${new Date().toLocaleDateString()}.csv`);
+    if (res !== 'cancelled') notifications.show({ title: "Succès", message: "Export CSV terminé — dossier choisi", color: "green" });
   };
 
   const filteredStock = stock.filter(item => {
@@ -352,7 +398,7 @@ export default function ListeStockRevendeur() {
   return (
     <Stack gap="lg" p="md">
       {/* EN-TÊTE */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+      <Paper className="tk-page-tools" p="xl" radius="lg">
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
             <ThemeIcon size={45} radius="md" color="cyan" variant="filled">
@@ -406,29 +452,69 @@ export default function ListeStockRevendeur() {
         )}
       </Card>
 
-      {/* Boutons d'export */}
-      {selectedClient && stock.length > 0 && (
+      <ModalImportStockRevendeur
+        opened={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        idRevendeur={selectedClient ? Number(selectedClient) : null}
+        revendeurNom={selectedClientDetails?.NomComplet}
+        onSuccess={() => { if (selectedClient) loadStock(Number(selectedClient)); }}
+      />
+
+      {/* Barre d'actions - Visible dès qu'un revendeur est sélectionné */}
+      {selectedClient && (
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group justify="space-between" align="center">
             <Text fw={600}>Actions</Text>
             <Group>
+              <Button 
+                leftSection={<IconUpload size={16} />} 
+                variant="light" 
+                color="grape"
+                onClick={() => setImportModalOpen(true)}
+              >
+                Importer le stock (Excel)
+              </Button>
               <Tooltip label="Imprimer le stock">
-                <ActionIcon variant="light" color="blue" size="lg" onClick={() => handlePrint()}>
+                <ActionIcon 
+                  variant="light" 
+                  color="blue" 
+                  size="lg" 
+                  onClick={() => handlePrint()} 
+                  disabled={stock.length === 0}
+                >
                   <IconPrinter size={20} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Exporter en CSV">
-                <ActionIcon variant="light" color="green" size="lg" onClick={handleExportCSV}>
+                <ActionIcon 
+                  variant="light" 
+                  color="green" 
+                  size="lg" 
+                  onClick={handleExportCSV} 
+                  disabled={stock.length === 0}
+                >
                   <IconFileExcel size={20} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Exporter en PDF">
-                <ActionIcon variant="light" color="red" size="lg" onClick={() => handlePrint()}>
+                <ActionIcon 
+                  variant="light" 
+                  color="red" 
+                  size="lg" 
+                  onClick={() => handlePrint()} 
+                  disabled={stock.length === 0}
+                >
                   <IconFileTypePdf size={20} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Réinitialiser le stock à 0">
-                <ActionIcon variant="light" color="orange" size="lg" onClick={handleResetStock}>
+                <ActionIcon 
+                  variant="light" 
+                  color="orange" 
+                  size="lg" 
+                  onClick={handleResetStock} 
+                  disabled={stock.length === 0}
+                >
                   <IconTrash size={20} />
                 </ActionIcon>
               </Tooltip>
@@ -481,6 +567,7 @@ export default function ListeStockRevendeur() {
 
       {/* Barre de recherche */}
       {selectedClient && stock.length > 0 && (
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <TextInput
             placeholder="Rechercher par produit, code ou catégorie..."
@@ -490,6 +577,7 @@ export default function ListeStockRevendeur() {
             size="md"
           />
         </Card>
+        </TkFilters>
       )}
 
       {/* Tableau des stocks */}
@@ -503,6 +591,15 @@ export default function ListeStockRevendeur() {
                 <IconPackage size={48} color="#868e96" />
                 <Text c="dimmed" size="lg" fw={500}>Aucun stock pour ce revendeur</Text>
                 <Text c="dimmed" size="sm">Le revendeur n'a pas encore de produits en stock</Text>
+                <Button 
+                  variant="light" 
+                  color="grape" 
+                  leftSection={<IconUpload size={16} />}
+                  onClick={() => setImportModalOpen(true)}
+                  mt="sm"
+                >
+                  Importer un stock
+                </Button>
               </Stack>
             </Center>
           ) : (
@@ -526,22 +623,22 @@ export default function ListeStockRevendeur() {
                 <ScrollArea h={400}>
                   <Table striped highlightOnHover>
                     <Table.Thead>
-                      <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                        <Table.Th c="white">Code</Table.Th>
-                        <Table.Th c="white">Produit</Table.Th>
-                        <Table.Th c="white">Catégorie</Table.Th>
-                        <Table.Th c="white" ta="center">Stock</Table.Th>
-                        <Table.Th c="white" ta="right">Prix Achat</Table.Th>
-                        <Table.Th c="white" ta="right">Prix Vente</Table.Th>
-                        <Table.Th c="white" ta="right">Marge unitaire</Table.Th>
-                        <Table.Th c="white" ta="right">Valeur stock</Table.Th>
-                        <Table.Th c="white" ta="center">Actions</Table.Th>
+                      <Table.Tr>
+                        <Table.Th>Code</Table.Th>
+                        <Table.Th>Produit</Table.Th>
+                        <Table.Th>Catégorie</Table.Th>
+                        <Table.Th ta="center">Stock</Table.Th>
+                        <Table.Th ta="right">Prix Achat</Table.Th>
+                        <Table.Th ta="right">Prix Vente</Table.Th>
+                        <Table.Th ta="right">Marge unitaire</Table.Th>
+                        <Table.Th ta="right">Valeur stock</Table.Th>
+                        <Table.Th ta="center">Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
                       {filteredStock.length === 0 ? (
                         <Table.Tr>
-                          <Table.Td colSpan={9} align="center">
+                          <Table.Td colSpan={9} ta="center">
                             <Text c="dimmed" py={50}>
                               {searchTerm ? "Aucun produit trouvé" : "Aucun stock disponible pour ce revendeur"}
                             </Text>
@@ -639,14 +736,14 @@ export default function ListeStockRevendeur() {
               <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                 <Table.Thead>
                   <Table.Tr style={{ backgroundColor: '#5c2d91' }}>
-                    <Table.Th c="white">N° Facture</Table.Th>
-                    <Table.Th c="white">Commande</Table.Th>
-                    <Table.Th c="white">Date</Table.Th>
-                    <Table.Th c="white" ta="right">Montant HT</Table.Th>
-                    <Table.Th c="white" ta="right">Montant TTC</Table.Th>
-                    <Table.Th c="white" ta="right">Commission</Table.Th>
-                    <Table.Th c="white" ta="center">Statut</Table.Th>
-                    <Table.Th c="white" ta="center">Action</Table.Th>
+                    <Table.Th>N° Facture</Table.Th>
+                    <Table.Th>Commande</Table.Th>
+                    <Table.Th>Date</Table.Th>
+                    <Table.Th ta="right">Montant HT</Table.Th>
+                    <Table.Th ta="right">Montant TTC</Table.Th>
+                    <Table.Th ta="right">Commission</Table.Th>
+                    <Table.Th ta="center">Statut</Table.Th>
+                    <Table.Th ta="center">Action</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -707,7 +804,6 @@ export default function ListeStockRevendeur() {
       >
         {selectedFacture && (
           <>
-   
             <div ref={factureRef} style={{ padding: 16, backgroundColor: 'white' }}>
               <Group justify="space-between" mb="md" style={{ borderBottom: '2px solid #5c2d91', paddingBottom: 8 }}>
                 <div>
@@ -715,62 +811,64 @@ export default function ListeStockRevendeur() {
                   <Text size="xs" c="dimmed">{selectedClientDetails?.Tel}</Text>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <Text fw={700} size="sm">N° {selectedFacture.code_facture}</Text>
-                  <Text size="xs" c="dimmed">{new Date(selectedFacture.date_facture).toLocaleDateString('fr-FR')}</Text>
-                  <Badge color={selectedFacture.statut === 'PAYEE' ? 'green' : 'orange'} size="xs">{selectedFacture.statut}</Badge>
+                  <Text fw={700} size="lg" c="#5c2d91">{selectedFacture.code_facture}</Text>
+                  <Text size="xs" c="dimmed">Date: {new Date(selectedFacture.date_facture).toLocaleDateString('fr-FR')}</Text>
                 </div>
               </Group>
-
-              <Text fw={700} ta="center" size="sm" mb="md" style={{ backgroundColor: '#ede7f6', padding: 4, borderRadius: 4 }}>
-                FACTURE REVENDEUR
-              </Text>
 
               {loadingFactureDetails ? (
                 <Center py={30}><Loader size="sm" /></Center>
               ) : (
-                <Table withColumnBorders style={{ fontSize: '11px', marginBottom: 12 }}>
+                <Table striped highlightOnHover>
                   <Table.Thead>
-                    <Table.Tr style={{ backgroundColor: '#5c2d91' }}>
-                      <Table.Th c="white">Produit</Table.Th>
-                      <Table.Th c="white" ta="center">Qté</Table.Th>
-                      <Table.Th c="white" ta="right">PU</Table.Th>
-                      <Table.Th c="white" ta="right">Total</Table.Th>
+                    <Table.Tr>
+                      <Table.Th>Produit</Table.Th>
+                      <Table.Th>Code</Table.Th>
+                      <Table.Th ta="center">Qté</Table.Th>
+                      <Table.Th ta="right">Prix unit.</Table.Th>
+                      <Table.Th ta="right">Total</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {factureDetails.map((d, i) => (
-                      <Table.Tr key={i}>
-                        <Table.Td><Text size="xs">{d.designation}</Text></Table.Td>
-                        <Table.Td ta="center"><Text size="xs">{d.quantite}</Text></Table.Td>
-                        <Table.Td ta="right"><Text size="xs">{d.prix_unitaire_vente.toLocaleString()} F</Text></Table.Td>
-                        <Table.Td ta="right"><Text size="xs" fw={600}>{d.total.toLocaleString()} F</Text></Table.Td>
+                    {factureDetails.map((detail, idx) => (
+                      <Table.Tr key={idx}>
+                        <Table.Td>{detail.designation}</Table.Td>
+                        <Table.Td>{detail.code_produit}</Table.Td>
+                        <Table.Td ta="center">{detail.quantite}</Table.Td>
+                        <Table.Td ta="right">{detail.prix_unitaire_vente.toLocaleString()} F</Table.Td>
+                        <Table.Td ta="right">{detail.total.toLocaleString()} F</Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
+                  <Table.Tfoot>
+                    <Table.Tr>
+                      <Table.Td colSpan={3}></Table.Td>
+                      <Table.Td ta="right" fw={700}>Total HT</Table.Td>
+                      <Table.Td ta="right" fw={700}>{selectedFacture.montant_ht.toLocaleString()} F</Table.Td>
+                    </Table.Tr>
+                    <Table.Tr>
+                      <Table.Td colSpan={3}></Table.Td>
+                      <Table.Td ta="right" fw={700}>TVA (18%)</Table.Td>
+                      <Table.Td ta="right" fw={700}>{(selectedFacture.montant_ttc - selectedFacture.montant_ht).toLocaleString()} F</Table.Td>
+                    </Table.Tr>
+                    <Table.Tr>
+                      <Table.Td colSpan={3}></Table.Td>
+                      <Table.Td ta="right" fw={700}  c="blue">Total TTC</Table.Td>
+                      <Table.Td ta="right" fw={700}  c="blue">{selectedFacture.montant_ttc.toLocaleString()} F</Table.Td>
+                    </Table.Tr>
+                    <Table.Tr>
+                      <Table.Td colSpan={3}></Table.Td>
+                      <Table.Td ta="right" fw={700} c="orange">Commission</Table.Td>
+                      <Table.Td ta="right" fw={700} c="orange">{selectedFacture.commission.toLocaleString()} F</Table.Td>
+                    </Table.Tr>
+                  </Table.Tfoot>
                 </Table>
               )}
-
-              <Divider my="xs" />
-              <SimpleGrid cols={3} spacing="xs">
-                <Paper p={6} withBorder>
-                  <Text size="xs" c="dimmed">Montant HT</Text>
-                  <Text fw={600} size="sm">{selectedFacture.montant_ht.toLocaleString()} F</Text>
-                </Paper>
-                <Paper p={6} withBorder style={{ backgroundColor: '#fff3e0' }}>
-                  <Text size="xs" c="dimmed">Commission</Text>
-                  <Text fw={600} size="sm" c="orange">{selectedFacture.commission.toLocaleString()} F</Text>
-                </Paper>
-                <Paper p={6} withBorder style={{ backgroundColor: '#e8f5e9' }}>
-                  <Text size="xs" c="dimmed">Montant TTC</Text>
-                  <Text fw={700} size="sm" c="green">{selectedFacture.montant_ttc.toLocaleString()} F</Text>
-                </Paper>
-              </SimpleGrid>
             </div>
 
-            <Divider my="sm" />
-            <Group justify="flex-end" gap="xs">
-              <Button size="compact-sm" variant="subtle" onClick={() => setShowFactureModal(false)}>Fermer</Button>
-              <Button size="compact-sm" leftSection={<IconPrinter size={14} />} color="violet" onClick={() => handlePrintFacture()}>
+            <Group justify="flex-end" mt="md">
+              <Button variant="light" onClick={() => setShowFactureModal(false)}>Fermer</Button>
+              <Button leftSection={<IconPrinter size={16} />} onClick={() => handlePrintFacture()} color="violet">
                 Imprimer
               </Button>
             </Group>
@@ -778,88 +876,97 @@ export default function ListeStockRevendeur() {
         )}
       </Modal>
 
-      {/* MODAL DÉTAILS PRODUIT */}
+      {/* MODAL DETAILS PRODUIT */}
       <Modal
         opened={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
-        title={`Détails du produit - ${selectedProduct?.designation || ''}`}
+        title={`Détails - ${selectedProduct?.designation || ''}`}
         size="md"
         centered
-        styles={{
-          header: { backgroundColor: '#1a1a2e', padding: '16px 20px', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' },
-          title: { color: 'white', fontWeight: 600 },
-          body: { padding: '20px' }
-        }}
       >
         {selectedProduct && (
-          <Stack gap="md">
+          <Stack>
             <SimpleGrid cols={2} spacing="md">
-              <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Code produit</Text>
+              <div>
+                <Text size="xs" c="dimmed">Code</Text>
                 <Text fw={600}>{selectedProduct.code_produit}</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
+              </div>
+              <div>
                 <Text size="xs" c="dimmed">Catégorie</Text>
                 <Text fw={600}>{selectedProduct.categorie || '-'}</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Stock actuel</Text>
-                <Badge color={selectedProduct.qte_stock <= 0 ? 'red' : 'green'} size="lg">
-                  {selectedProduct.qte_stock} unités
-                </Badge>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Quantité en stock</Text>
+                <Text fw={600} c={selectedProduct.qte_stock <= 0 ? 'red' : selectedProduct.qte_stock <= 5 ? 'orange' : 'green'}>
+                  {selectedProduct.qte_stock}
+                </Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Unité</Text>
+                <Text fw={600}>{selectedProduct.unite_base || '-'}</Text>
+              </div>
+              <div>
                 <Text size="xs" c="dimmed">Prix d'achat</Text>
-                <Text fw={600} c="orange">{selectedProduct.prix_achat_base.toLocaleString()} F</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
+                <Text fw={600}>{selectedProduct.prix_achat_base?.toLocaleString()} F</Text>
+              </div>
+              <div>
                 <Text size="xs" c="dimmed">Prix de vente</Text>
-                <Text fw={600} c="blue">{selectedProduct.prix_vente_gros.toLocaleString()} F</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
+                <Text fw={600} c="blue">{selectedProduct.prix_vente_gros?.toLocaleString()} F</Text>
+              </div>
+              <div>
                 <Text size="xs" c="dimmed">Marge unitaire</Text>
-                <Text fw={600} c="green">{(selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base).toLocaleString()} F</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Valeur stock</Text>
+                <Text fw={600} c={(selectedProduct.prix_vente_gros || 0) - (selectedProduct.prix_achat_base || 0) >= 0 ? 'green' : 'red'}>
+                  {((selectedProduct.prix_vente_gros || 0) - (selectedProduct.prix_achat_base || 0)).toLocaleString()} F
+                </Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Valeur du stock</Text>
                 <Text fw={700} c="green">{(selectedProduct.qte_stock * selectedProduct.prix_achat_base).toLocaleString()} F</Text>
-              </Paper>
-              <Paper withBorder p="sm" radius="md">
-                <Text size="xs" c="dimmed">Bénéfice potentiel</Text>
-                <Text fw={700} c="blue">{(selectedProduct.qte_stock * (selectedProduct.prix_vente_gros - selectedProduct.prix_achat_base)).toLocaleString()} F</Text>
-              </Paper>
+              </div>
             </SimpleGrid>
 
             <Divider />
 
-            <Group justify="flex-end" gap="sm">
-              <Button
-                variant="light"
-                color="blue"
-                leftSection={<IconReceipt size={16} />}
-                onClick={() => {
-                  setShowDetailsModal(false);
-                  notifications.show({ title: "Décompte", message: "Créer un décompte pour " + selectedProduct.designation, color: "blue" });
-                }}
-              >
-                Créer décompte
-              </Button>
-              <Button
-                variant="light"
-                color="green"
-                leftSection={<IconFileInvoice size={16} />}
-                onClick={() => {
-                  setShowDetailsModal(false);
-                  notifications.show({ title: "Information", message: "Cette fonctionnalité sera disponible prochainement", color: "blue" });
-                }}
-              >
-                Générer facture
-              </Button>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Bénéfice potentiel total</Text>
+              <Text fw={700} c="green">
+                {((selectedProduct.qte_stock || 0) * ((selectedProduct.prix_vente_gros || 0) - (selectedProduct.prix_achat_base || 0))).toLocaleString()} F
+              </Text>
             </Group>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Chiffre d'affaires potentiel</Text>
+              <Text fw={700} c="blue">
+                {((selectedProduct.qte_stock || 0) * (selectedProduct.prix_vente_gros || 0)).toLocaleString()} F
+              </Text>
+            </Group>
+
+            <Divider label="Ajustement d'inventaire" labelPosition="center" />
+            <Text size="xs" c="dimmed">
+              Corrige la quantité en stock. L'opération est tracée (mouvement + audit) — jamais silencieuse.
+            </Text>
+            <Group align="flex-end" gap="xs" wrap="nowrap">
+              <NumberInput
+                label="Nouvelle quantité"
+                value={adjustQte}
+                onChange={(v) => setAdjustQte(Number(v) || 0)}
+                min={0}
+                w={140}
+                hideControls={false}
+              />
+              <TextInput
+                style={{ flex: 1 }}
+                label="Motif"
+                placeholder="Ex: inventaire physique, casse, correction…"
+                value={adjustMotif}
+                onChange={(e) => setAdjustMotif(e.currentTarget.value)}
+              />
+              <Button color="teal" loading={adjustLoading} onClick={handleAjuster}>Ajuster</Button>
+            </Group>
+
+            <Button variant="light" onClick={() => setShowDetailsModal(false)}>Fermer</Button>
           </Stack>
         )}
       </Modal>
     </Stack>
   );
-};
-
+}

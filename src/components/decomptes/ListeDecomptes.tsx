@@ -46,7 +46,9 @@ import {
 import { notifications } from '@mantine/notifications';
 import { clientRepository } from '../../database/repositories/clientRepository';
 import { getDb } from '../../database/db';
+import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import TkFilters from '../TkFilters';
 
 interface DecompteDetail {
   idDetailRevendeur: number;
@@ -144,6 +146,7 @@ const formatDateTimeCustom = (dateStr: string): string => {
 
 export default function ListeDecomptes() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [decomptes, setDecomptes] = useState<Decompte[]>([]);
   const [filteredDecomptes, setFilteredDecomptes] = useState<Decompte[]>([]);
   const [loading, setLoading] = useState(true);
@@ -333,7 +336,9 @@ const loadDecomptes = async () => {
           montant_benefice: row.montant_benefice || 0,
           montant_commission: row.montant_commission || 0,
           montant_net: row.montant_net || 0,
-          statut: row.statut || 'brouillon',
+          statut: (['valide', 'paye', 'annule'].includes(String(row.statut || '').toLowerCase())
+            ? String(row.statut).toLowerCase()
+            : 'brouillon') as Decompte['statut'],
           observation: row.observation,
           periode_debut: row.periode_debut,
           periode_fin: row.periode_fin,
@@ -421,10 +426,10 @@ const loadDecomptes = async () => {
       totalPaye: decomptesArray.filter((d: Decompte) => d.statut === 'paye').length,
       totalAnnule: decomptesArray.filter((d: Decompte) => d.statut === 'annule').length,
       totalBrouillon: decomptesArray.filter((d: Decompte) => d.statut === 'brouillon').length,
-      montantTotal: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_net || 0), 0),
-      montantTotalVente: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_vente || 0), 0),
-      montantTotalCommission: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_commission || 0), 0),
-      montantTotalBenefice: decomptesArray.reduce((sum: number, d: Decompte) => sum + (d.montant_benefice || 0), 0)
+      montantTotal: decomptesArray.filter((d: any) => !d.est_annule).reduce((sum: number, d: Decompte) => sum + (d.montant_net || 0), 0),
+      montantTotalVente: decomptesArray.filter((d: any) => !d.est_annule).reduce((sum: number, d: Decompte) => sum + (d.montant_vente || 0), 0),
+      montantTotalCommission: decomptesArray.filter((d: any) => !d.est_annule).reduce((sum: number, d: Decompte) => sum + (d.montant_commission || 0), 0),
+      montantTotalBenefice: decomptesArray.filter((d: any) => !d.est_annule).reduce((sum: number, d: Decompte) => sum + (d.montant_benefice || 0), 0)
     };
     setStatistiques(stats);
 
@@ -446,10 +451,11 @@ const loadDecomptes = async () => {
     const totalPaye = data.filter(d => d.statut === 'paye').length;
     const totalAnnule = data.filter(d => d.statut === 'annule').length;
     const totalBrouillon = data.filter(d => d.statut === 'brouillon').length;
-    const montantTotal = data.reduce((sum, d) => sum + (d.montant_net || 0), 0);
-    const montantTotalVente = data.reduce((sum, d) => sum + (d.montant_vente || 0), 0);
-    const montantTotalCommission = data.reduce((sum, d) => sum + (d.montant_commission || 0), 0);
-    const montantTotalBenefice = data.reduce((sum, d) => sum + (d.montant_benefice || 0), 0);
+    const nonAnnules = data.filter(d => d.statut !== 'annule' && !(d as any).est_annule);
+    const montantTotal = nonAnnules.reduce((sum, d) => sum + (d.montant_net || 0), 0);
+    const montantTotalVente = nonAnnules.reduce((sum, d) => sum + (d.montant_vente || 0), 0);
+    const montantTotalCommission = nonAnnules.reduce((sum, d) => sum + (d.montant_commission || 0), 0);
+    const montantTotalBenefice = nonAnnules.reduce((sum, d) => sum + (d.montant_benefice || 0), 0);
 
     setStatistiques({
       total: data.length,
@@ -527,7 +533,7 @@ const loadDecomptes = async () => {
   };
 
   const handleDelete = async (idDecompte: number) => {
-    if (!await confirm('Êtes-vous sûr de vouloir supprimer ce décompte ?\n\nCette action est irréversible et restaurera les stocks.', 'Suppression décompte')) {
+    if (!await confirm('Annuler ce décompte ? Les stocks seront réintégrés et le décompte restera visible, marqué « Annulé ».', 'Annulation décompte')) {
       return;
     }
 
@@ -580,23 +586,37 @@ const loadDecomptes = async () => {
             SET qte_stock = CASE WHEN qte_stock + ? >= 0 THEN qte_stock + ? ELSE 0 END
             WHERE idProduit = ? AND idRevendeur = ?
           `, [netRevendeur, netRevendeur, detail.idProduit, idRevendeur]);
+
+          // Tracer le mouvement d'annulation (sinon le stock bouge sans historique).
+          // Type choisi selon le sens pour rester cohérent avec le contrôle de cohérence.
+          await db.execute(
+            `INSERT INTO mouvements_revendeur (idProduit, idRevendeur, idDecompte, type_mouvement, qte_mouvement, date_mouvement)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+            [detail.idProduit, idRevendeur, idDecompte,
+             netRevendeur >= 0 ? 'ANNULATION_DECOMPTE' : 'ANNULATION_REAPPRO', Math.abs(netRevendeur)]
+          );
         }
       }
 
-      // Supprimer les enregistrements dépendants (sans CASCADE)
-      await db.execute(`DELETE FROM mouvements_revendeur WHERE idDecompte = ?`, [idDecompte]);
-      await db.execute(`DELETE FROM factures_approvisionnement WHERE idDecompte = ?`, [idDecompte]);
+      // Neutraliser l'impact CAISSE : retirer l'entrée de journal créée lors du décompte
+      // (sinon la caisse reste créditée alors que le décompte est annulé).
+      await db.execute(
+        `DELETE FROM journal_caisse WHERE categorie = 'DECOMPTE_REVENDEUR' AND idReference = ?`,
+        [idDecompte]
+      );
 
-      // Supprimer les détails (CASCADE géré par la DB)
-      await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [idDecompte]);
-
-      // Supprimer le décompte
-      await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [idDecompte]);
+      // Annuler le décompte (au lieu de le supprimer) : conservé et tracé, stocks déjà réintégrés.
+      // Les détails, mouvements et factures d'approvisionnement liés sont conservés comme historique.
+      await db.execute(`
+        UPDATE decomptes
+        SET est_annule = 1, statut = 'annule', date_annulation = datetime('now'), annule_par = ?
+        WHERE idDecompte = ?
+      `, [user?.nom || null, idDecompte]);
 
       notifications.show({
         title: '✅ Succès',
-        message: 'Décompte supprimé avec succès.',
-        color: 'green',
+        message: 'Décompte annulé avec succès (stocks réintégrés).',
+        color: 'orange',
         autoClose: 3000
       });
 
@@ -658,14 +678,9 @@ const loadDecomptes = async () => {
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper
+      <Paper className="tk-page-tools"
         p="xl"
-        radius="lg"
-        style={{
-          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-          borderBottom: '3px solid #e94560'
-        }}
-      >
+        radius="lg">
         <Stack gap="md">
           <Group justify="space-between" align="center" wrap="wrap">
             <Group gap="md">
@@ -701,6 +716,7 @@ const loadDecomptes = async () => {
           </Group>
 
           {/* Barre de recherche et filtres */}
+          <TkFilters>
           <Card bg="rgba(255,255,255,0.1)" radius="md" p="md" withBorder={false}>
             <Grid align="flex-end">
               <Grid.Col span={{ base: 12, sm: 3 }}>
@@ -798,6 +814,7 @@ const loadDecomptes = async () => {
                 <Select
                   placeholder="Statut"
                   clearable
+                  searchable
                   data={[
                     { value: 'brouillon', label: 'Brouillon' },
                     { value: 'valide', label: 'Validé' },
@@ -946,6 +963,7 @@ const loadDecomptes = async () => {
               </Grid.Col>
             </Grid>
           </Card>
+          </TkFilters>
         </Stack>
       </Paper>
 
@@ -989,30 +1007,30 @@ const loadDecomptes = async () => {
             <ScrollArea h={550}>
               <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="xs">
                 <Table.Thead>
-                  <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                    <Table.Th style={{ width: 30, textAlign: 'center', color: 'white' }}>
+                  <Table.Tr>
+                    <Table.Th style={{ width: 30, textAlign: 'center', }}>
                       <Checkbox
                         checked={selectedItems.length === paginatedDecomptes.length && paginatedDecomptes.length > 0}
                         onChange={(e) => handleSelectAll(e.currentTarget.checked)}
                         styles={{ input: { backgroundColor: 'rgba(255,255,255,0.2)' } }}
                       />
                     </Table.Th>
-                    <Table.Th style={{ width: 35, textAlign: 'center', fontSize: 11, color: 'white' }}>N°</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Nom du client</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Date</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: 'white' }}>CodeFacture</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Catégorie</Table.Th>
-                    <Table.Th style={{ fontSize: 11, color: 'white' }}>Désignation</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté initiale</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté vendue</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Qté restante</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Prix Achat</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Prix Vente</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Total Achat</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Total Vente</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Bénéfice</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'right', color: 'white' }}>Commission</Table.Th>
-                    <Table.Th style={{ fontSize: 11, textAlign: 'center', color: 'white' }}>Actions</Table.Th>
+                    <Table.Th style={{ width: 35, textAlign: 'center', fontSize: 11, }}>N°</Table.Th>
+                    <Table.Th style={{ fontSize: 11, }}>Nom du client</Table.Th>
+                    <Table.Th style={{ fontSize: 11, }}>Date</Table.Th>
+                    <Table.Th style={{ fontSize: 11, }}>CodeFacture</Table.Th>
+                    <Table.Th style={{ fontSize: 11, }}>Catégorie</Table.Th>
+                    <Table.Th style={{ fontSize: 11, }}>Désignation</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', }}>Qté initiale</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', }}>Qté vendue</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', }}>Qté restante</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Prix Achat</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Prix Vente</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Total Achat</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Total Vente</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Bénéfice</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'right', }}>Commission</Table.Th>
+                    <Table.Th style={{ fontSize: 11, textAlign: 'center', }}>Actions</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -1099,11 +1117,12 @@ const loadDecomptes = async () => {
                                       <IconPencil size={14} />
                                     </ActionIcon>
                                   </Tooltip>
-                                  <Tooltip label="Supprimer">
+                                  <Tooltip label="Annuler le décompte">
                                     <ActionIcon
                                       variant="subtle"
                                       color="red"
                                       size="sm"
+                                      disabled={!!(decompte as any).est_annule}
                                       onClick={() => handleDelete(decompte.idDecompte)}
                                     >
                                       <IconTrash size={14} />
@@ -1116,8 +1135,9 @@ const loadDecomptes = async () => {
                         );
                       });
                     } else {
+                      const estAnnuleDec = !!(decompte as any).est_annule;
                       return (
-                        <Table.Tr key={decompte.idDecompte}>
+                        <Table.Tr key={decompte.idDecompte} style={estAnnuleDec ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
                           <Table.Td ta="center">
                             <Checkbox
                               checked={selectedItems.includes(decompte.idDecompte)}
@@ -1171,11 +1191,12 @@ const loadDecomptes = async () => {
                                   <IconPencil size={14} />
                                 </ActionIcon>
                               </Tooltip>
-                              <Tooltip label="Supprimer">
+                              <Tooltip label="Annuler le décompte">
                                 <ActionIcon
                                   variant="subtle"
                                   color="red"
                                   size="sm"
+                                  disabled={!!(decompte as any).est_annule}
                                   onClick={() => handleDelete(decompte.idDecompte)}
                                 >
                                   <IconTrash size={14} />

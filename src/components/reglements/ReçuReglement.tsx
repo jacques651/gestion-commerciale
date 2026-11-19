@@ -6,7 +6,10 @@ import {
 } from '@mantine/core';
 import { IconPrinter, IconDownload, IconCheck } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
+import { construireCssImpression } from '../../utils/printFormats';
+import SelecteurFormatImpression, { useFormatImpression } from '../common/SelecteurFormatImpression';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
 import { getDb } from '../../database/db';
 
 interface ReçuReglementProps {
@@ -26,7 +29,9 @@ interface ReçuReglementProps {
 
 export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClose }) => {
   const printRef = useRef<HTMLDivElement>(null);
+  const { format, setFormat } = useFormatImpression();
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
+  const { tvaActive } = useTVAConfig();
   const [factureInfo, setFactureInfo] = useState<{
     montant_total: number;
     total_regle_avant: number;
@@ -39,19 +44,22 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
       try {
         const db = await getDb();
         const facture = await db.select<any[]>(`
-          SELECT montant_ttc, idFacture
-          FROM factures 
+          SELECT montant_ttc, montant_ht, idFacture
+          FROM factures
           WHERE code_facture = ? OR idFacture = ?
         `, [reglement.code_facture, reglement.idFacture || 0]);
-        
+
         if (facture.length > 0) {
           const idFacture = facture[0].idFacture;
-          const totalFacture = facture[0].montant_ttc || 0;
-          
+          // Sans TVA, on présente le HT (le TTC stocké peut être gonflé sur d'anciennes factures).
+          const totalFacture = tvaActive
+            ? (facture[0].montant_ttc || 0)
+            : (facture[0].montant_ht ?? facture[0].montant_ttc ?? 0);
+
           const reglements = await db.select<any[]>(`
             SELECT COALESCE(SUM(montant), 0) as total
-            FROM reglements 
-            WHERE idFacture = ?
+            FROM reglements
+            WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
           `, [idFacture]);
           
           const totalRegle = reglements[0].total || 0;
@@ -82,11 +90,12 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
       }
     };
     loadFactureInfo();
-  }, [reglement.idFacture, reglement.code_facture, reglement.montant]);
+  }, [reglement.idFacture, reglement.code_facture, reglement.montant, tvaActive]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
     documentTitle: `Reçu_Reglement_${reglement.code_reglement}`,
+    pageStyle: construireCssImpression({ format, racine: '.recu-reg-body' }),
   });
 
   const formatMontant = (value: number | string | undefined | null): string => {
@@ -189,6 +198,8 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
     <Box>
       {/* Boutons d'action */}
       <Group justify="flex-end" mb={4} className="no-print" gap="xs">
+        <SelecteurFormatImpression format={format} onFormatChange={setFormat} size="xs" avecOrientation={false} />
+
         <Button size="compact-xs" variant="subtle" onClick={onClose}>Fermer</Button>
         <Button size="compact-xs" variant="subtle" onClick={handlePrint} leftSection={<IconPrinter size={12} />}>
           Imprimer
@@ -198,7 +209,7 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
         </Button>
       </Group>
 
-      <div ref={printRef}>
+      <div ref={printRef} className="recu-reg-body">
         <Paper p={8} style={{ maxWidth: '1000px', margin: '0 auto', backgroundColor: 'white', fontSize: '11px' }}>
           
           {/* En-tête compact */}
@@ -339,7 +350,7 @@ export const ReçuReglement: React.FC<ReçuReglementProps> = ({ reglement, onClo
           {/* Pied de page compact */}
           <Flex justify="space-between" mt={2} style={{ fontSize: '8px', color: '#aaa' }}>
             <Text>{atelier.adresse}</Text>
-            <Text>{atelier.nif && `NIF: ${atelier.nif}`}</Text>
+            <Text>{(atelier as any).nif && `NIF: ${(atelier as any).nif}`}</Text>
           </Flex>
         </Paper>
       </div>

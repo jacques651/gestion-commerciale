@@ -48,6 +48,7 @@ import {
 import { notifications } from '@mantine/notifications';
 
 import { Credit, creditRepository, Remboursement } from '../../database/repositories/creditRepository';
+import TkFilters from '../TkFilters';
 
 interface Statistiques {
   totalCredits: number;
@@ -367,7 +368,7 @@ export default function ListeCredits() {
   return (
     <Stack gap="lg" p="md">
       {/* En-tête */}
-      <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+      <Paper className="tk-page-tools" p="xl" radius="lg">
         <Flex justify="space-between" align="center" wrap="wrap">
           <Group gap="md">
             <ThemeIcon size={45} radius="md" color="violet" variant="filled">
@@ -471,6 +472,7 @@ export default function ListeCredits() {
       </Paper>
 
       {/* Filtres */}
+      <TkFilters>
       <Card withBorder radius="lg" shadow="sm" p="lg">
         <Flex align="flex-end" gap="sm" wrap="wrap">
           <TextInput
@@ -485,6 +487,7 @@ export default function ListeCredits() {
           <Select
             placeholder="Statut"
             clearable
+            searchable
             data={[
               { value: 'EN_COURS', label: 'En cours' },
               { value: 'TERMINE', label: 'Terminé' },
@@ -499,6 +502,7 @@ export default function ListeCredits() {
           <Select
             placeholder="Type"
             clearable
+            searchable
             data={[
               { value: 'CLIENT', label: 'Vente à crédit' },
               { value: 'FOURNISSEUR', label: 'Avance / Prêt accordé' },
@@ -533,24 +537,25 @@ export default function ListeCredits() {
           </Text>
         )}
       </Card>
+      </TkFilters>
 
       {/* Liste des crédits */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
         <ScrollArea h={500}>
           <Table striped highlightOnHover verticalSpacing="sm">
             <Table.Thead>
-              <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                <Table.Th c="white" w={50}>N°</Table.Th>
-                <Table.Th c="white">Code</Table.Th>
-                <Table.Th c="white">Date</Table.Th>
-                <Table.Th c="white">Désignation</Table.Th>
-                <Table.Th c="white">Bénéficiaire</Table.Th>
-                <Table.Th c="white">Type</Table.Th>
-                <Table.Th c="white" ta="right">Montant</Table.Th>
-                <Table.Th c="white" ta="right">Reste</Table.Th>
-                <Table.Th c="white" ta="center">Progression</Table.Th>
-                <Table.Th c="white" ta="center">Statut</Table.Th>
-                <Table.Th c="white" ta="center">Actions</Table.Th>
+              <Table.Tr>
+                <Table.Th w={50}>N°</Table.Th>
+                <Table.Th>Code</Table.Th>
+                <Table.Th>Date</Table.Th>
+                <Table.Th>Désignation</Table.Th>
+                <Table.Th>Bénéficiaire</Table.Th>
+                <Table.Th>Type</Table.Th>
+                <Table.Th ta="right">Montant</Table.Th>
+                <Table.Th ta="right">Reste</Table.Th>
+                <Table.Th ta="center">Progression</Table.Th>
+                <Table.Th ta="center">Statut</Table.Th>
+                <Table.Th ta="center">Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>

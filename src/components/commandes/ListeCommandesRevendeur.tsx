@@ -12,10 +12,13 @@ import {
   IconSearch, IconRefresh, IconTruck, 
   IconUser, IconCurrencyFrank,
   IconFileInvoice, IconEye, IconReceipt, 
-  IconX, IconList
+  IconX, IconList, IconPlus
 } from '@tabler/icons-react';
 import { getDb } from '../../database/db';
 import { notifications } from '@mantine/notifications';
+import { FormulaireCommande } from './FormulaireCommande';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
+import TkFilters from '../TkFilters';
 
 interface CommandeRevendeur {
   idCommande: number;
@@ -53,6 +56,9 @@ const formatDateCustom = (dateStr: string): string => {
 export const ListeCommandesRevendeur: React.FC = () => {
   const navigate = useNavigate();
   const [commandes, setCommandes] = useState<CommandeRevendeur[]>([]);
+  // Formulaire de création, restreint au circuit revendeur
+  const [formulaireOpened, setFormulaireOpened] = useState(false);
+  const { tvaActive, tauxTVA } = useTVAConfig();
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
@@ -240,7 +246,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
     <>
       <Stack gap="lg" p="md">
         {/* EN-TÊTE */}
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+        <Paper className="tk-page-tools" p="xl" radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
               <Group gap="md">
@@ -254,6 +260,15 @@ export const ListeCommandesRevendeur: React.FC = () => {
               </Group>
             </Stack>
             <Group>
+              {/* Point d'entrée du circuit décrit dans le guide :
+                  Revendeurs → Commandes → Nouvelle commande */}
+              <Button
+                color="green"
+                leftSection={<IconPlus size={18} />}
+                onClick={() => setFormulaireOpened(true)}
+              >
+                Nouvelle commande
+              </Button>
               <Button variant="light" color="white" leftSection={<IconRefresh size={18} />} onClick={chargerCommandes}>
                 Actualiser
               </Button>
@@ -285,6 +300,7 @@ export const ListeCommandesRevendeur: React.FC = () => {
         </Paper>
 
         {/* FILTRES + BOUTONS */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="sm">
           <Group grow align="flex-end" gap="xs">
             {/* Revendeur */}
@@ -364,21 +380,22 @@ export const ListeCommandesRevendeur: React.FC = () => {
             </Group>
           </Group>
         </Card>
+        </TkFilters>
 
         {/* TABLEAU PRINCIPAL */}
         <Card withBorder radius="lg" shadow="sm" p={0}>
           <ScrollArea h="calc(100vh - 500px)" style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="md" style={{ minWidth: 980, tableLayout: 'fixed' }}>
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                  <Table.Th c="white" w={50} style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
-                  <Table.Th c="white" w={175} style={{ whiteSpace: 'nowrap' }}>Revendeur</Table.Th>
-                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
-                  <Table.Th c="white" w={185} style={{ whiteSpace: 'nowrap' }}>Code commande</Table.Th>
-                  <Table.Th c="white" ta="right" w={120} style={{ whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
-                  <Table.Th c="white" w={195} style={{ whiteSpace: 'nowrap' }}>Code facture</Table.Th>
-                  <Table.Th c="white" w={110} style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
-                  <Table.Th c="white" ta="center" w={160} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th w={50} style={{ whiteSpace: 'nowrap' }}>N°</Table.Th>
+                  <Table.Th w={175} style={{ whiteSpace: 'nowrap' }}>Revendeur</Table.Th>
+                  <Table.Th w={110} style={{ whiteSpace: 'nowrap' }}>Date</Table.Th>
+                  <Table.Th w={185} style={{ whiteSpace: 'nowrap' }}>Code commande</Table.Th>
+                  <Table.Th ta="right" w={120} style={{ whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
+                  <Table.Th w={195} style={{ whiteSpace: 'nowrap' }}>Code facture</Table.Th>
+                  <Table.Th w={110} style={{ whiteSpace: 'nowrap' }}>Statut</Table.Th>
+                  <Table.Th ta="center" w={160} style={{ whiteSpace: 'nowrap' }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -388,6 +405,17 @@ export const ListeCommandesRevendeur: React.FC = () => {
                       <Stack align="center" py={50}>
                         <IconTruck size={50} color="#ccc" />
                         <Text c="dimmed">Aucune commande revendeur trouvée</Text>
+                        {/* L'état vide propose directement l'action attendue
+                            par le guide plutôt que de laisser l'écran mort. */}
+                        <Button
+                          leftSection={<IconPlus size={16} />}
+                          color="green"
+                          variant="light"
+                          size="xs"
+                          onClick={() => setFormulaireOpened(true)}
+                        >
+                          Créer une commande revendeur
+                        </Button>
                       </Stack>
                     </Table.Td>
                   </Table.Tr>
@@ -557,7 +585,10 @@ export const ListeCommandesRevendeur: React.FC = () => {
                 <div>
                   <Text size="sm" c="dimmed">Total HT:</Text>
                   <Text fw={700} size="lg">{formatMontant((selectedCommande as any).montant_ht || 0)} F</Text>
-                  <Text size="xs" c="dimmed">TVA (18%): {formatMontant((selectedCommande as any).montant_tva || 0)} F</Text>
+                  {/* Taux réel issu des paramètres, plus de 18 % codé en dur */}
+                  {tvaActive && (
+                    <Text size="xs" c="dimmed">TVA ({tauxTVA}%): {formatMontant((selectedCommande as any).montant_tva || 0)} F</Text>
+                  )}
                   <Text fw={700} size="xl" c="blue">Total TTC: {formatMontant((selectedCommande as any).montant_ttc || 0)} F</Text>
                 </div>
               </Group>
@@ -565,6 +596,16 @@ export const ListeCommandesRevendeur: React.FC = () => {
           </Stack>
         )}
       </Modal>
+
+      {/* Création d'une commande revendeur : le formulaire est verrouillé sur
+          le circuit REVENDEUR (seuls les revendeurs sont proposés, prix gros
+          et commission appliqués) conformément au guide des circuits. */}
+      <FormulaireCommande
+        opened={formulaireOpened}
+        onClose={() => setFormulaireOpened(false)}
+        restrictionType="REVENDEUR"
+        onSaved={chargerCommandes}
+      />
     </>
   );
 };

@@ -4,7 +4,7 @@ import {
   Table, TextInput, Button, Group, Badge, ActionIcon,
   Stack, Title, Card, Text, Tooltip, Pagination, Modal,
   ScrollArea, Paper, Flex, ThemeIcon, SimpleGrid, Avatar,
-  Loader, Alert, NumberInput, Divider, Select, Grid
+  Loader, Alert, NumberInput, Divider, Select, Grid, Textarea
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -18,8 +18,11 @@ import { FormulaireProduit } from './FormulaireProduit';
 import { ModalImportProduits } from './ModalImportProduits';
 import { ModalAjoutStock } from './ModalAjoutStock';
 import { PageHeader } from '../common/PageHeader';
+import { useAuth } from '../../contexts/AuthContext';
+import TkFilters from '../TkFilters';
 
 export const ListeProduits: React.FC = () => {
+  const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -32,12 +35,14 @@ export const ListeProduits: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   const [showRuptureOnly, setShowRuptureOnly] = useState(false);
+  const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'bas' | 'rupture'>('all');
 
   // Modals states
   const [modalOpened, setModalOpened] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [motifAnnulation, setMotifAnnulation] = useState('');
   const [ajoutStockModalOpen, setAjoutStockModalOpen] = useState(false);
   const [selectedProductForStock, setSelectedProductForStock] = useState<Product | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -65,28 +70,37 @@ export const ListeProduits: React.FC = () => {
   const unites = [...new Set(products.map(p => p.unite_base).filter(Boolean))];
 
   // Statistiques globales
+  // Les produits annulés sont exclus des statistiques de stock et de valeur
+  const actifs = products.filter(p => !(p as any).est_annule);
   const stats = {
-    total: products.length,
+    total: actifs.length,
+    annules: products.filter(p => (p as any).est_annule).length,
     categories: categories.length,
-    ruptureStock: products.filter(p => p.qte_stock <= 0).length,
-    stockBas: products.filter(p => p.qte_stock > 0 && p.qte_stock <= (p.seuil_alerte || 10)).length,
-    stockOK: products.filter(p => p.qte_stock > (p.seuil_alerte || 10)).length,
-    valeurVente: products.reduce((sum, p) => sum + (p.qte_stock * p.prix_vente_detail), 0),
-    valeurAchat: products.reduce((sum, p) => sum + (p.qte_stock * (p.prix_moyen_pondere || p.prix_achat_base)), 0),
-    margePotentielle: products.reduce((sum, p) => sum + (p.qte_stock * p.prix_vente_detail), 0) - 
-                      products.reduce((sum, p) => sum + (p.qte_stock * (p.prix_moyen_pondere || p.prix_achat_base)), 0)
+    ruptureStock: actifs.filter(p => p.qte_stock <= 0).length,
+    stockBas: actifs.filter(p => p.qte_stock > 0 && p.qte_stock <= (p.seuil_alerte ?? 5)).length,
+    stockOK: actifs.filter(p => p.qte_stock > (p.seuil_alerte ?? 5)).length,
+    valeurVente: actifs.reduce((sum, p) => sum + (p.qte_stock * p.prix_vente_detail), 0),
+    valeurAchat: actifs.reduce((sum, p) => sum + (p.qte_stock * (p.prix_moyen_pondere || p.prix_achat_base)), 0),
+    margePotentielle: actifs.reduce((sum, p) => sum + (p.qte_stock * p.prix_vente_detail), 0) -
+                      actifs.reduce((sum, p) => sum + (p.qte_stock * (p.prix_moyen_pondere || p.prix_achat_base)), 0)
   };
 
   // Filtrage avancé
   const filteredProducts = products.filter(p => {
     const matchSearch = searchTerm === '' ||
       p.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.code_produit?.toLowerCase().includes(searchTerm.toLowerCase());
+      p.code_produit?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      // Recherche par référence de l'article
+      (p.reference as string | undefined)?.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchCategorie = !categorieFiltre || p.categorie === categorieFiltre;
     const matchUnite = !uniteFiltre || p.unite_base === uniteFiltre;
     const matchStock = (!stockMin || p.qte_stock >= stockMin) && (!stockMax || p.qte_stock <= stockMax);
     const matchRupture = !showRuptureOnly || p.qte_stock <= 0;
+    const matchStatus =
+      stockStatusFilter === 'all' ? true :
+      stockStatusFilter === 'rupture' ? p.qte_stock <= 0 :
+      (p.qte_stock > 0 && p.qte_stock <= (p.seuil_alerte ?? 5));
 
     let matchDate = true;
     if (dateDebut || dateFin) {
@@ -95,7 +109,7 @@ export const ListeProduits: React.FC = () => {
       if (dateFin && dateEntree > dateFin) matchDate = false;
     }
 
-    return matchSearch && matchCategorie && matchUnite && matchStock && matchDate && matchRupture;
+    return matchSearch && matchCategorie && matchUnite && matchStock && matchDate && matchRupture && matchStatus;
   });
 
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -106,14 +120,21 @@ export const ListeProduits: React.FC = () => {
 
   const formatMontant = (value: number): string => (value || 0).toLocaleString('fr-FR');
 
-  const handleDelete = async () => {
+  const handleAnnuler = async () => {
     if (productToDelete) {
-      await productRepository.delete(productToDelete.idProduit);
-      notifications.show({ title: 'Succès', message: 'Produit supprimé', color: 'green' });
+      await productRepository.annuler(productToDelete.idProduit, motifAnnulation.trim() || undefined, user?.nom);
+      notifications.show({ title: 'Produit annulé', message: `"${productToDelete.designation}" annulé (exclu du stock)`, color: 'orange' });
       setDeleteModalOpen(false);
       setProductToDelete(null);
+      setMotifAnnulation('');
       loadProducts();
     }
+  };
+
+  const handleRestaurer = async (product: Product) => {
+    await productRepository.restaurer(product.idProduit);
+    notifications.show({ title: 'Produit rétabli', message: `"${product.designation}" a été rétabli`, color: 'green' });
+    loadProducts();
   };
 
   const resetFilters = () => {
@@ -130,9 +151,10 @@ export const ListeProduits: React.FC = () => {
 
   // Export Excel
   const exportToExcel = () => {
-    const headers = ['Code', 'Désignation', 'Catégorie', 'Unité', 'Stock', 'Prix achat (PMP)', 'Prix vente', 'Prix gros', 'Date entrée'];
+    const headers = ['Code', 'Référence', 'Désignation', 'Catégorie', 'Unité', 'Stock', 'Prix achat (PMP)', 'Prix vente', 'Prix gros', 'Date entrée'];
     const rows = filteredProducts.map(p => [
       p.code_produit,
+      p.reference || '',
       p.designation,
       p.categorie || '',
       p.unite_base,
@@ -216,10 +238,12 @@ export const ListeProduits: React.FC = () => {
           </Button>
         }
         stats={[
-          { label: 'Références', value: stats.total, icon: <IconPackage size={13} /> },
-          { label: 'Valeur vente', value: `${formatMontant(stats.valeurVente)} F`, icon: <IconCash size={13} />, color: '#40c057' },
-          { label: 'Stock bas', value: stats.stockBas, icon: <IconAlertCircle size={13} />, color: stats.stockBas > 0 ? '#f59f00' : 'rgba(255,255,255,0.5)' },
-          { label: 'Rupture', value: stats.ruptureStock, icon: <IconAlertTriangle size={13} />, color: stats.ruptureStock > 0 ? '#ff6b6b' : 'rgba(255,255,255,0.5)' },
+          { label: 'Références', value: stats.total, icon: <IconPackage size={13} />, onClick: () => { setStockStatusFilter('all'); setCurrentPage(1); } },
+          { label: 'Valeur ventes', value: `${formatMontant(stats.valeurVente)} F`, icon: <IconCash size={13} />, color: '#40c057', onClick: () => { setStockStatusFilter('all'); setCurrentPage(1); } },
+          { label: 'Valeur achats', value: `${formatMontant(stats.valeurAchat)} F`, icon: <IconCash size={13} />, color: '#4dabf7', onClick: () => { setStockStatusFilter('all'); setCurrentPage(1); } },
+          { label: 'Bénéfice potentiel', value: `${formatMontant(stats.margePotentielle)} F`, icon: <IconCash size={13} />, color: '#f4b400', onClick: () => { setStockStatusFilter('all'); setCurrentPage(1); } },
+          { label: 'Stock bas', value: stats.stockBas, icon: <IconAlertCircle size={13} />, color: stats.stockBas > 0 ? '#f59f00' : 'rgba(255,255,255,0.5)', onClick: () => { setStockStatusFilter(f => f === 'bas' ? 'all' : 'bas'); setCurrentPage(1); } },
+          { label: 'Rupture', value: stats.ruptureStock, icon: <IconAlertTriangle size={13} />, color: stats.ruptureStock > 0 ? '#ff6b6b' : 'rgba(255,255,255,0.5)', onClick: () => { setStockStatusFilter(f => f === 'rupture' ? 'all' : 'rupture'); setCurrentPage(1); } },
         ]}
       />
 
@@ -248,12 +272,13 @@ export const ListeProduits: React.FC = () => {
       )}
 
       {/* Barre de recherche, filtres et boutons sur une seule ligne */}
+      <TkFilters>
       <Card withBorder radius="lg" shadow="sm" p="md">
         <Grid align="flex-end">
           {/* Recherche */}
           <Grid.Col span={2.5}>
             <TextInput
-              placeholder="Rechercher..."
+              placeholder="Rechercher (nom, code, référence)..."
               leftSection={<IconSearch size={16} />}
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
@@ -268,6 +293,7 @@ export const ListeProduits: React.FC = () => {
               data={categories.map(c => ({ value: c, label: c }))}
               value={categorieFiltre}
               onChange={setCategorieFiltre}
+              searchable
               clearable
               size="sm"
             />
@@ -280,6 +306,7 @@ export const ListeProduits: React.FC = () => {
               data={unites.map(u => ({ value: u, label: u }))}
               value={uniteFiltre}
               onChange={setUniteFiltre}
+              searchable
               clearable
               size="sm"
             />
@@ -402,36 +429,52 @@ export const ListeProduits: React.FC = () => {
           📊 {filteredProducts.length} produit(s) trouvé(s) sur {products.length}
         </Text>
       </Card>
+      </TkFilters>
 
       {/* Tableau des produits */}
       <Card withBorder radius="lg" shadow="sm" p={0}>
+        <style>{`
+          .produits-table td, .produits-table th { white-space: nowrap !important; }
+          .produits-table td { font-size: 11.5px !important; padding-top: 6px !important; padding-bottom: 6px !important; }
+          .produits-table td .mantine-Text-root { font-size: 11.5px !important; }
+          .produits-table td .mantine-ActionIcon-root { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
+        `}</style>
         <ScrollArea h="calc(100vh - 480px)">
-          <Table striped highlightOnHover>
-            <Table.Thead style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+          <Table striped highlightOnHover className="produits-table">
+            <Table.Thead>
               <Table.Tr>
-                <Table.Th style={{ color: 'white' }}>Code</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Désignation</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Catégorie</Table.Th>
-                <Table.Th style={{ color: 'white' }}>Unité</Table.Th>
-                <Table.Th style={{ color: 'white' }} ta="center">Stock</Table.Th>
-                <Table.Th style={{ color: 'white' }} ta="right">Prix achat (PMP)</Table.Th>
-                <Table.Th style={{ color: 'white' }} ta="right">Prix vente</Table.Th>
-                <Table.Th style={{ color: 'white' }} ta="right">Valeur stock</Table.Th>
-                <Table.Th style={{ color: 'white' }} ta="center">Actions</Table.Th>
+                <Table.Th>Code</Table.Th>
+                <Table.Th>Désignation</Table.Th>
+                <Table.Th>Catégorie</Table.Th>
+                <Table.Th>Unité</Table.Th>
+                <Table.Th ta="center">Stock</Table.Th>
+                <Table.Th ta="right">Prix achat (PMP)</Table.Th>
+                <Table.Th ta="right">Prix détail</Table.Th>
+                <Table.Th ta="right">Prix gros</Table.Th>
+                <Table.Th ta="right">Valeur achats</Table.Th>
+                <Table.Th ta="right">Valeur ventes</Table.Th>
+                <Table.Th ta="right">Bénéfice</Table.Th>
+                <Table.Th ta="center">Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {paginatedProducts.map((product) => (
-                <Table.Tr key={product.idProduit} style={product.qte_stock <= 0 ? { backgroundColor: '#fff5f5' } : {}}>
+                <Table.Tr key={product.idProduit} style={(product as any).est_annule ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : (product.qte_stock <= 0 ? { backgroundColor: '#fff5f5' } : {})}>
                   <Table.Td>
-                    <Text fw={600} size="sm">{product.code_produit}</Text>
+                    <Group gap={6} wrap="nowrap">
+                      <Text fw={600} size="sm">{product.code_produit}</Text>
+                      {product.reference ? (
+                        <Text size="xs" c="dimmed">· {product.reference}</Text>
+                      ) : null}
+                    </Group>
                   </Table.Td>
                   <Table.Td>
-                    <Group gap="sm">
+                    <Group gap="xs" wrap="nowrap">
                       <Avatar size="sm" radius="xl" color="blue">
                         <IconCube size={14} />
                       </Avatar>
-                      <Text fw={500} size="sm">{product.designation}</Text>
+                      <Text fw={500} size="sm" truncate style={{ maxWidth: 240 }}>{product.designation}</Text>
+                      {(product as any).est_annule ? <Badge color="orange" variant="filled" size="xs">Annulé</Badge> : null}
                     </Group>
                   </Table.Td>
                   <Table.Td>
@@ -445,7 +488,7 @@ export const ListeProduits: React.FC = () => {
                       <Badge color="red" variant="filled" size="sm">Rupture</Badge>
                     ) : (
                       <Badge 
-                        color={product.qte_stock <= (product.seuil_alerte || 10) ? 'orange' : 'green'} 
+                        color={product.qte_stock <= (product.seuil_alerte ?? 5) ? 'orange' : 'green'} 
                         variant="light" 
                         size="sm"
                       >
@@ -464,12 +507,32 @@ export const ListeProduits: React.FC = () => {
                     </Text>
                   </Table.Td>
                   <Table.Td ta="right">
+                    <Text size="sm" fw={700} c="teal">
+                      {formatMontant(product.prix_vente_gros)} F
+                    </Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
+                    <Text size="sm" fw={600} c="dimmed">
+                      {(product.qte_stock * (product.prix_moyen_pondere || product.prix_achat_base)).toLocaleString()} F
+                    </Text>
+                  </Table.Td>
+                  <Table.Td ta="right">
                     <Text size="sm" fw={600}>
                       {(product.qte_stock * product.prix_vente_detail).toLocaleString()} F
                     </Text>
                   </Table.Td>
+                  <Table.Td ta="right">
+                    {(() => {
+                      const benefice = product.qte_stock * (product.prix_vente_detail - (product.prix_moyen_pondere || product.prix_achat_base));
+                      return (
+                        <Text size="sm" fw={700} c={benefice >= 0 ? 'green' : 'red'}>
+                          {benefice.toLocaleString()} F
+                        </Text>
+                      );
+                    })()}
+                  </Table.Td>
                   <Table.Td>
-                    <Group gap={4} justify="center">
+                    <Group gap={4} justify="center" wrap="nowrap">
                       <Tooltip label="Ajouter du stock">
                         <ActionIcon 
                           color="blue" 
@@ -496,19 +559,33 @@ export const ListeProduits: React.FC = () => {
                           <IconEdit size={16} />
                         </ActionIcon>
                       </Tooltip>
-                      <Tooltip label="Supprimer">
-                        <ActionIcon 
-                          color="red" 
-                          variant="light" 
-                          size="md" 
-                          onClick={() => { 
-                            setProductToDelete(product); 
-                            setDeleteModalOpen(true); 
-                          }}
-                        >
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Tooltip>
+                      {(product as any).est_annule ? (
+                        <Tooltip label="Rétablir le produit">
+                          <ActionIcon
+                            color="green"
+                            variant="light"
+                            size="md"
+                            onClick={() => handleRestaurer(product)}
+                          >
+                            <IconRefresh size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip label="Annuler le produit">
+                          <ActionIcon
+                            color="red"
+                            variant="light"
+                            size="md"
+                            onClick={() => {
+                              setProductToDelete(product);
+                              setMotifAnnulation('');
+                              setDeleteModalOpen(true);
+                            }}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -529,11 +606,22 @@ export const ListeProduits: React.FC = () => {
       </Card>
 
       {/* Modals */}
-      <Modal opened={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Confirmation" centered>
-        <Alert icon={<IconAlertCircle size={16} />} color="red">Supprimer "{productToDelete?.designation}" ?</Alert>
+      <Modal opened={deleteModalOpen} onClose={() => { setDeleteModalOpen(false); setMotifAnnulation(''); }} title="Annuler le produit" centered>
+        <Alert icon={<IconAlertCircle size={16} />} color="orange">
+          Annuler « {productToDelete?.designation} » ? Le produit restera visible et tracé, mais ne sera plus compté dans le stock ni proposé à la vente.
+        </Alert>
+        <Textarea
+          mt="md"
+          label="Motif (optionnel)"
+          placeholder="Raison de l'annulation"
+          value={motifAnnulation}
+          onChange={(e) => setMotifAnnulation(e.currentTarget.value)}
+          autosize
+          minRows={2}
+        />
         <Group justify="flex-end" mt="md">
-          <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>Annuler</Button>
-          <Button color="red" onClick={handleDelete}>Supprimer</Button>
+          <Button variant="outline" onClick={() => { setDeleteModalOpen(false); setMotifAnnulation(''); }}>Fermer</Button>
+          <Button color="orange" onClick={handleAnnuler}>Confirmer l'annulation</Button>
         </Group>
       </Modal>
 

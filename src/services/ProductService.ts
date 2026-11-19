@@ -8,6 +8,8 @@ export interface ProductDto {
 
   code_produit: string;
 
+  reference?: string; // Référence de l'article (champ optionnel)
+
   designation: string;
 
   categorie?: string;
@@ -47,6 +49,7 @@ export default class ProductService {
       INSERT INTO products
       (
         code_produit,
+        reference,
         designation,
         categorie,
         unite_base,
@@ -59,11 +62,12 @@ export default class ProductService {
       )
       VALUES
       (
-        ?,?,?,?,?,?,?,?,?,?
+        ?,?,?,?,?,?,?,?,?,?,?
       )
       `,
       [
         product.code_produit,
+        product.reference ?? null,
         product.designation,
         product.categorie ?? null,
         product.unite_base ?? null,
@@ -100,6 +104,7 @@ export default class ProductService {
       UPDATE products
       SET
         code_produit = ?,
+        reference = ?,
         designation = ?,
         categorie = ?,
         unite_base = ?,
@@ -112,6 +117,7 @@ export default class ProductService {
       `,
       [
         product.code_produit,
+        product.reference ?? null,
         product.designation,
         product.categorie ?? null,
         product.unite_base ?? null,
@@ -180,6 +186,7 @@ export default class ProductService {
       SELECT *
       FROM products
       WHERE est_supprime = 0
+      AND COALESCE(est_annule, 0) = 0
       ORDER BY designation
       `
     ) as ProductDto[];
@@ -200,6 +207,7 @@ export default class ProductService {
       WHERE
       qte_stock <= seuil_alerte
       AND est_supprime = 0
+      AND COALESCE(est_annule, 0) = 0
       `
     ) as ProductDto[];
   }
@@ -218,13 +226,18 @@ export default class ProductService {
       SELECT *
       FROM products
       WHERE
-        designation LIKE ?
-        OR code_produit LIKE ?
-        OR categorie LIKE ?
-      AND est_supprime = 0
+        (
+          designation LIKE ?
+          OR code_produit LIKE ?
+          OR categorie LIKE ?
+          OR reference LIKE ?
+        )
+        AND est_supprime = 0
+        AND COALESCE(est_annule, 0) = 0
       ORDER BY designation
       `,
       [
+        `%${texte}%`,
         `%${texte}%`,
         `%${texte}%`,
         `%${texte}%`
@@ -272,6 +285,7 @@ export default class ProductService {
       ) as total
       FROM products
       WHERE est_supprime = 0
+      AND COALESCE(est_annule, 0) = 0
       `
     ) as { total:number }[];
 

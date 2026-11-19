@@ -1,7 +1,23 @@
 // src/database/db.ts
-import Database from '@tauri-apps/plugin-sql';
+import { WebDatabase } from './webAdapter';
 
-let dbInstance: Database | null = null;
+// Type minimal commun aux deux implementations (Tauri natif et adaptateur web).
+type DbLike = {
+  select: <T = any>(query: string, bindValues?: any[]) => Promise<T>;
+  execute: (query: string, bindValues?: any[]) => Promise<{ rowsAffected: number; lastInsertId: number }>;
+  close: () => Promise<boolean>;
+};
+
+let dbInstance: DbLike | null = null;
+
+/**
+ * Detecte si l'application tourne dans la coque native Tauri.
+ * Sinon, on est dans un navigateur (mode web portable) -> adaptateur HTTP.
+ */
+const isTauri = (): boolean => {
+  return typeof window !== 'undefined' &&
+    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+};
 
 const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -144,26 +160,28 @@ CREATE TABLE IF NOT EXISTS unites (
     FOREIGN KEY (unite_reference_id) REFERENCES unites(idUnite)
 );
 
--- Table products (version complète avec toutes les colonnes)
 CREATE TABLE IF NOT EXISTS products (
+    commission_pourcentage REAL DEFAULT 0,
     idProduit INTEGER PRIMARY KEY AUTOINCREMENT,
     code_produit TEXT UNIQUE NOT NULL,
+    reference TEXT,
     designation TEXT NOT NULL,
     categorie TEXT,
     unite_base TEXT DEFAULT 'pièce',
+    contenu_unite REAL DEFAULT 1,
     prix_achat_base REAL DEFAULT 0,
     prix_vente_detail REAL DEFAULT 0,
     prix_vente_gros REAL DEFAULT 0,
     qte_stock REAL DEFAULT 0,
-    seuil_alerte REAL DEFAULT 10,
+    seuil_alerte REAL DEFAULT 5,
     prix_moyen_pondere REAL DEFAULT 0,
     methode_gestion_stock TEXT DEFAULT 'FIFO',
     date_entree DATETIME DEFAULT CURRENT_TIMESTAMP,
     est_supprime INTEGER DEFAULT 0
 );
 
--- Table conditionnements
 CREATE TABLE IF NOT EXISTS conditionnements (
+    code_conditionnement TEXT,
     idConditionnement INTEGER PRIMARY KEY AUTOINCREMENT,
     idProduit INTEGER NOT NULL,
     idUnite INTEGER NOT NULL,
@@ -191,6 +209,9 @@ CREATE TABLE IF NOT EXISTS clients (
     Tel TEXT,
     Email TEXT,
     Ville TEXT,
+    adresse_postale TEXT,
+    ifu TEXT,
+    rccm TEXT,
     TypeClient TEXT NOT NULL CHECK(TypeClient IN ('client', 'revendeur'))
 );
 
@@ -216,6 +237,7 @@ CREATE TABLE IF NOT EXISTS commandes (
     signature_base64 TEXT,
     code_facture TEXT,
     date_facture DATE,
+    taux_commission REAL DEFAULT 60,
     FOREIGN KEY (idClient) REFERENCES clients(idClient)
 );
 
@@ -248,7 +270,7 @@ CREATE TABLE IF NOT EXISTS stock_revendeur (
 );
 
 -- =====================================================
--- 6. DÉCOMPTES REVENDEURS (version corrigée)
+-- 6. DÉCOMPTES REVENDEURS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS decomptes (
@@ -267,15 +289,15 @@ CREATE TABLE IF NOT EXISTS decomptes (
     periode_fin TEXT,
     notes TEXT,
     id_facture_approvisionnement INTEGER,
+    taux_commission REAL DEFAULT 60,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
     FOREIGN KEY (idClient) REFERENCES clients(idClient),
-    FOREIGN KEY (id_facture_approvisionnement)
-        REFERENCES factures_approvisionnement(idFactureAppro)
+    FOREIGN KEY (id_facture_approvisionnement) REFERENCES factures_approvisionnement(idFactureAppro)
 );
 
 CREATE TABLE IF NOT EXISTS decompte_details (
+    prix_unitaire_vente REAL DEFAULT 0,
     idDetailRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
     idDecompte INTEGER NOT NULL,
     idProduit INTEGER NOT NULL,
@@ -286,17 +308,104 @@ CREATE TABLE IF NOT EXISTS decompte_details (
     commission_pourcentage REAL DEFAULT 0,
     designation TEXT,
     total REAL DEFAULT 0,
+    qte_reappro REAL DEFAULT 0,
     FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte) ON DELETE CASCADE,
     FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
--- Index pour les décomptes
 CREATE INDEX IF NOT EXISTS idx_decomptes_client ON decomptes(idClient);
 CREATE INDEX IF NOT EXISTS idx_decomptes_date ON decomptes(date_decompte);
 CREATE INDEX IF NOT EXISTS idx_decomptes_statut ON decomptes(statut);
 CREATE INDEX IF NOT EXISTS idx_decomptes_code ON decomptes(code_decompte);
 CREATE INDEX IF NOT EXISTS idx_decompte_details_decompte ON decompte_details(idDecompte);
 CREATE INDEX IF NOT EXISTS idx_decompte_details_produit ON decompte_details(idProduit);
+
+-- =====================================================
+-- REVENDEURS PONCTUELS - CYCLE DE VIE COMPLET
+-- =====================================================
+
+-- 1. Fiche revendeur
+CREATE TABLE IF NOT EXISTS revendeurs_ponctuels (
+    idRevendeurPonctuel INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom_complet TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    email TEXT,
+    adresse TEXT,
+    piece_identite TEXT,
+    numero_piece TEXT,
+    date_inscription DATETIME DEFAULT CURRENT_TIMESTAMP,
+    est_actif INTEGER DEFAULT 1,
+    notes TEXT
+);
+
+-- 2. Mouvements principaux (sorties)
+CREATE TABLE IF NOT EXISTS mouvements_revendeurs (
+    idMouvement INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_mouvement TEXT UNIQUE NOT NULL,
+    idRevendeurPonctuel INTEGER NOT NULL,
+    idProduit INTEGER NOT NULL,
+    date_sortie DATETIME DEFAULT CURRENT_TIMESTAMP,
+    quantite_sortie REAL NOT NULL,
+    prix_unitaire REAL NOT NULL,
+    montant_total REAL NOT NULL,
+    destination TEXT NOT NULL CHECK(destination IN ('PRESENTATION', 'VENTE')),
+    statut TEXT DEFAULT 'EN_COURS' CHECK(statut IN ('EN_COURS', 'RETOURNE', 'VENDU', 'PARTIELLEMENT_RETOURNE', 'PARTIELLEMENT_VENDU', 'CLOTURE')),
+    stock_avant_sortie REAL NOT NULL,
+    stock_apres_sortie REAL NOT NULL,
+    notes TEXT,
+    idUtilisateur INTEGER,
+    date_cloture DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idRevendeurPonctuel) REFERENCES revendeurs_ponctuels(idRevendeurPonctuel),
+    FOREIGN KEY (idProduit) REFERENCES products(idProduit),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+-- 3. Événements du mouvement (retours, ventes, pertes, etc.)
+CREATE TABLE IF NOT EXISTS mouvement_evenements (
+    idEvenement INTEGER PRIMARY KEY AUTOINCREMENT,
+    idMouvement INTEGER NOT NULL,
+    type_evenement TEXT NOT NULL CHECK(type_evenement IN ('RETOUR', 'VENTE', 'PERTE', 'ECHANGE', 'AJUSTEMENT')),
+    date_evenement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    quantite REAL NOT NULL,
+    prix_unitaire REAL,
+    montant REAL,
+    etat TEXT CHECK(etat IN ('BON', 'ABIME', 'PERDU')),
+    client_nom TEXT,
+    client_contact TEXT,
+    stock_avant REAL NOT NULL,
+    stock_apres REAL NOT NULL,
+    notes TEXT,
+    idUtilisateur INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+-- 4. États du mouvement (historique des changements de statut)
+CREATE TABLE IF NOT EXISTS mouvement_etats (
+    idEtat INTEGER PRIMARY KEY AUTOINCREMENT,
+    idMouvement INTEGER NOT NULL,
+    ancien_statut TEXT NOT NULL,
+    nouveau_statut TEXT NOT NULL,
+    date_changement DATETIME DEFAULT CURRENT_TIMESTAMP,
+    raison TEXT,
+    idUtilisateur INTEGER,
+    FOREIGN KEY (idMouvement) REFERENCES mouvements_revendeurs(idMouvement) ON DELETE CASCADE,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
+-- 5. Index
+CREATE INDEX IF NOT EXISTS idx_mouvements_revendeur ON mouvements_revendeurs(idRevendeurPonctuel);
+CREATE INDEX IF NOT EXISTS idx_mouvements_produit ON mouvements_revendeurs(idProduit);
+CREATE INDEX IF NOT EXISTS idx_mouvements_date_sortie ON mouvements_revendeurs(date_sortie);
+CREATE INDEX IF NOT EXISTS idx_mouvements_statut ON mouvements_revendeurs(statut);
+CREATE INDEX IF NOT EXISTS idx_mouvements_code ON mouvements_revendeurs(code_mouvement);
+CREATE INDEX IF NOT EXISTS idx_evenements_mouvement ON mouvement_evenements(idMouvement);
+CREATE INDEX IF NOT EXISTS idx_evenements_date ON mouvement_evenements(date_evenement);
+CREATE INDEX IF NOT EXISTS idx_evenements_type ON mouvement_evenements(type_evenement);
+CREATE INDEX IF NOT EXISTS idx_etats_mouvement ON mouvement_etats(idMouvement);
 
 -- =====================================================
 -- 7. VENTES
@@ -335,8 +444,101 @@ CREATE INDEX IF NOT EXISTS idx_vente_client ON ventes(idClient);
 CREATE INDEX IF NOT EXISTS idx_vente_detail_vente ON vente_details(idVente);
 CREATE INDEX IF NOT EXISTS idx_vente_detail_produit ON vente_details(idProduit);
 
+-- Prestations de services : volontairement séparées des produits pour ne
+-- jamais déclencher de mouvement ou de contrôle de stock.
+CREATE TABLE IF NOT EXISTS prestations (
+    idPrestation INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_prestation TEXT UNIQUE NOT NULL,
+    designation TEXT NOT NULL,
+    categorie TEXT,
+    description TEXT,
+    prix_defaut REAL DEFAULT 0,
+    prix_libre INTEGER DEFAULT 0,
+    unite_facturation TEXT DEFAULT 'prestation',
+    statut TEXT DEFAULT 'ACTIVE' CHECK(statut IN ('ACTIVE', 'INACTIVE')),
+    observations TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ventes_prestations (
+    idVentePrestation INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_facture TEXT UNIQUE NOT NULL,
+    idClient INTEGER,
+    client_nom TEXT,
+    client_contact TEXT,
+    date_vente DATETIME DEFAULT CURRENT_TIMESTAMP,
+    montant_total REAL NOT NULL DEFAULT 0,
+    montant_paye REAL NOT NULL DEFAULT 0,
+    mode_paiement TEXT,
+    mode_paiement_detail TEXT,
+    statut_paiement TEXT NOT NULL DEFAULT 'PAYEE' CHECK(statut_paiement IN ('PAYEE', 'PARTIELLE', 'IMPAYEE', 'ANNULEE')),
+    idUtilisateur INTEGER,
+    idSession INTEGER,
+    observations TEXT,
+    est_annule INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idClient) REFERENCES clients(idClient),
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id),
+    FOREIGN KEY (idSession) REFERENCES sessions_caisse(idSession)
+);
+
+CREATE TABLE IF NOT EXISTS vente_prestation_details (
+    idDetailPrestation INTEGER PRIMARY KEY AUTOINCREMENT,
+    idVentePrestation INTEGER NOT NULL,
+    idPrestation INTEGER,
+    designation TEXT NOT NULL,
+    unite_facturation TEXT DEFAULT 'prestation',
+    quantite REAL NOT NULL DEFAULT 1,
+    prix_unitaire REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    observations TEXT,
+    FOREIGN KEY (idVentePrestation) REFERENCES ventes_prestations(idVentePrestation) ON DELETE CASCADE,
+    FOREIGN KEY (idPrestation) REFERENCES prestations(idPrestation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prestations_statut ON prestations(statut);
+CREATE INDEX IF NOT EXISTS idx_ventes_prestations_date ON ventes_prestations(date_vente);
+CREATE INDEX IF NOT EXISTS idx_ventes_prestations_client ON ventes_prestations(idClient);
+
 -- =====================================================
--- 8. MOUVEMENTS STOCK (version complète)
+-- 7bis. ATTESTATIONS D'ACHAT-VENTE (matériel d'occasion)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS attestations (
+    idAttestation INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_attestation TEXT UNIQUE,
+    date_attestation DATETIME DEFAULT CURRENT_TIMESTAMP,
+    idVente INTEGER,
+    cedant_nom TEXT,
+    cedant_domicile TEXT,
+    cedant_tel TEXT,
+    cedant_doc TEXT,
+    cedant_ref TEXT,
+    cess_nom TEXT,
+    cess_domicile TEXT,
+    cess_tel TEXT,
+    cess_doc TEXT,
+    cess_ref TEXT,
+    materiel TEXT,
+    en_echange TEXT,
+    montant REAL DEFAULT 0,
+    sens TEXT DEFAULT 'ACHAT',
+    fait_a TEXT,
+    date_acte TEXT,
+    nb_exemplaires TEXT,
+    created_by TEXT,
+    est_annule INTEGER DEFAULT 0,
+    date_annulation DATETIME,
+    annule_par TEXT,
+    motif_annulation TEXT,
+    FOREIGN KEY (idVente) REFERENCES ventes(idVente)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attestations_date ON attestations(date_attestation);
+
+-- =====================================================
+-- 8. MOUVEMENTS STOCK
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS mouvements_stock (
@@ -378,7 +580,6 @@ CREATE TABLE IF NOT EXISTS lots_stock (
     FOREIGN KEY (idFournisseur) REFERENCES fournisseurs(idFournisseur)
 );
 
--- Table des sorties de stock par lot
 CREATE TABLE IF NOT EXISTS sorties_lots (
     idSortieLot INTEGER PRIMARY KEY AUTOINCREMENT,
     idLot INTEGER NOT NULL,
@@ -389,7 +590,6 @@ CREATE TABLE IF NOT EXISTS sorties_lots (
     FOREIGN KEY (idMouvement) REFERENCES mouvements_stock(idMouvement)
 );
 
--- Table pour l'historique des prix
 CREATE TABLE IF NOT EXISTS historique_prix (
     idHistorique INTEGER PRIMARY KEY AUTOINCREMENT,
     idProduit INTEGER NOT NULL,
@@ -409,6 +609,8 @@ CREATE TABLE IF NOT EXISTS historique_prix (
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS mouvements_revendeur (
+    code_facture TEXT,
+    prix_unitaire REAL DEFAULT 0,
     idMouvementRevendeur INTEGER PRIMARY KEY AUTOINCREMENT,
     idProduit INTEGER NOT NULL,
     idRevendeur INTEGER NOT NULL,
@@ -441,6 +643,10 @@ CREATE TABLE IF NOT EXISTS factures (
     statut TEXT DEFAULT 'EN_ATTENTE',
     type_facture TEXT DEFAULT 'VENTE',
     notes TEXT,
+    est_annule INTEGER DEFAULT 0,
+    date_annulation DATETIME,
+    annule_par TEXT,
+    motif_annulation TEXT,
     FOREIGN KEY (idClient) REFERENCES clients(idClient),
     FOREIGN KEY (idCommande) REFERENCES commandes(idCommande)
 );
@@ -455,7 +661,6 @@ CREATE TABLE IF NOT EXISTS facture_details (
     FOREIGN KEY (idProduit) REFERENCES products(idProduit)
 );
 
--- Table des factures d'approvisionnement
 CREATE TABLE IF NOT EXISTS factures_approvisionnement (
     idFactureAppro INTEGER PRIMARY KEY AUTOINCREMENT,
     code_facture TEXT UNIQUE NOT NULL,
@@ -471,7 +676,6 @@ CREATE TABLE IF NOT EXISTS factures_approvisionnement (
     FOREIGN KEY (idDecompte) REFERENCES decomptes(idDecompte)
 );
 
--- Table des détails des factures d'approvisionnement
 CREATE TABLE IF NOT EXISTS factures_approvisionnement_details (
     idDetailAppro INTEGER PRIMARY KEY AUTOINCREMENT,
     idFactureAppro INTEGER NOT NULL,
@@ -495,7 +699,7 @@ CREATE TABLE IF NOT EXISTS factures_revendeur (
     montant_ttc REAL DEFAULT 0,
     commission REAL DEFAULT 0,
     statut TEXT DEFAULT 'EN_ATTENTE',
-    taux_commission REAL DEFAULT 60,  -- ✅ Ajout de la colonne
+    taux_commission REAL DEFAULT 60,
     FOREIGN KEY (idCommande) REFERENCES commandes(idCommande),
     FOREIGN KEY (idRevendeur) REFERENCES clients(idClient)
 );
@@ -505,6 +709,7 @@ CREATE TABLE IF NOT EXISTS factures_revendeur (
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS reglements (
+    idDecompte INTEGER,
     idReglement INTEGER PRIMARY KEY AUTOINCREMENT,
     code_reglement TEXT UNIQUE NOT NULL,
     idClient INTEGER,
@@ -520,13 +725,42 @@ CREATE TABLE IF NOT EXISTS reglements (
     est_lettrage INTEGER DEFAULT 0,
     observation TEXT,
     idUtilisateur INTEGER,
+    statut TEXT DEFAULT 'VALIDE',
+    est_annule INTEGER DEFAULT 0,
+    date_annulation DATETIME,
+    annule_par TEXT,
     FOREIGN KEY (idClient) REFERENCES clients(idClient),
     FOREIGN KEY (idFacture) REFERENCES factures(idFacture),
     FOREIGN KEY (idVente) REFERENCES ventes(idVente)
 );
 
+CREATE TABLE IF NOT EXISTS sessions_caisse (
+    idSession INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_session TEXT UNIQUE NOT NULL,
+    nom_operateur TEXT NOT NULL,
+    date_ouverture DATETIME DEFAULT CURRENT_TIMESTAMP,
+    date_fermeture DATETIME,
+    solde_initial REAL DEFAULT 0,
+    solde_ouverture REAL DEFAULT 0,
+    solde_calcule REAL,
+    solde_declare REAL,
+    ecart REAL DEFAULT 0,
+    total_entrees REAL DEFAULT 0,
+    total_sorties REAL DEFAULT 0,
+    total_ventes REAL DEFAULT 0,
+    total_reglements REAL DEFAULT 0,
+    total_decomptes REAL DEFAULT 0,
+    total_charges REAL DEFAULT 0,
+    statut TEXT DEFAULT 'OUVERTE' CHECK(statut IN ('OUVERTE', 'FERMEE', 'BLOQUEE')),
+    notes_ouverture TEXT,
+    notes_fermeture TEXT,
+    idUtilisateur INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+);
+
 -- =====================================================
--- 13. UTILISATEURS
+-- 14. UTILISATEURS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS utilisateurs (
@@ -543,23 +777,32 @@ CREATE TABLE IF NOT EXISTS utilisateurs (
 );
 
 -- =====================================================
--- 14. CONFIGURATION ATELIER
+-- 15. CONFIGURATION ATELIER
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS configuration_atelier (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     nom_atelier TEXT,
+    forme_juridique TEXT,
+    adresse_postale TEXT,
+    adresse_cadastrale TEXT,
+    ifu TEXT,
+    rccm TEXT,
+    compte_bancaire TEXT,
+    regime_fiscal TEXT,
+    service_impots TEXT,
     telephone TEXT,
     adresse TEXT,
     email TEXT,
     nif TEXT,
     message_facture TEXT,
     logo_base64 TEXT,
+    tva_active INTEGER DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =====================================================
--- 15. CONFIGURATION COMMERCE
+-- 16. CONFIGURATION COMMERCE
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS config_commerce (
@@ -572,10 +815,11 @@ CREATE TABLE IF NOT EXISTS config_commerce (
 );
 
 -- =====================================================
--- 16. CREDITS ET REMBOURSEMENTS
+-- 17. CREDITS ET REMBOURSEMENTS
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS credits (
+    date_echeance TEXT,
     idCredit INTEGER PRIMARY KEY AUTOINCREMENT,
     code_credit TEXT NOT NULL UNIQUE,
     date_credit TEXT NOT NULL,
@@ -615,7 +859,7 @@ CREATE INDEX IF NOT EXISTS idx_remboursements_idCredit ON remboursements(idCredi
 CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date_remboursement);
 
 -- =====================================================
--- 17. JOURNAL DE CAISSE
+-- 18. JOURNAL DE CAISSE
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS journal_caisse (
@@ -630,9 +874,14 @@ CREATE TABLE IF NOT EXISTS journal_caisse (
     reference TEXT,
     idReference INTEGER,
     idUtilisateur INTEGER,
+    idSession INTEGER,
     notes TEXT,
+    -- Mode de paiement de l'opération. NULL = « Non précisé » (opérations
+    -- antérieures à l'introduction de cette colonne).
+    mode_paiement TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id),
+    FOREIGN KEY (idSession) REFERENCES sessions_caisse(idSession)
 );
 
 CREATE TABLE IF NOT EXISTS charges_fonctionnement (
@@ -642,14 +891,16 @@ CREATE TABLE IF NOT EXISTS charges_fonctionnement (
     designation TEXT NOT NULL,
     montant REAL NOT NULL,
     beneficiaire TEXT NOT NULL,
-    categorie_charge TEXT NOT NULL CHECK(categorie_charge IN ('EAU', 'ELECTRICITE', 'LOYER', 'SALAIRE', 'TRANSPORT', 'COMMUNICATION', 'AUTRE')),
+    categorie_charge TEXT NOT NULL,  -- catégorie libre (référentiel: categories_charges)
     reference_paiement TEXT,
     idJournal INTEGER,
     idUtilisateur INTEGER,
+    idSession INTEGER,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (idJournal) REFERENCES journal_caisse(idJournal),
-    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id)
+    FOREIGN KEY (idUtilisateur) REFERENCES utilisateurs(id),
+    FOREIGN KEY (idSession) REFERENCES sessions_caisse(idSession)
 );
 
 CREATE TABLE IF NOT EXISTS categories_charges (
@@ -675,10 +926,9 @@ CREATE TABLE IF NOT EXISTS recapitulatif_journalier (
 );
 
 -- =====================================================
--- 18. VUES
+-- 19. VUES
 -- =====================================================
 
--- Vue pour le calcul du PMP et stock actuel
 CREATE VIEW IF NOT EXISTS vue_stock_actuel AS
 SELECT 
     p.idProduit,
@@ -698,7 +948,6 @@ LEFT JOIN lots_stock l ON p.idProduit = l.idProduit AND l.quantite_restante > 0 
 WHERE p.est_supprime = 0
 GROUP BY p.idProduit;
 
--- Vue pour l'historique des mouvements détaillés
 CREATE VIEW IF NOT EXISTS vue_mouvements_detail AS
 SELECT 
     m.idMouvement,
@@ -723,7 +972,7 @@ LEFT JOIN lots_stock l ON m.idLot = l.idLot
 ORDER BY m.date_mouvement DESC;
 
 -- =====================================================
--- 19. INDEX
+-- 20. INDEX
 -- =====================================================
 
 CREATE INDEX IF NOT EXISTS idx_products_code ON products(code_produit);
@@ -742,7 +991,7 @@ CREATE INDEX IF NOT EXISTS idx_charges_date ON charges_fonctionnement(date_charg
 CREATE INDEX IF NOT EXISTS idx_recap_date ON recapitulatif_journalier(date_recap);
 
 -- =====================================================
--- 20. DONNÉES PAR DÉFAUT
+-- 21. DONNÉES PAR DÉFAUT
 -- =====================================================
 
 INSERT OR IGNORE INTO config_generale (id_config, nom_application, devise, taux_tva_default) 
@@ -796,43 +1045,70 @@ INSERT OR IGNORE INTO categories_charges (code_categorie, libelle) VALUES
 ('AUTRE', 'Autres charges');
 `;
 
-export const getDb = async (): Promise<Database> => {
+// =====================================================
+// FONCTIONS DE GESTION DE LA BASE DE DONNÉES
+// =====================================================
+
+/**
+ * Obtient l'instance de la base de données
+ * Crée une nouvelle connexion si elle n'existe pas
+ */
+export const getDb = async (): Promise<DbLike> => {
     if (dbInstance) return dbInstance;
 
     try {
-        dbInstance = await Database.load('sqlite:gestion-commerciale.db');
+        if (isTauri()) {
+            // Mode natif (application de bureau Tauri) : plugin SQL natif.
+            const { default: Database } = await import('@tauri-apps/plugin-sql');
+            const native = await Database.load('sqlite:gestion-commerciale.db');
 
-        // 🔥 IMPORTANT
-        await dbInstance.execute('PRAGMA foreign_keys = ON;');
-        await dbInstance.execute('PRAGMA journal_mode = WAL;');
-        await dbInstance.execute('PRAGMA synchronous = NORMAL;');
-        await dbInstance.execute('PRAGMA busy_timeout = 30000;');
+            // Configuration des PRAGMA pour optimiser les performances
+            await native.execute('PRAGMA foreign_keys = ON;');
+            await native.execute('PRAGMA journal_mode = WAL;');
+            await native.execute('PRAGMA synchronous = NORMAL;');
+            await native.execute('PRAGMA busy_timeout = 30000;');
 
-        console.log('✅ Base de données connectée');
+            dbInstance = native as unknown as DbLike;
+            console.log('✅ Base de données connectée (mode natif Tauri)');
+        } else {
+            // Mode web portable : la base vit dans le serveur, accès via HTTP.
+            // Les PRAGMA sont déjà appliqués côté serveur.
+            dbInstance = await WebDatabase.load('sqlite:gestion-commerciale.db');
+            console.log('✅ Base de données connectée (mode web portable)');
+        }
+
         return dbInstance;
 
     } catch (error) {
-        console.error('❌ Erreur de connexion:', error);
+        console.error('❌ Erreur de connexion à la base de données:', error);
         throw error;
     }
 };
-// src/database/db.ts - Ajouter cette fonction
+
+/**
+ * Débogue les verrous de la base de données
+ */
 export async function debugLocks() {
     try {
         const db = await getDb();
         const result = await db.select(`
-      SELECT 
-        pid,
-        status,
-        sql
-      FROM pragma_vfs_list()
-    `);
+            SELECT 
+                pid,
+                status,
+                sql
+            FROM pragma_vfs_list()
+        `);
         console.log('🔍 Verrous actifs:', result);
+        return result;
     } catch (error) {
-        console.error('Erreur debug locks:', error);
+        console.error('❌ Erreur debug locks:', error);
+        return null;
     }
 }
 
+/**
+ * Initialise la base de données avec le schéma complet
+ */
 export const initDatabase = async (): Promise<void> => {
     try {
         const db = await getDb();
@@ -841,37 +1117,264 @@ export const initDatabase = async (): Promise<void> => {
 
         // Exécuter le schéma complet
         await db.execute(SCHEMA_SQL);
+
+        // Migration: Ajout de la colonne id_facture_approvisionnement dans decomptes
         try {
             await db.execute(`
-    ALTER TABLE decomptes
-    ADD COLUMN id_facture_approvisionnement INTEGER
-  `);
-
-            console.log('✅ Colonne id_facture_approvisionnement ajoutée');
+                ALTER TABLE decomptes
+                ADD COLUMN id_facture_approvisionnement INTEGER
+            `);
+            console.log('✅ Colonne id_facture_approvisionnement ajoutée à decomptes');
         } catch (error) {
             console.log('ℹ️ Colonne id_facture_approvisionnement déjà existante');
         }
+
+        // Migration: Ajout de la colonne qte_avant_decompte dans decompte_details
         try {
-            await db.execute(`ALTER TABLE decompte_details ADD COLUMN qte_avant_decompte REAL DEFAULT 0`);
-            console.log('✅ Colonne qte_avant_decompte ajoutée');
+            await db.execute(`
+                ALTER TABLE decompte_details 
+                ADD COLUMN qte_avant_decompte REAL DEFAULT 0
+            `);
+            console.log('✅ Colonne qte_avant_decompte ajoutée à decompte_details');
         } catch (error) {
             console.log('ℹ️ Colonne qte_avant_decompte déjà existante');
         }
+
+        // Migration: Ajout de la colonne qte_reappro dans decompte_details
+        try {
+            await db.execute(`
+                ALTER TABLE decompte_details 
+                ADD COLUMN qte_reappro REAL DEFAULT 0
+            `);
+            console.log('✅ Colonne qte_reappro ajoutée à decompte_details');
+        } catch (error) {
+            console.log('ℹ️ Colonne qte_reappro déjà existante');
+        }
+
+        // Migration: Ajout de la colonne taux_commission dans commandes
+        try {
+            await db.execute(`
+                ALTER TABLE commandes 
+                ADD COLUMN taux_commission REAL DEFAULT 60
+            `);
+            console.log('✅ Colonne taux_commission ajoutée à commandes');
+        } catch (error) {
+            console.log('ℹ️ Colonne taux_commission déjà existante dans commandes');
+        }
+
+        // Migration: Ajout de la colonne taux_commission dans decomptes
+        try {
+            await db.execute(`
+                ALTER TABLE decomptes 
+                ADD COLUMN taux_commission REAL DEFAULT 60
+            `);
+            console.log('✅ Colonne taux_commission ajoutée à decomptes');
+        } catch (error) {
+            console.log('ℹ️ Colonne taux_commission déjà existante dans decomptes');
+        }
+
+        // Migration: Ajout de la colonne idSession dans journal_caisse
+        try {
+            await db.execute(`
+                ALTER TABLE journal_caisse 
+                ADD COLUMN idSession INTEGER REFERENCES sessions_caisse(idSession)
+            `);
+            console.log('✅ Colonne idSession ajoutée à journal_caisse');
+        } catch (error) {
+            console.log('ℹ️ Colonne idSession déjà existante dans journal_caisse');
+        }
+
+        // Migration: Ajout de la colonne idSession dans charges_fonctionnement
+        try {
+            await db.execute(`
+                ALTER TABLE charges_fonctionnement 
+                ADD COLUMN idSession INTEGER REFERENCES sessions_caisse(idSession)
+            `);
+            console.log('✅ Colonne idSession ajoutée à charges_fonctionnement');
+        } catch (error) {
+            console.log('ℹ️ Colonne idSession déjà existante dans charges_fonctionnement');
+        }
+
+        // Migration: Ajout de la colonne tva_active dans configuration_atelier
+        try {
+            await db.execute(`
+                ALTER TABLE configuration_atelier 
+                ADD COLUMN tva_active INTEGER DEFAULT 0
+            `);
+            console.log('✅ Colonne tva_active ajoutée à configuration_atelier');
+        } catch (error) {
+            console.log('ℹ️ Colonne tva_active déjà existante dans configuration_atelier');
+        }
+
+        // Migration: Ajout de la colonne date_cloture dans mouvements_revendeurs
+        try {
+            await db.execute(`
+                ALTER TABLE mouvements_revendeurs 
+                ADD COLUMN date_cloture DATETIME
+            `);
+            console.log('✅ Colonne date_cloture ajoutée à mouvements_revendeurs');
+        } catch (error) {
+            console.log('ℹ️ Colonne date_cloture déjà existante dans mouvements_revendeurs');
+        }
+
+        // Migration non destructive : lever la contrainte CHECK sur charges_fonctionnement.categorie_charge
+        // (permet des catégories de charge personnalisées)
+        try {
+            const infoCharges = await db.select<any[]>(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='charges_fonctionnement'"
+            );
+            const sqlDef: string = infoCharges?.[0]?.sql || '';
+            if (sqlDef.includes('CHECK(categorie_charge')) {
+                await db.execute('PRAGMA foreign_keys=OFF;');
+                await db.execute('BEGIN TRANSACTION');
+                await db.execute(`
+                    CREATE TABLE charges_fonctionnement_new (
+                        idCharge INTEGER PRIMARY KEY AUTOINCREMENT,
+                        code_charge TEXT UNIQUE NOT NULL,
+                        date_charge DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        designation TEXT NOT NULL,
+                        montant REAL NOT NULL,
+                        beneficiaire TEXT NOT NULL,
+                        categorie_charge TEXT NOT NULL,
+                        reference_paiement TEXT,
+                        idJournal INTEGER,
+                        idUtilisateur INTEGER,
+                        idSession INTEGER,
+                        notes TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+                `);
+                await db.execute(`
+                    INSERT INTO charges_fonctionnement_new
+                    (idCharge, code_charge, date_charge, designation, montant, beneficiaire,
+                     categorie_charge, reference_paiement, idJournal, idUtilisateur, idSession, notes, created_at)
+                    SELECT idCharge, code_charge, date_charge, designation, montant, beneficiaire,
+                     categorie_charge, reference_paiement, idJournal, idUtilisateur, idSession, notes, created_at
+                    FROM charges_fonctionnement;
+                `);
+                await db.execute('DROP TABLE charges_fonctionnement;');
+                await db.execute('ALTER TABLE charges_fonctionnement_new RENAME TO charges_fonctionnement;');
+                await db.execute('COMMIT');
+                await db.execute('PRAGMA foreign_keys=ON;');
+                console.log('✅ Contrainte CHECK retirée de charges_fonctionnement (catégories libres)');
+            }
+        } catch (error) {
+            console.log('ℹ️ Migration catégories de charge ignorée:', error);
+        }
+
+        // Migration: colonnes adresse_postale, ifu, rccm dans clients (bases anciennes)
+        for (const col of ['adresse_postale', 'ifu', 'rccm']) {
+            try {
+                await db.execute(`ALTER TABLE clients ADD COLUMN ${col} TEXT`);
+                console.log(`✅ Colonne ${col} ajoutée à clients`);
+            } catch (error) {
+                // colonne déjà présente -> ignorer
+            }
+        }
+
+        // Migration: colonnes atelier (formulaire Paramètres) sur bases anciennes
+        for (const col of ['forme_juridique','adresse_postale','adresse_cadastrale','ifu','rccm','compte_bancaire','regime_fiscal','service_impots']) {
+            try { await db.execute(`ALTER TABLE configuration_atelier ADD COLUMN ${col} TEXT`); } catch (e) { /* déjà présent */ }
+        }
+
+        // Migration: colonnes complémentaires détectées par audit
+        try { await db.execute(`ALTER TABLE conditionnements ADD COLUMN code_conditionnement TEXT`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE credits ADD COLUMN date_echeance TEXT`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE reglements ADD COLUMN idDecompte INTEGER`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE decompte_details ADD COLUMN prix_unitaire_vente REAL DEFAULT 0`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE products ADD COLUMN commission_pourcentage REAL DEFAULT 0`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE mouvements_revendeur ADD COLUMN prix_unitaire REAL DEFAULT 0`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE mouvements_revendeur ADD COLUMN code_facture TEXT`); } catch (e) { /* déjà présent */ }
+        // Migration : sens de l'attestation (ACHAT = le commerce achète / VENTE = le commerce vend)
+        try { await db.execute(`ALTER TABLE attestations ADD COLUMN sens TEXT DEFAULT 'ACHAT'`); } catch (e) { /* déjà présent */ }
+
+        // Migration : ajout de la référence produit (champ optionnel) — utilisée pour la recherche
+        try { await db.execute(`ALTER TABLE products ADD COLUMN reference TEXT`); } catch (e) { /* déjà présent */ }
+        // Contenu de l'unité de vente : ex. carton = 12 pièces. Les
+        // conditionnements existants gardent la priorité lorsqu'ils sont définis.
+        try { await db.execute(`ALTER TABLE products ADD COLUMN contenu_unite REAL DEFAULT 1`); } catch (e) { /* déjà présent */ }
+
+        // Migration : colonnes d'ANNULATION (remplace la suppression) sur les tables métier.
+        // Un enregistrement annulé reste visible et tracé, mais est exclu des stocks/totaux.
+        // est_annule = 0/1 ; date_annulation ; annule_par (nom utilisateur) ; motif_annulation (optionnel)
+        const tablesAnnulables = ['products', 'ventes', 'commandes', 'factures', 'factures_revendeur', 'decomptes', 'clients', 'charges_fonctionnement'];
+        for (const table of tablesAnnulables) {
+            try { await db.execute(`ALTER TABLE ${table} ADD COLUMN est_annule INTEGER DEFAULT 0`); } catch (e) { /* déjà présent */ }
+            try { await db.execute(`ALTER TABLE ${table} ADD COLUMN date_annulation DATETIME`); } catch (e) { /* déjà présent */ }
+            try { await db.execute(`ALTER TABLE ${table} ADD COLUMN annule_par TEXT`); } catch (e) { /* déjà présent */ }
+            try { await db.execute(`ALTER TABLE ${table} ADD COLUMN motif_annulation TEXT`); } catch (e) { /* déjà présent */ }
+        }
+
+        // Migration : référentiel des MOYENS DE PAIEMENT (extensible).
+        // Chaque moyen appartient à une « famille » (categorie) qui pilote la
+        // ventilation espèces/transferts de la caisse ; le libellé précis
+        // (Orange Money, Wave, ou un mode « Autre » saisi par l'opérateur) est
+        // conservé pour l'affichage et les filtres, et réapparaît ensuite dans la liste.
+        try {
+            await db.execute(`
+                CREATE TABLE IF NOT EXISTS moyens_paiement (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT UNIQUE NOT NULL,
+                    libelle TEXT NOT NULL,
+                    categorie TEXT NOT NULL CHECK (categorie IN ('ESPECES','MOBILE_MONEY','VIREMENT','CHEQUE','AUTRE')),
+                    est_systeme INTEGER DEFAULT 0,
+                    est_actif INTEGER DEFAULT 1,
+                    ordre INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            const moyensDefaut: Array<[string, string, string, number]> = [
+                ['ESPECES', 'Espèces', 'ESPECES', 1],
+                ['ORANGE_MONEY', 'Orange Money', 'MOBILE_MONEY', 10],
+                ['MOOV_MONEY', 'Moov Money', 'MOBILE_MONEY', 11],
+                ['TELECEL_MONEY', 'Telecel Money', 'MOBILE_MONEY', 12],
+                ['WAVE', 'Wave', 'MOBILE_MONEY', 13],
+                ['SANK_MONEY', 'Sank Money', 'MOBILE_MONEY', 14],
+                ['VIREMENT', 'Virement bancaire', 'VIREMENT', 20],
+                ['CHEQUE', 'Chèque', 'CHEQUE', 30],
+                ['AUTRE', 'Autre', 'AUTRE', 40],
+            ];
+            for (const [code, libelle, categorie, ordre] of moyensDefaut) {
+                try {
+                    await db.execute(
+                        `INSERT OR IGNORE INTO moyens_paiement (code, libelle, categorie, est_systeme, est_actif, ordre)
+                         VALUES (?, ?, ?, 1, 1, ?)`,
+                        [code, libelle, categorie, ordre]
+                    );
+                } catch (e) { /* ignoré */ }
+            }
+            // Normalisation Télétel -> Telecel sur les bases déjà initialisées.
+            try {
+                await db.execute(`UPDATE moyens_paiement SET code='TELECEL_MONEY', libelle='Telecel Money' WHERE code='TELETEL_MONEY'`);
+                await db.execute(`UPDATE journal_caisse SET mode_paiement_detail='Telecel Money' WHERE mode_paiement_detail='Télétel Money'`);
+            } catch (e) { /* ignoré */ }
+            // Harmonisation des statuts de décompte (ancien 'EN_ATTENTE' -> 'valide').
+            try { await db.execute(`UPDATE decomptes SET statut='valide' WHERE statut='EN_ATTENTE'`); } catch (e) { /* ignoré */ }
+        } catch (e) {
+            console.error('Erreur création référentiel moyens_paiement:', e);
+        }
+
+        // Colonnes « mode de paiement » sur le journal de caisse (bases anciennes).
+        // Sans elles, l'enregistrement d'une charge / d'un encaissement échoue
+        // (colonne manquante). ALTER idempotent : ignoré si déjà présent.
+        try { await db.execute(`ALTER TABLE journal_caisse ADD COLUMN mode_paiement TEXT`); } catch (e) { /* déjà présent */ }
+        try { await db.execute(`ALTER TABLE journal_caisse ADD COLUMN mode_paiement_detail TEXT`); } catch (e) { /* déjà présent */ }
+
         console.log('✅ Schéma SQL exécuté avec succès');
 
         // Vérification des tables principales
         const tables = await db.select<any[]>(`
-      SELECT name FROM sqlite_master 
-      WHERE type='table' 
-      ORDER BY name
-    `);
+            SELECT name FROM sqlite_master 
+            WHERE type='table' 
+            ORDER BY name
+        `);
 
         console.log('📊 Tables créées:', tables.map(t => t.name).join(', '));
 
         // Vérifier que la table products a bien toutes les colonnes
         const columns = await db.select<any[]>(`
-      PRAGMA table_info(products)
-    `);
+            PRAGMA table_info(products)
+        `);
 
         console.log('📋 Colonnes de products:', columns.map(c => c.name).join(', '));
 
@@ -883,28 +1386,114 @@ export const initDatabase = async (): Promise<void> => {
             console.warn('⚠️ Les tables de crédits n\'ont pas été créées');
         }
 
+        // Vérifier les tables des revendeurs ponctuels
+        const tempResellerTables = tables.filter(t => 
+            t.name === 'revendeurs_ponctuels' || 
+            t.name === 'mouvements_revendeurs' || 
+            t.name === 'mouvement_evenements' ||
+            t.name === 'mouvement_etats'
+        );
+        if (tempResellerTables.length === 4) {
+            console.log('✅ Tables des revendeurs ponctuels créées avec succès');
+        } else {
+            console.warn('⚠️ Certaines tables des revendeurs ponctuels manquent');
+        }
+
+        // Vérifier les tables des sessions caisse
+        const sessionTables = tables.filter(t => t.name === 'sessions_caisse');
+        if (sessionTables.length > 0) {
+            console.log('✅ Table sessions_caisse créée avec succès');
+        } else {
+            console.warn('⚠️ Table sessions_caisse non trouvée');
+        }
+
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';
-        console.error('❌ Erreur initialisation:', errorMsg);
+        console.error('❌ Erreur lors de l\'initialisation de la base de données:', errorMsg);
         throw error;
     }
 };
 
+/**
+ * Ferme la connexion à la base de données
+ */
 export const closeDatabase = async (): Promise<void> => {
     if (dbInstance) {
-        await dbInstance.close();
-        dbInstance = null;
-        console.log('🔒 Base déconnectée');
+        try {
+            await dbInstance.close();
+            dbInstance = null;
+            console.log('🔒 Base de données déconnectée');
+        } catch (error) {
+            console.error('❌ Erreur lors de la fermeture de la base:', error);
+            throw error;
+        }
     }
 };
 
+/**
+ * Vérifie si la base de données est connectée
+ */
 export const isDatabaseConnected = (): boolean => {
     return dbInstance !== null;
 };
 
+/**
+ * Exécute une transaction avec rollback automatique en cas d'erreur
+ */
+export const transaction = async <T>(
+    callback: (db: DbLike) => Promise<T>
+): Promise<T> => {
+    const db = await getDb();
+    try {
+        await db.execute('BEGIN TRANSACTION');
+        const result = await callback(db);
+        await db.execute('COMMIT');
+        return result;
+    } catch (error) {
+        await db.execute('ROLLBACK');
+        throw error;
+    }
+};
+
+/**
+ * Nettoie les données de test (à utiliser avec précaution)
+ */
+export const clearDatabase = async (): Promise<void> => {
+    const db = await getDb();
+    try {
+        await db.execute('BEGIN TRANSACTION');
+        
+        // Supprimer les données des tables principales (sans supprimer les tables)
+        await db.execute('DELETE FROM journal_caisse');
+        await db.execute('DELETE FROM charges_fonctionnement');
+        await db.execute('DELETE FROM ventes');
+        await db.execute('DELETE FROM vente_details');
+        await db.execute('DELETE FROM mouvements_stock');
+        await db.execute('DELETE FROM mouvements_revendeurs');
+        await db.execute('DELETE FROM mouvement_evenements');
+        await db.execute('DELETE FROM mouvement_etats');
+        await db.execute('DELETE FROM revendeurs_ponctuels');
+        await db.execute('DELETE FROM sessions_caisse');
+
+        // Réinitialiser les séquences
+        await db.execute("DELETE FROM sqlite_sequence WHERE name IN ('journal_caisse', 'charges_fonctionnement', 'ventes', 'vente_details', 'mouvements_stock', 'lots_stock', 'mouvements_revendeurs', 'mouvement_evenements', 'mouvement_etats', 'revendeurs_ponctuels', 'sessions_caisse')");
+
+        await db.execute('COMMIT');
+        console.log('🧹 Base de données nettoyée');
+    } catch (error) {
+        await db.execute('ROLLBACK');
+        console.error('❌ Erreur lors du nettoyage:', error);
+        throw error;
+    }
+};
+
+// Export par défaut
 export default {
     getDb,
     initDatabase,
     closeDatabase,
-    isDatabaseConnected
+    isDatabaseConnected,
+    debugLocks,
+    transaction,
+    clearDatabase
 };

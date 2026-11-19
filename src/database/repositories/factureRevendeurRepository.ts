@@ -1,5 +1,12 @@
 // src/database/repositories/factureRevendeurRepository.ts
 import { getDb } from '../db';
+import { tvaService } from '../../services/tvaService';
+
+/** Coefficient TVA effectif (0 si désactivée dans les paramètres). */
+async function coefTVA(): Promise<number> {
+  const c = await tvaService.get();
+  return c.active ? c.taux / 100 : 0;
+}
 
 export const factureRevendeurRepository = {
   
@@ -31,12 +38,14 @@ export const factureRevendeurRepository = {
 
       // ✅ Récupérer les détails depuis factures_revendeur_details
       let details = await db.select<any[]>(`
-        SELECT 
+        SELECT
           frd.*,
           p.designation,
           p.code_produit,
+          p.reference,
           p.unite_base,
-          p.categorie
+          p.categorie,
+          p.prix_vente_gros AS prix_reel
         FROM factures_revendeur_details frd
         LEFT JOIN products p ON p.idProduit = frd.idProduit
         WHERE frd.idFactureRevendeur = ?
@@ -53,9 +62,11 @@ export const factureRevendeurRepository = {
             cd.prix_unitaire_vente,
             p.designation,
             p.code_produit,
+            p.reference,
             p.unite_base,
             p.categorie,
-            p.prix_achat_base
+            p.prix_achat_base,
+            p.prix_vente_gros AS prix_reel
           FROM commande_details cd
           LEFT JOIN products p ON p.idProduit = cd.idProduit
           WHERE cd.idCommande = ?
@@ -79,9 +90,12 @@ export const factureRevendeurRepository = {
       }
       
       const benefice = montantHT - totalAchat;
-      const tauxCommission = factureData.taux_commission || 60;
+      // ✅ Utiliser le taux stocké en base (peut être 0)
+      const tauxCommission = factureData.taux_commission !== undefined && factureData.taux_commission !== null
+        ? factureData.taux_commission
+        : 60;
       const commission = (benefice * tauxCommission) / 100;
-      const montantTTC = montantHT * 1.18; // TVA 18%
+      const montantTTC = montantHT * (1 + await coefTVA());
       
       // ✅ Si les montants sont à 0 dans la base, les mettre à jour
       if (montantHT > 0 && factureData.montant_ht === 0) {
@@ -114,6 +128,7 @@ export const factureRevendeurRepository = {
         montant_ht: result.montant_ht,
         montant_ttc: result.montant_ttc,
         commission: result.commission,
+        taux_commission: result.taux_commission,
         detailsCount: result.details.length
       });
 
@@ -147,12 +162,14 @@ export const factureRevendeurRepository = {
       const result = [];
       for (const facture of factures) {
         const details = await db.select<any[]>(`
-          SELECT 
+          SELECT
             frd.*,
             p.designation,
             p.code_produit,
+            p.reference,
             p.unite_base,
-            p.categorie
+            p.categorie,
+            p.prix_vente_gros AS prix_reel
           FROM factures_revendeur_details frd
           LEFT JOIN products p ON p.idProduit = frd.idProduit
           WHERE frd.idFactureRevendeur = ?
@@ -172,15 +189,19 @@ export const factureRevendeurRepository = {
         }
         
         const benefice = montantHT - totalAchat;
-        const tauxCommission = facture.taux_commission || 60;
+        // ✅ Utiliser le taux stocké en base (peut être 0)
+        const tauxCommission = facture.taux_commission !== undefined && facture.taux_commission !== null
+          ? facture.taux_commission
+          : 60;
         const commission = (benefice * tauxCommission) / 100;
-        const montantTTC = montantHT * 1.18;
+        const montantTTC = montantHT * (1 + await coefTVA());
         
         result.push({
           ...facture,
           montant_ht: montantHT || facture.montant_ht || 0,
           montant_ttc: montantTTC || facture.montant_ttc || 0,
           commission: commission || facture.commission || 0,
+          taux_commission: tauxCommission,
           details: details || []
         });
       }
@@ -205,6 +226,15 @@ export const factureRevendeurRepository = {
         WHERE frd.idFactureRevendeur = ?
       `, [idFacture]);
 
+      // Récupérer le taux de commission de la facture
+      const facture = await db.select<any[]>(`
+        SELECT taux_commission FROM factures_revendeur WHERE idFactureRevendeur = ?
+      `, [idFacture]);
+      
+      const tauxCommission = facture.length > 0 && facture[0].taux_commission !== undefined
+        ? facture[0].taux_commission
+        : 60;
+
       let totalHT = 0;
       let totalAchat = 0;
       
@@ -218,9 +248,8 @@ export const factureRevendeurRepository = {
       }
 
       const benefice = totalHT - totalAchat;
-      const tauxCommission = 60; // Valeur par défaut
       const commission = (benefice * tauxCommission) / 100;
-      const totalTTC = totalHT * 1.18;
+      const totalTTC = totalHT * (1 + await coefTVA());
 
       await db.execute(`
         UPDATE factures_revendeur 
@@ -230,7 +259,7 @@ export const factureRevendeurRepository = {
         WHERE idFactureRevendeur = ?
       `, [totalHT, totalTTC, commission, idFacture]);
 
-      console.log('✅ Montants recalculés:', { totalHT, totalTTC, commission });
+      console.log('✅ Montants recalculés:', { totalHT, totalTTC, commission, tauxCommission });
       
       return { montant_ht: totalHT, montant_ttc: totalTTC, commission };
 
@@ -241,7 +270,7 @@ export const factureRevendeurRepository = {
   },
 
   // ✅ CRÉER UNE FACTURE À PARTIR D'UNE COMMANDE
-  async createFromCommande(idCommande: number): Promise<number> {
+  async createFromCommande(idCommande: number, options?: { taux_commission?: number }): Promise<number> {
     try {
       const db = await getDb();
       
@@ -283,9 +312,14 @@ export const factureRevendeurRepository = {
       }
 
       const benefice = totalHT - totalAchat;
-      const tauxCommission = 60;
+      
+      // ✅ Utiliser le taux passé en option ou celui de la commande
+      const tauxCommission = options?.taux_commission !== undefined && options.taux_commission !== null
+        ? options.taux_commission
+        : commande[0].taux_commission || 60;
+      
       const commission = (benefice * tauxCommission) / 100;
-      const totalTTC = totalHT * 1.18;
+      const totalTTC = totalHT * (1 + await coefTVA());
 
       // 4. Générer le code facture
       const codeFacture = await generateFactureRevendeurCode();
@@ -344,7 +378,7 @@ export const factureRevendeurRepository = {
         WHERE idCommande = ?
       `, [codeFacture, idCommande]);
 
-      console.log('✅ Facture revendeur créée avec succès ID:', idFacture);
+      console.log('✅ Facture revendeur créée avec succès ID:', idFacture, 'Taux commission:', tauxCommission);
       return idFacture;
 
     } catch (error) {

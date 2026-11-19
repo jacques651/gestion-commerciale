@@ -88,68 +88,59 @@ export class BackupManager {
   }
   
   static async restoreBackup(backupId: string): Promise<void> {
+    const db = await getDb();
     try {
       const backupJson = localStorage.getItem(`backup_${backupId}`);
       if (!backupJson) {
-        throw new Error('Backup non trouvé');
+        throw new Error('Sauvegarde introuvable');
       }
-      
+
       const backupData = JSON.parse(backupJson) as Record<string, any[]>;
-      const db = await getDb();
-      
-      // Commencer une transaction
+
+      // Désactiver les clés étrangères pour toute la durée de la restauration
+      await db.execute('PRAGMA foreign_keys = OFF');
       await db.execute('BEGIN TRANSACTION');
-      
-      // Supprimer les tables existantes (sauf version et système)
+
+      // Récupérer toutes les tables existantes
       const tables = await db.select<{ name: string }[]>(`
-        SELECT name FROM sqlite_master 
+        SELECT name FROM sqlite_master
         WHERE type='table' AND name NOT LIKE 'sqlite_%'
         AND name != 'database_version'
       `);
-      
+
+      // Vider toutes les tables (sans les supprimer — le schéma est conservé)
       for (const table of tables) {
-        await db.execute(`DROP TABLE IF EXISTS ${table.name}`);
+        await db.execute(`DELETE FROM ${table.name}`);
       }
-      
-      // Recréer les tables et insérer les données
+
+      // Réinsérer les données de la sauvegarde
       for (const [tableName, rows] of Object.entries(backupData)) {
         if (tableName === 'database_version') continue;
-        
-        if (rows.length === 0) continue;
-        
-        // Récupérer la structure de la table
+        if (!rows || rows.length === 0) continue;
+
         const columns = Object.keys(rows[0]);
         const placeholders = columns.map(() => '?').join(', ');
-        
-        // Créer la table
-        const createSQL = `
-          CREATE TABLE IF NOT EXISTS ${tableName} (
-            ${columns.map(col => `${col} TEXT`).join(', ')}
-          )
-        `;
-        await db.execute(createSQL);
-        
-        // Insérer les données
+        const sql = `INSERT OR IGNORE INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
+
         for (const row of rows) {
           const values = columns.map(col => row[col] !== undefined ? row[col] : null);
-          await db.execute(
-            `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`,
-            values
-          );
+          try {
+            await db.execute(sql, values);
+          } catch (e) {
+            console.warn(`Ligne ignorée dans ${tableName}:`, e);
+          }
         }
       }
-      
+
       await db.execute('COMMIT');
-      
+
     } catch (error) {
-      // Annuler la transaction en cas d'erreur
-      try {
-        const db = await getDb();
-        await db.execute('ROLLBACK');
-      } catch (e) {}
-      
+      try { await db.execute('ROLLBACK'); } catch (_) {}
       console.error('Erreur restauration:', error);
       throw error;
+    } finally {
+      // Toujours réactiver les clés étrangères
+      try { await db.execute('PRAGMA foreign_keys = ON'); } catch (_) {}
     }
   }
 }

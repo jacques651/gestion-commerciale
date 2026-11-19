@@ -17,8 +17,11 @@ import {
   Alert} from '@mantine/core';
 import { IconPrinter, IconDownload, IconAlertCircle } from '@tabler/icons-react';
 import { useReactToPrint } from 'react-to-print';
+import { construireCssImpression } from '../../utils/printFormats';
+import SelecteurFormatImpression, { useFormatImpression } from '../common/SelecteurFormatImpression';
 import html2pdf from 'html2pdf.js';
 import { useAtelierConfig } from '../../hooks/useAtelierConfig';
+import { useTVAConfig } from '../../hooks/useTVAConfig';
 import { generateFactureCode } from '../../services/codeGeneratorService';
 import { getDb } from '../../database/db';
 
@@ -47,6 +50,10 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 }) => {
   const printRef = useRef<HTMLDivElement>(null);
   const { config: atelierConfig, loading: atelierLoading } = useAtelierConfig();
+  const { tvaActive, coefficientTVA } = useTVAConfig();
+  // Format initialisé avec la valeur de la prop (rétrocompatibilité) puis
+  // modifiable par l'utilisateur avant impression.
+  const { format, setFormat } = useFormatImpression();
   const [codeFacture, setCodeFacture] = useState<string>(facture?.code_facture || '');
   const [generating, setGenerating] = useState(false);
 
@@ -119,8 +126,9 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
   const statutInfo = getStatutInfo(facture?.statut);
   const tauxCommission = facture?.taux_commission || 60;
   
-  // ✅ Calcul du total TTC
-  const totalTTC = facture?.montant_ttc || facture?.total_ttc || 0;
+  // TVA selon le réglage (source de vérité unique). 0 si désactivée.
+  const totalHT_rev = facture?.montant_ht || 0;
+  const totalTTC = tvaActive ? (facture?.montant_ttc || totalHT_rev * (1 + coefficientTVA)) : totalHT_rev;
 
   // ✅ Calcul des détails
   const detailsWithCalculs = useMemo<DetailsWithCalculs[]>(() => {
@@ -131,6 +139,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
     return facture.details.map((detail: any, idx: number) => {
       const qte = detail.qte_commande || detail.quantite || detail.qte || 0;
       const prixAchat = detail.prix_achat_base || detail.prix_achat || 0;
+      // Prix vendu : prix figé sur la facture au moment de la vente
       const prixVente = detail.prix_unitaire_vente || detail.prix_vente || detail.prix_unitaire || 0;
 
       return {
@@ -168,29 +177,18 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
     logo_base64: ''
   };
 
+  // Le format papier sélectionné pilote la géométrie de page et
+  // l'adaptation automatique du corps du document.
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Facture_${codeFacture || 'facture'}`
+    documentTitle: `Facture_${codeFacture || 'facture'}`,
+    pageStyle: construireCssImpression({ format, racine: '.print-area' }),
   });
 
-  const handleOpenPdfNewTab = async () => {
-    if (!printRef.current) return;
-
-    try {
-      const worker = html2pdf().set({
-        margin: 0.2,
-        filename: `Facture_${codeFacture || 'facture'}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'in', format: formatPapier, orientation: 'portrait' }
-      }).from(printRef.current);
-
-      const pdfBlob = await worker.outputPdf('blob');
-      const url = URL.createObjectURL(pdfBlob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (error) {
-      console.error('Erreur PDF:', error);
-    }
+  const handleOpenPdfNewTab = () => {
+    // Impression vectorielle (pas de capture d'écran, pas de popup) :
+    // l'utilisateur choisit « Enregistrer au format PDF » et l'emplacement.
+    handlePrint();
   };
 
   if (atelierLoading || generating) {
@@ -206,7 +204,14 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
 
   return (
     <Box>
-      <Group justify="flex-end" mb="sm" className="no-print">
+      <Group justify="space-between" align="flex-end" mb="sm" className="no-print" wrap="wrap">
+        <SelecteurFormatImpression
+          format={format}
+          onFormatChange={setFormat}
+          avecOrientation={false}
+          size="xs"
+        />
+        <Group gap="xs">
         <Button
           size="xs"
           variant="light"
@@ -224,6 +229,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
         >
           Télécharger PDF
         </Button>
+        </Group>
       </Group>
 
       <div ref={printRef} className="print-area">
@@ -245,11 +251,19 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
               marginBottom: 10
             }}
           >
-            <Box>
-              <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
-              <Text size="xs" c="dimmed">{atelier.adresse}</Text>
-              <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text>
-            </Box>
+            <Group gap="sm" wrap="nowrap" align="flex-start">
+              {(atelier as any).logo_base64 ? (
+                <img src={(atelier as any).logo_base64} alt="" style={{ height: 42, objectFit: 'contain' }} />
+              ) : null}
+              <Box>
+                <Text fw={800} size="sm">{atelier.nom_atelier}</Text>
+                {atelier.adresse ? <Text size="xs" c="dimmed">{atelier.adresse}</Text> : null}
+                {atelier.telephone ? <Text size="xs" c="dimmed">Tel: {atelier.telephone}</Text> : null}
+                {(atelier as any).email ? <Text size="xs" c="dimmed">{(atelier as any).email}</Text> : null}
+                {(atelier as any).ifu ? <Text size="xs" c="dimmed">IFU: {(atelier as any).ifu}</Text> : null}
+                {(atelier as any).rccm ? <Text size="xs" c="dimmed">RCCM: {(atelier as any).rccm}</Text> : null}
+              </Box>
+            </Group>
             <Box style={{ textAlign: 'right' }}>
               <Text size="xs" c="dimmed">N°: {displayCodeFacture}</Text>
               <Text size="xs" c="dimmed">Date: {formatDate(facture?.date_facture)}</Text>
@@ -301,14 +315,15 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
                 <Table.Th c="white" ta="center" w={80}>Unité</Table.Th>
                 <Table.Th c="white" ta="center" w={55}>Qté</Table.Th>
                 <Table.Th c="white" ta="right" w={75}>P.A</Table.Th>
-                <Table.Th c="white" ta="right" w={75}>P.V</Table.Th>
+                <Table.Th c="white" ta="right" w={75}>Prix vendu</Table.Th>
                 <Table.Th c="white" ta="right" w={75}>Bénéf.</Table.Th>
                 <Table.Th c="white" ta="right" w={85}>Total</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {detailsWithCalculs.length > 0 ? (
-                detailsWithCalculs.map((detail) => (
+                detailsWithCalculs.map((detail) => {
+                  return (
                   <Table.Tr key={detail.numero}>
                     <Table.Td ta="center">{detail.numero}</Table.Td>
                     <Table.Td>
@@ -330,7 +345,8 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
                     </Table.Td>
                     <Table.Td ta="right" fw={700}>{formatMontant(detail.total_vente)}</Table.Td>
                   </Table.Tr>
-                ))
+                  );
+                })
               ) : (
                 <Table.Tr>
                   <Table.Td colSpan={9}>
@@ -342,8 +358,7 @@ export const FactureRevendeur: React.FC<FactureRevendeurProps> = ({
               )}
             </Table.Tbody>
           </Table>
-
-          <Divider my="xs" />
+<Divider my="xs" />
 
           {/* Récapitulatif */}
           <SimpleGrid cols={4} spacing="xs" mb="xs">

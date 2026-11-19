@@ -20,10 +20,13 @@ import { FactureStandard } from './FactureStandard';
 import { FormulaireReglement } from '../reglements/FormulaireReglement';
 import { notifications } from '@mantine/notifications';
 import { getDb } from '../../database/db';
+import { useAuth } from '../../contexts/AuthContext';
 import FactureRevendeur from './FactureRevendeur';
+import TkFilters from '../TkFilters';
 
 export const ListeFactures: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { factures, loading, refresh } = useFactures();
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -167,7 +170,7 @@ export const ListeFactures: React.FC = () => {
         reglements = await db.select<any[]>(`
           SELECT idReglement, montant, date_reglement 
           FROM reglements 
-          WHERE idFacture = ?
+          WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
         `, [idFacture]);
 
         details = await db.select<any[]>(`
@@ -213,35 +216,19 @@ const handleDeleteFacture = async () => {
 
     try {
       if (isRevendeur) {
-        // Supprimer les règlements revendeur
+        // Annuler la facture revendeur (tracée, exclue des totaux) — détails et règlements conservés
         await db.execute(`
-          DELETE FROM reglements_revendeur WHERE idFactureRevendeur = ?
-        `, [idFacture]);
-
-        // Supprimer les détails revendeur
-        await db.execute(`
-          DELETE FROM factures_revendeur_details WHERE idFactureRevendeur = ?
-        `, [idFacture]);
-
-        // Supprimer la facture revendeur
-        await db.execute(`
-          DELETE FROM factures_revendeur WHERE idFactureRevendeur = ?
-        `, [idFacture]);
+          UPDATE factures_revendeur
+          SET est_annule = 1, date_annulation = datetime('now'), annule_par = ?
+          WHERE idFactureRevendeur = ?
+        `, [user?.nom || null, idFacture]);
       } else {
-        // Supprimer les règlements standard
+        // Annuler la facture standard (tracée, exclue des totaux) — détails et règlements conservés
         await db.execute(`
-          DELETE FROM reglements WHERE idFacture = ?
-        `, [idFacture]);
-
-        // Supprimer les détails standard
-        await db.execute(`
-          DELETE FROM facture_details WHERE idFacture = ?
-        `, [idFacture]);
-
-        // Supprimer la facture standard
-        await db.execute(`
-          DELETE FROM factures WHERE idFacture = ?
-        `, [idFacture]);
+          UPDATE factures
+          SET est_annule = 1, date_annulation = datetime('now'), annule_par = ?
+          WHERE idFacture = ?
+        `, [user?.nom || null, idFacture]);
       }
 
       // Réactiver les contraintes
@@ -249,7 +236,7 @@ const handleDeleteFacture = async () => {
 
       notifications.show({
         title: '✅ Succès',
-        message: `Facture ${factureToDelete.code_facture} supprimée avec succès.`,
+        message: `Facture ${factureToDelete.code_facture} annulée avec succès.`,
         color: 'green',
         autoClose: 5000
       });
@@ -383,7 +370,7 @@ const handleDeleteFacture = async () => {
         const reglements = await db.select<any[]>(`
           SELECT COALESCE(SUM(montant), 0) as total_regle 
           FROM reglements 
-          WHERE idFacture = ?
+          WHERE idFacture = ? AND COALESCE(statut, 'VALIDE') <> 'ANNULE'
         `, [idFacture]);
 
         const montantRegle = reglements[0]?.total_regle || 0;
@@ -452,7 +439,7 @@ const handleDeleteFacture = async () => {
         reglements = await db.select(`
           SELECT r.*, 'standard' as type
           FROM reglements r
-          WHERE r.idFacture = ?
+          WHERE r.idFacture = ? AND COALESCE(r.statut, 'VALIDE') <> 'ANNULE'
           ORDER BY r.date_reglement DESC
         `, [idFacture]);
       }
@@ -658,7 +645,7 @@ const handleDeleteFacture = async () => {
 
   const stats = {
     total: localFactures.length,
-    montantTotal: localFactures.reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
+    montantTotal: localFactures.filter((f: any) => !f.est_annule).reduce((sum, f: any) => sum + (f.montant_ttc || 0), 0),
     revendeurs: localFactures.filter(f => getTypeFactureLabel(f) === 'Revendeur').length,
     standards: localFactures.filter(f => getTypeFactureLabel(f) === 'Standard').length
   };
@@ -689,15 +676,10 @@ const handleDeleteFacture = async () => {
     <>
       <Stack gap="lg" p="md">
         {/* EN-TÊTE */}
-        <Paper
+        <Paper className="tk-page-tools"
           p="xl"
           radius="lg"
-          style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-            borderBottom: '3px solid #e94560',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
+          style={{ position: 'relative', overflow: 'hidden' }}
         >
           <Flex justify="space-between" align="center" wrap="wrap">
             <Stack gap={4}>
@@ -762,6 +744,7 @@ const handleDeleteFacture = async () => {
         </Paper>
 
         {/* RECHERCHE */}
+        <TkFilters>
         <Card withBorder radius="lg" shadow="sm" p="lg">
           <Group justify="space-between" mb="md">
             <Group><IconSearch size={20} color="#1b365d" /><Title order={3} size="h4">Rechercher</Title></Group>
@@ -824,6 +807,7 @@ const handleDeleteFacture = async () => {
             </Grid.Col>
           </Grid>
         </Card>
+        </TkFilters>
 
         {/* BARRE DE NAVIGATION */}
         <Card withBorder radius="lg" shadow="sm" p="md">
@@ -878,14 +862,14 @@ const handleDeleteFacture = async () => {
           <Box style={{ overflowX: 'auto' }}>
             <Table striped highlightOnHover verticalSpacing="xs" horizontalSpacing="sm" style={{ minWidth: 950, tableLayout: 'fixed' }}>
               <Table.Thead>
-                <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                  <Table.Th c="white" style={{ width: 50, textAlign: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>N°</Table.Th>
-                  <Table.Th c="white" style={{ width: 170, fontSize: '12px', whiteSpace: 'nowrap' }}>Client</Table.Th>
-                  <Table.Th c="white" style={{ width: 100, fontSize: '12px', whiteSpace: 'nowrap' }}>Date</Table.Th>
-                  <Table.Th c="white" style={{ width: 100, fontSize: '12px', whiteSpace: 'nowrap' }}>Type</Table.Th>
-                  <Table.Th c="white" style={{ width: 130, textAlign: 'right', fontSize: '12px', whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
-                  <Table.Th c="white" style={{ width: 210, fontSize: '12px', whiteSpace: 'nowrap' }}>Code Facture</Table.Th>
-                  <Table.Th c="white" style={{ width: 280, textAlign: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>Actions</Table.Th>
+                <Table.Tr>
+                  <Table.Th style={{ width: 50, textAlign: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>N°</Table.Th>
+                  <Table.Th style={{ width: 170, fontSize: '12px', whiteSpace: 'nowrap' }}>Client</Table.Th>
+                  <Table.Th style={{ width: 100, fontSize: '12px', whiteSpace: 'nowrap' }}>Date</Table.Th>
+                  <Table.Th style={{ width: 100, fontSize: '12px', whiteSpace: 'nowrap' }}>Type</Table.Th>
+                  <Table.Th style={{ width: 130, textAlign: 'right', fontSize: '12px', whiteSpace: 'nowrap' }}>Montant TTC</Table.Th>
+                  <Table.Th style={{ width: 210, fontSize: '12px', whiteSpace: 'nowrap' }}>Code Facture</Table.Th>
+                  <Table.Th style={{ width: 280, textAlign: 'center', fontSize: '12px', whiteSpace: 'nowrap' }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -912,9 +896,12 @@ const handleDeleteFacture = async () => {
                     const isRevendeur = isRevendeurFacture(facture);
                     const uniqueKey = getUniqueKey(facture);
 
+                    const estAnnulee = !!(facture as any).est_annule;
                     return (
-                      <Table.Tr key={uniqueKey}>
-                        <Table.Td ta="center" fw={600} style={{ whiteSpace: 'nowrap' }}>{num}</Table.Td>
+                      <Table.Tr key={uniqueKey} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
+                        <Table.Td ta="center" fw={600} style={{ whiteSpace: 'nowrap' }}>
+                          {num}{estAnnulee && <Badge ml={4} color="orange" variant="filled" size="xs">Annulé</Badge>}
+                        </Table.Td>
                         <Table.Td fw={500} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
                           <Text truncate size="sm">{facture.NomComplet || facture.client_nom || '-'}</Text>
                         </Table.Td>
@@ -999,12 +986,13 @@ const handleDeleteFacture = async () => {
                                 <IconDownload size={16} />
                               </ActionIcon>
                             </Tooltip>
-                            {/* ✅ BOUTON SUPPRIMER */}
-                            <Tooltip label="Supprimer">
+                            {/* ✅ BOUTON ANNULER */}
+                            <Tooltip label={estAnnulee ? 'Facture déjà annulée' : 'Annuler la facture'}>
                               <ActionIcon
                                 variant="light"
                                 color="red"
                                 size="md"
+                                disabled={estAnnulee}
                                 onClick={() => analyzeDeleteImpact(facture)}
                               >
                                 <IconTrash size={16} />

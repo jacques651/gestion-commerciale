@@ -3,6 +3,7 @@ import { getDb } from '../database/db';
 
 export interface CommerceParametres {
   tva_default: number;
+  tva_active: boolean;
   devise: string;
   gestion_stock: boolean;
   gestion_commandes: boolean;
@@ -49,6 +50,48 @@ export const configCommerceService = {
     return (result[0] as CommerceConfig) || null;
   },
 
+  // ✅ Récupérer la config TVA complète
+  getTVAConfig: async (): Promise<{ active: boolean; taux: number }> => {
+    const db = await getDb();
+    
+    // 1. Lire la configuration générale
+    const generalResult = await db.select<any[]>(`
+      SELECT taux_tva_default FROM config_generale WHERE id_config = 1
+    `);
+    const taux = generalResult[0]?.taux_tva_default || 18;
+    
+    // 2. Lire la configuration de l'atelier (tva_active)
+    const atelierResult = await db.select<any[]>(`
+      SELECT tva_active FROM configuration_atelier WHERE id = 1
+    `);
+    
+    // Si tva_active existe, l'utiliser, sinon par défaut activée
+    let active = true;
+    if (atelierResult && atelierResult.length > 0) {
+      active = atelierResult[0].tva_active === 1;
+    }
+    
+    return { active, taux };
+  },
+
+  // ✅ Mettre à jour la TVA
+  updateTVA: async (active: boolean, taux?: number): Promise<void> => {
+    const db = await getDb();
+    
+    // 1. Mettre à jour tva_active dans configuration_atelier
+    await db.execute(`
+      INSERT OR REPLACE INTO configuration_atelier (id, tva_active, updated_at)
+      VALUES (1, ?, CURRENT_TIMESTAMP)
+    `, [active ? 1 : 0]);
+    
+    // 2. Si un taux est fourni, mettre à jour config_generale
+    if (taux !== undefined) {
+      await db.execute(`
+        UPDATE config_generale SET taux_tva_default = ? WHERE id_config = 1
+      `, [taux]);
+    }
+  },
+
   // Récupérer la configuration complète avec paramètres parsés
   getFullConfig: async (): Promise<{ type: TypeCommerce | null; parametres: CommerceParametres | null } | null> => {
     const db = await getDb();
@@ -76,6 +119,18 @@ export const configCommerceService = {
       console.error('Erreur parsing parametres', e);
     }
     
+    // ✅ Récupérer tva_active depuis configuration_atelier
+    if (parametres) {
+      const atelierResult = await db.select<any[]>(`
+        SELECT tva_active FROM configuration_atelier WHERE id = 1
+      `);
+      if (atelierResult && atelierResult.length > 0) {
+        parametres.tva_active = atelierResult[0].tva_active === 1;
+      } else {
+        parametres.tva_active = true; // Par défaut
+      }
+    }
+    
     return { type, parametres };
   },
 
@@ -88,11 +143,10 @@ export const configCommerceService = {
     `, [id_type_commerce, JSON.stringify([]), JSON.stringify(parametres)]);
   },
 
-  // Appliquer la configuration (active/désactive des fonctionnalités)
+  // Appliquer la configuration
   applyConfig: async (typeCommerceId: number): Promise<Record<string, boolean>> => {
     const db = await getDb();
     
-    // Récupérer la configuration du type de commerce
     const typeResult = await db.select<any[]>(`
       SELECT * FROM config_types_commerce WHERE id_type_commerce = ?
     `, [typeCommerceId]);
@@ -104,6 +158,7 @@ export const configCommerceService = {
     const typeConfig = typeResult[0] as TypeCommerce;
     let parametres: CommerceParametres = {
       tva_default: 18,
+      tva_active: true,
       devise: 'FCFA',
       gestion_stock: true,
       gestion_commandes: true,
@@ -129,7 +184,7 @@ export const configCommerceService = {
       WHERE id_config = 1
     `, [parametres.tva_default, parametres.devise]);
     
-    // Activer/désactiver les modules selon le type de commerce
+    // Activer/désactiver les modules
     const modules = {
       VENTES: true,
       STOCK: parametres.gestion_stock !== false,
@@ -147,7 +202,6 @@ export const configCommerceService = {
       `, [moduleName, isActive ? 1 : 0]);
     }
     
-    // Sauvegarder la configuration
     await configCommerceService.saveConfig(typeCommerceId, parametres);
     
     return modules;
@@ -164,7 +218,6 @@ export const configCommerceService = {
       return result[0].est_actif === 1;
     }
     
-    // Par défaut, tous les modules sont actifs sauf mention contraire
     const inactiveDefault = ['MULTI_MAGASINS', 'LOTS'];
     return !inactiveDefault.includes(moduleName);
   },
@@ -185,4 +238,60 @@ export const configCommerceService = {
     
     return { taux_tva_default: 18, devise: 'FCFA' };
   },
+
+  // ✅ NOUVEAU : Mettre à jour la TVA depuis l'interface
+  setTVAConfig: async (active: boolean, taux?: number): Promise<void> => {
+    const db = await getDb();
+    
+    // 1. Mettre à jour config_generale si taux fourni
+    if (taux !== undefined) {
+      await db.execute(`
+        UPDATE config_generale SET taux_tva_default = ? WHERE id_config = 1
+      `, [taux]);
+    }
+    
+    // 2. Mettre à jour configuration_atelier
+    const atelierExists = await db.select<any[]>(`
+      SELECT id FROM configuration_atelier WHERE id = 1
+    `);
+    
+    if (atelierExists && atelierExists.length > 0) {
+      await db.execute(`
+        UPDATE configuration_atelier SET tva_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1
+      `, [active ? 1 : 0]);
+    } else {
+      await db.execute(`
+        INSERT INTO configuration_atelier (id, tva_active, updated_at)
+        VALUES (1, ?, CURRENT_TIMESTAMP)
+      `, [active ? 1 : 0]);
+    }
+  },
+
+  // ✅ NOUVEAU : Taux de commission par défaut (dynamique / configurable)
+  // Stocké dans config_parametres (categorie COMMERCIAL, code taux_commission_defaut)
+  getCommissionDefaut: async (): Promise<number> => {
+    const db = await getDb();
+    try {
+      const result = await db.select<any[]>(`
+        SELECT valeur FROM config_parametres
+        WHERE categorie = 'COMMERCIAL' AND code_param = 'taux_commission_defaut'
+      `);
+      if (result && result.length > 0 && result[0].valeur != null && result[0].valeur !== '') {
+        const n = Number(result[0].valeur);
+        return Number.isFinite(n) ? n : 60;
+      }
+    } catch (e) {
+      console.error('Erreur lecture taux_commission_defaut', e);
+    }
+    return 60; // valeur de repli si non configuré
+  },
+
+  setCommissionDefaut: async (taux: number): Promise<void> => {
+    const db = await getDb();
+    await db.execute(`
+      INSERT INTO config_parametres (categorie, code_param, valeur, type_valeur, description)
+      VALUES ('COMMERCIAL', 'taux_commission_defaut', ?, 'number', 'Taux de commission par défaut des revendeurs')
+      ON CONFLICT(categorie, code_param) DO UPDATE SET valeur = excluded.valeur
+    `, [String(taux)]);
+  }
 };

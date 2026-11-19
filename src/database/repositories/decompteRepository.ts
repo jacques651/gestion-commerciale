@@ -406,9 +406,12 @@ export const decompteRepository = {
   },
 
   // =====================================================
-  // DELETE SANS TRANSACTION
+  // ANNULATION TRACÉE (ex-"delete") — on ne supprime plus rien :
+  // le stock est restauré, un mouvement d'annulation est écrit, et le décompte
+  // passe au statut 'annule'. Mouvements et détails sont CONSERVÉS (preuve de
+  // la sortie et de son annulation).
   // =====================================================
-  async delete(idDecompte: number): Promise<void> {
+  async delete(idDecompte: number, motif?: string): Promise<void> {
     const db = await getDb();
 
     try {
@@ -420,6 +423,9 @@ export const decompteRepository = {
 
       if (decompte.length === 0) {
         throw new Error("Décompte introuvable");
+      }
+      if (String(decompte[0].statut || '').toLowerCase() === 'annule') {
+        throw new Error("Ce décompte est déjà annulé.");
       }
 
       const idRevendeur = decompte[0].idClient;
@@ -477,20 +483,20 @@ export const decompteRepository = {
         }
       }
 
-      // Supprimer les enregistrements
-      await db.execute(`DELETE FROM mouvements_revendeur WHERE idDecompte = ?`, [idDecompte]);
-      console.log(`✅ Mouvements supprimés`);
-
-      await db.execute(`DELETE FROM decompte_details WHERE idDecompte = ?`, [idDecompte]);
-      console.log(`✅ Détails supprimés`);
-
-      await db.execute(`DELETE FROM decomptes WHERE idDecompte = ?`, [idDecompte]);
-      console.log(`✅ Décompte supprimé`);
-
-      console.log(`✅ Suppression du décompte ${idDecompte} terminée`);
+      // On CONSERVE mouvements et détails (traçabilité) et on marque le décompte
+      // comme ANNULÉ. Le motif est journalisé dans l'observation.
+      await db.execute(
+        `UPDATE decomptes
+         SET statut = 'annule',
+             observation = TRIM(COALESCE(observation, '') || ' [ANNULÉ le ' || datetime('now') ||
+               CASE WHEN ? IS NOT NULL AND ? <> '' THEN ' — ' || ? ELSE '' END || ']')
+         WHERE idDecompte = ?`,
+        [motif || null, motif || null, motif || null, idDecompte]
+      );
+      console.log(`✅ Décompte ${idDecompte} annulé (mouvements conservés)`);
 
     } catch (error) {
-      console.error('❌ Erreur lors de la suppression:', error);
+      console.error('❌ Erreur lors de l\'annulation du décompte:', error);
       throw error;
     }
   },

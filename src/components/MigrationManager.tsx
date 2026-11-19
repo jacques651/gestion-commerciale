@@ -39,7 +39,7 @@ export const MigrationManagerComponent: React.FC<MigrationManagerComponentProps>
     currentVersion: number;
     latestVersion: number;
     pendingMigrations: any[];
-    hasBackup: boolean;
+    hasBackup?: boolean;
   } | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);

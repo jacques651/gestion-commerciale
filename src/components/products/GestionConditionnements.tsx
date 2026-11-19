@@ -200,14 +200,15 @@ const GestionConditionnements: React.FC<GestionConditionnementsProps> = ({
   };
 
   const handleDelete = async (id: number, libelle: string) => {
-    if (!await confirm(`Supprimer le conditionnement "${libelle}" ?`, 'Suppression')) return;
+    if (!await confirm(`Retirer le conditionnement "${libelle}" ? Il sera désactivé (conservé en base), sans suppression définitive.`, 'Désactivation')) return;
     try {
       const db = await getDb();
-      await db.execute('DELETE FROM conditionnements WHERE idConditionnement = ?', [id]);
+      // Désactivation au lieu de suppression : l'enregistrement est conservé
+      await db.execute('UPDATE conditionnements SET est_actif = 0 WHERE idConditionnement = ?', [id]);
       loadConditionnements();
     } catch (error) {
-      console.error('Erreur suppression:', error);
-      alert('Erreur lors de la suppression');
+      console.error('Erreur désactivation:', error);
+      alert('Erreur lors de la désactivation');
     }
   };
 
@@ -316,7 +317,7 @@ const GestionConditionnements: React.FC<GestionConditionnementsProps> = ({
                           <IconEdit size={14} />
                         </ActionIcon>
                       </Tooltip>
-                      <Tooltip label="Supprimer">
+                      <Tooltip label="Retirer (désactiver)">
                         <ActionIcon size="sm" color="red" variant="subtle" onClick={() => handleDelete(c.idConditionnement, c.libelle)}>
                           <IconTrash size={14} />
                         </ActionIcon>

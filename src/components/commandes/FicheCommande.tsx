@@ -282,7 +282,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
     <Box p="md">
       <Stack gap="lg">
         {/* En-tête */}
-        <Paper p="xl" radius="lg" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', borderBottom: '3px solid #e94560' }}>
+        <Paper className="tk-page-tools tk-page-tools--fiche" p="xl" radius="lg">
           <Flex justify="space-between" align="center" wrap="wrap">
             <Group gap="md">
               <ThemeIcon size={45} radius="md" color="white" variant="light">
@@ -319,7 +319,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
 
           {/* Informations client et commande */}
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-            <Card withBorder radius="md" p="md">
+            <Card className="tk-detail-tile" withBorder radius="md" p="md">
               <Group gap="xs" mb="xs">
                 <IconUser size={16} color="#1b365d" />
                 <Text fw={600} size="sm">Client</Text>
@@ -333,7 +333,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
               )}
             </Card>
 
-            <Card withBorder radius="md" p="md">
+            <Card className="tk-detail-tile" withBorder radius="md" p="md">
               <Group gap="xs" mb="xs">
                 <IconCalendar size={16} color="#1b365d" />
                 <Text fw={600} size="sm">Date</Text>
@@ -342,7 +342,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
               <Text size="sm" c="dimmed">à {formatDate(commande.date_commande).split(' ')[1] || ''}</Text>
             </Card>
 
-            <Card withBorder radius="md" p="md">
+            <Card className="tk-detail-tile" withBorder radius="md" p="md">
               <Group gap="xs" mb="xs">
                 <IconShoppingBag size={16} color="#1b365d" />
                 <Text fw={600} size="sm">Type</Text>
@@ -354,7 +354,7 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
           </SimpleGrid>
 
           {/* Récapitulatif financier */}
-          <Card withBorder radius="md" p="md" mt="md">
+          <Card className="tk-detail-section" withBorder radius="md" p="md" mt="md">
             <Title order={4} mb="md">Récapitulatif financier</Title>
             <Divider mb="md" />
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
@@ -395,20 +395,20 @@ const FicheCommande: React.FC<FicheCommandeProps> = ({ commandeId, onBack }) => 
 
           {/* Produits commandés */}
           {commande.details && commande.details.length > 0 && (
-            <Card withBorder radius="md" p="md" mt="md">
+            <Card className="tk-detail-section" withBorder radius="md" p="md" mt="md">
               <Title order={4} mb="md">Produits commandés</Title>
               <Divider mb="md" />
               <ScrollArea h={250}>
                 <Table striped highlightOnHover>
                   <Table.Thead>
-                    <Table.Tr style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
-                      <Table.Th c="white">Code</Table.Th>
-                      <Table.Th c="white">Désignation</Table.Th>
-                      <Table.Th c="white">Catégorie</Table.Th>
-                      <Table.Th c="white" ta="center">Unité</Table.Th>
-                      <Table.Th c="white" ta="right">Qté</Table.Th>
-                      <Table.Th c="white" ta="right">Prix unit.</Table.Th>
-                      <Table.Th c="white" ta="right">Total</Table.Th>
+                    <Table.Tr>
+                      <Table.Th>Code</Table.Th>
+                      <Table.Th>Désignation</Table.Th>
+                      <Table.Th>Catégorie</Table.Th>
+                      <Table.Th ta="center">Unité</Table.Th>
+                      <Table.Th ta="right">Qté</Table.Th>
+                      <Table.Th ta="right">Prix unit.</Table.Th>
+                      <Table.Th ta="right">Total</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
