@@ -333,8 +333,8 @@ export const DebugPanel: React.FC = () => {
                         {filteredLogs.map((log) => (
                           <Table.Tr
                             key={log.id}
-                            style={log.level === 'error' ? { backgroundColor: '#fff5f5' } :
-                                   log.level === 'warning' ? { backgroundColor: '#fff9f0' } : undefined}
+                            className={log.level === 'error' ? 'tk-row-danger' :
+                                   log.level === 'warning' ? 'tk-row-warning' : undefined}
                           >
                             <Table.Td>
                               <Text size="xs" c="dimmed">{formatDate(log.timestamp)}</Text>

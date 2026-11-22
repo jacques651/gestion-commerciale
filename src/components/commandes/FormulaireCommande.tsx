@@ -1212,7 +1212,7 @@ try {
                         const prix = getPrixProduit(product);
                         const hasPrix = prix > 0;
                         return (
-                          <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
+                          <Table.Tr key={product.idProduit} className={isRupture ? 'tk-row-danger' : undefined}>
                             <Table.Td><Text fw={500} size="xs">{product.code_produit}</Text></Table.Td>
                             <Table.Td><Text fw={500} size="xs" lineClamp={1}>{product.designation}</Text></Table.Td>
                             <Table.Td><Badge variant="light" size="xs" fullWidth>{product.categorie || '-'}</Badge></Table.Td>

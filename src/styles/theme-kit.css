@@ -999,6 +999,9 @@ html:root:root:not([data-theme="dark"]) {
  * En sombre : fond var(--tk-dark-surface-2), texte = teinte claire du badge.
  */
 @media screen {
+:root:not([data-theme="dark"]) .tk-row-muted {
+    background-color: #f1f3f5 !important;
+  }
   :root:not([data-theme="dark"]) .tk-row-danger {
     background-color: rgba(224,49,49,.08) !important;
   }

@@ -940,7 +940,7 @@ export default function NouveauDecompte({
                     const isRupture = (product.qte_stock || 0) <= 0;
                     const quantite = getQuantite(product.idProduit);
                     return (
-                      <Table.Tr key={product.idProduit} style={isRupture ? { backgroundColor: '#fff5f5' } : {}}>
+                      <Table.Tr key={product.idProduit} className={isRupture ? 'tk-row-danger' : undefined}>
                         <Table.Td><Text fw={500} size="xs" lineClamp={1}>{product.code_produit}</Text></Table.Td>
                         <Table.Td><Text fw={500} size="xs" lineClamp={2}>{product.designation}</Text></Table.Td>
                         <Table.Td>

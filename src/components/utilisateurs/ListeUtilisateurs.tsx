@@ -970,7 +970,7 @@ const ListeUtilisateurs: React.FC = () => {
         <Tabs defaultValue="compte" styles={{
           tab: { fontWeight: 500, fontSize: 13 },
           panel: { padding: 0 },
-          list: { borderBottom: '1px solid #e5e7eb', background: '#f8f9fa' },
+          list: { borderBottom: '1px solid var(--mantine-color-default-border)' },
         }}>
           <Tabs.List px="md">
             <Tabs.Tab value="compte" leftSection={<IconUser size={14} />}>

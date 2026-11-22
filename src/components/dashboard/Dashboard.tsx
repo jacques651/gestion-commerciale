@@ -663,7 +663,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
                 { label: 'Commissions', value: formatCurrency(stats.commissions), color: 'orange' },
                 { label: 'Net reversé', value: formatCurrency(stats.netAReverser), color: 'green' },
               ].map((item, i) => (
-                <Box key={i} p="xs" style={{ background: '#f8f9fa', borderRadius: 8, textAlign: 'center' }}>
+                <Box key={i} p="xs" className="tk-detail-tile" style={{ textAlign: 'center' }}>
                   <Text size="xs" c="dimmed" lh={1.2}>{item.label}</Text>
                   <Text size="xs" fw={700} c={item.color} mt={4}>{item.value}</Text>
                 </Box>
@@ -676,7 +676,7 @@ const Dashboard: React.FC<DashboardProps> = () => {
                 </Text>
                 <Stack gap={4}>
                   {recentDecomptes.slice(0, 4).map((d, i) => (
-                    <Group key={i} justify="space-between" p="xs" style={{ background: '#f8f9fa', borderRadius: 6 }}>
+                    <Group key={i} justify="space-between" p="xs" className="tk-detail-tile">
                       <Box>
                         <Text size="xs" fw={600}>{d.code_decompte}</Text>
                         <Text size="xs" c="dimmed">{d.NomComplet || '—'}</Text>

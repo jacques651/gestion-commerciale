@@ -1137,7 +1137,7 @@ const loadDecomptes = async () => {
                     } else {
                       const estAnnuleDec = !!(decompte as any).est_annule;
                       return (
-                        <Table.Tr key={decompte.idDecompte} style={estAnnuleDec ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
+                        <Table.Tr key={decompte.idDecompte} className={estAnnuleDec ? 'tk-row-muted' : undefined} style={estAnnuleDec ? { opacity: 0.65, textDecoration: 'line-through' } : undefined}>
                           <Table.Td ta="center">
                             <Checkbox
                               checked={selectedItems.includes(decompte.idDecompte)}

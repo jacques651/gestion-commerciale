@@ -229,7 +229,7 @@ export const ListeClients: React.FC = () => {
               </Table.Thead>
               <Table.Tbody>
                 {paginatedClients.map((client) => (
-                  <Table.Tr key={client.idClient} style={(client as any).est_annule ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
+                  <Table.Tr key={client.idClient} className={(client as any).est_annule ? 'tk-row-muted' : undefined} style={(client as any).est_annule ? { opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                     <Table.Td>
                       <Group gap="sm" wrap="nowrap">
                         <Avatar size="md" radius="xl" color="blue">

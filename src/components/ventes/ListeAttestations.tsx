@@ -155,7 +155,7 @@ export const ListeAttestations: React.FC<ListeAttestationsProps> = ({ reloadSign
               ) : filtrees.map((a) => {
                 const annulee = !!a.est_annule;
                 return (
-                  <Table.Tr key={a.idAttestation} style={annulee ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
+                  <Table.Tr key={a.idAttestation} className={annulee ? 'tk-row-muted' : undefined} style={annulee ? { opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                     <Table.Td>{fmtDate(a.date_attestation)}</Table.Td>
                     <Table.Td>
                       <Group gap={6}>

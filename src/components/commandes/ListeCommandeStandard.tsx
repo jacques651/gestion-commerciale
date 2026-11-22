@@ -598,7 +598,7 @@ export const ListeCommandeStandard: React.FC = () => {
                     const num = (currentPage - 1) * itemsPerPage + index + 1;
                     const estAnnulee = !!(commande as any).est_annule || commande.statut === 'ANNULEE';
                     return (
-                      <Table.Tr key={commande.idCommande} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
+                      <Table.Tr key={commande.idCommande} className={estAnnulee ? 'tk-row-muted' : undefined} style={estAnnulee ? { opacity: 0.65, textDecoration: 'line-through' } : undefined}>
                         <Table.Td style={{ whiteSpace: 'nowrap' }}>
                           <Text fw={600} size="sm">{num}</Text>
                         </Table.Td>

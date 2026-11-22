@@ -459,7 +459,7 @@ export const ListeProduits: React.FC = () => {
             </Table.Thead>
             <Table.Tbody>
               {paginatedProducts.map((product) => (
-                <Table.Tr key={product.idProduit} style={(product as any).est_annule ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : (product.qte_stock <= 0 ? { backgroundColor: '#fff5f5' } : {})}>
+                <Table.Tr key={product.idProduit} className={(product as any).est_annule ? 'tk-row-muted' : (product.qte_stock <= 0 ? 'tk-row-danger' : undefined)} style={(product as any).est_annule ? { opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                   <Table.Td>
                     <Group gap={6} wrap="nowrap">
                       <Text fw={600} size="sm">{product.code_produit}</Text>

@@ -898,7 +898,7 @@ const handleDeleteFacture = async () => {
 
                     const estAnnulee = !!(facture as any).est_annule;
                     return (
-                      <Table.Tr key={uniqueKey} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.65, textDecoration: 'line-through' } : undefined}>
+                      <Table.Tr key={uniqueKey} className={estAnnulee ? 'tk-row-muted' : undefined} style={estAnnulee ? { opacity: 0.65, textDecoration: 'line-through' } : undefined}>
                         <Table.Td ta="center" fw={600} style={{ whiteSpace: 'nowrap' }}>
                           {num}{estAnnulee && <Badge ml={4} color="orange" variant="filled" size="xs">Annulé</Badge>}
                         </Table.Td>

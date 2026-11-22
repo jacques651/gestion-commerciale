@@ -679,7 +679,7 @@ export const ChargesFonctionnement: React.FC = () => {
                   const info = getCategorieInfo(charge.categorie_charge);
                   const estAnnulee = !!(charge as any).est_annule;
                   return (
-                    <Table.Tr key={charge.idCharge} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
+                    <Table.Tr key={charge.idCharge} className={estAnnulee ? 'tk-row-muted' : undefined} style={estAnnulee ? { opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                       <Table.Td fw={600}>{num}</Table.Td>
                       <Table.Td>{formatDate(charge.date_charge)}</Table.Td>
                       <Table.Td>

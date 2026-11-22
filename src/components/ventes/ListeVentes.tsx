@@ -640,7 +640,7 @@ const supprimerVente = async () => {
                   
                   const estAnnulee = !!(v as any).est_annule;
                   return (
-                    <Table.Tr key={'vente:'+(v.idVente || idx)} style={estAnnulee ? { backgroundColor: '#f1f3f5', opacity: 0.6, textDecoration: 'line-through' } : undefined}>
+                    <Table.Tr key={'vente:'+(v.idVente || idx)} className={estAnnulee ? 'tk-row-muted' : undefined} style={estAnnulee ? { opacity: 0.6, textDecoration: 'line-through' } : undefined}>
                       <Table.Td fw={500}>{(currentPage - 1) * itemsPerPage + idx + 1}</Table.Td>
                       <Table.Td>
                         <Group gap={6}>
